@@ -1,0 +1,62 @@
+{
+  "Alkali": {
+    "normal": "#d8f8ff",
+    "normal_font": "#00758c",
+    "hover": "#244d57",
+    "hover_font": "#d8f8ff"
+  },
+  "Alkaline": {
+    "normal": "#ffe7e7",
+    "normal_font": "#d60024",
+    "hover": "#622e39",
+    "hover_font": "#ffe7e7"
+  },
+  "Transition": {
+    "normal": "#f3e8fd",
+    "normal_font": "#6232ec",
+    "hover": "#433c65",
+    "hover_font": "#f3e8fd"
+  },
+  "Post Transition": {
+    "normal": "#d6f9e8",
+    "normal_font": "#227754",
+    "hover": "#2f4d47",
+    "hover_font": "#d6f9e8"
+  },
+  "Metalloid": {
+    "normal": "#fef7e0",
+    "normal_font": "#945700",
+    "hover": "#523e1b",
+    "hover_font": "#fef7e0"
+  },
+  "Nonmetal": {
+    "normal": "#e2eeff",
+    "normal_font": "#0060f0",
+    "hover": "#2a4165",
+    "hover_font": "#e2eeff"
+  },
+  "Noble gas": {
+    "normal": "#ffe7eb",
+    "normal_font": "#cd1d5e",
+    "hover": "#623842",
+    "hover_font": "#ffe7eb"
+  },
+  "Lanthanide": {
+    "normal": "#dff3ff",
+    "normal_font": "#003355",
+    "hover": "#004a77",
+    "hover_font": "#d8f8ff"
+  },
+  "Actinide": {
+    "normal": "#ffe6d4",
+    "normal_font": "#c73200",
+    "hover": "#613b28",
+    "hover_font": "#ffe6d4"
+  },
+  "Unknown": {
+    "normal": "#e7e7ea",
+    "normal_font": "#3f374f",
+    "hover": "#46474c",
+    "hover_font": "#e7e7ea"
+  }
+}

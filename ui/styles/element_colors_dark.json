@@ -1,0 +1,62 @@
+{
+  "Alkali metal": {
+    "normal": "#004145",
+    "normal_font": "white",
+    "hover": "#022b30",
+    "hover_font": "white"
+  },
+  "Alkaline earth metal": {
+    "normal": "#007d79",
+    "normal_font": "white",
+    "hover": "#005d5d",
+    "hover_font": "white"
+  },
+  "Transition metal": {
+    "normal": "#491d8b",
+    "normal_font": "white",
+    "hover": "#31135e",
+    "hover_font": "white"
+  },
+  "Post-transition metal": {
+    "normal": "#002d9c",
+    "normal_font": "white",
+    "hover": "#001d6c",
+    "hover_font": "white"
+  },
+  "Metalloid": {
+    "normal": "#0f62fe",
+    "normal_font": "white",
+    "hover": "#0043ce",
+    "hover_font": "white"
+  },
+  "Nonmetal": {
+    "normal": "#08bdba",
+    "normal_font": "white",
+    "hover": "#009d9a",
+    "hover_font": "white"
+  },
+  "Noble gas": {
+    "normal": "#d02670",
+    "normal_font": "white",
+    "hover": "#9f1853",
+    "hover_font": "white"
+  },
+  "Lanthanide": {
+    "normal": "#8a3ffc",
+    "normal_font": "white",
+    "hover": "#6929c4",
+    "hover_font": "white"
+  },
+  "Actinide": {
+    "normal": "#be95ff",
+    "normal_font": "white",
+    "hover": "#a56eff",
+    "hover_font": "white"
+  },
+  "Halogen": {
+    "normal": "#740937",
+    "normal_font": "white",
+    "hover": "#510224",
+    "hover_font": "white"
+  }
+}
