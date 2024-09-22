@@ -174,3 +174,5 @@ poetry.toml
 pyrightconfig.json
 
 # __added__
+.vscode/
+archive/
