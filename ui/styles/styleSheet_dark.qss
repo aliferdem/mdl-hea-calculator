@@ -36,17 +36,17 @@ QMenu::item:selected {
 QScrollBar:vertical {
     border: none;
     background: #161616;
-    width: 10px;
+    width: 11px;
     margin: 0 0 0 0;
 }
 QScrollBar::handle:vertical {
-    background: #262626;
+    background: #393939;
     border-left: 1px solid #161616;
     border-radius: 0px;
     min-height: 40px;
 }
 QScrollBar::handle:vertical:hover {
-    background: #393939;
+    background: #6F6F6F;
 }
 QScrollBar::add-line:vertical {
     border: none;
@@ -243,14 +243,15 @@ QWidget[class="global_header"] {
 }
 
 QLabel {
-    font-size: 13px;
+    font-size: 10.5pt;
     color: #f4f4f4;
 }
 
 QLabel#element_label {
     border-bottom: 2px solid #393939;
     font-weight: bold;
-    font-size: 9;
+    font-size: 10.5pt;
+    color: #C6C6C6;
 }
 
 QPushButton {
@@ -270,7 +271,7 @@ QRadioButton {
     border-radius: 0px;
     border-bottom: 2px solid #393939;
     color: #c6c6c6;
-    font-size: 9pt;
+    font-size: 10.5pt;
 }
 QRadioButton::indicator {
     image: none;
@@ -289,7 +290,7 @@ QRadioButton:hover {
 QRadioButton#single_radio {
     padding: 0px;
     color: #f4f4f4;
-    font-size: 11px;
+    font-size: 9pt;
     border: none;
     background-color: none;
 }
@@ -326,6 +327,22 @@ QPushButton[class="secondary_button"]:pressed {
     background-color: #5e5e5e;
 }
 
+QPushButton[class="tertiary_button"] {
+    background-color: #161616;
+    color: #FFFFFF;
+    border: 1px solid #FFFFFF;
+}
+QPushButton[class="tertiary_button"]:hover {
+    background-color: #F4F4F4;
+    color: #161616;
+    border: 1px solid #FFFFFF;
+}
+QPushButton[class="tertiary_button"]:pressed {
+    background-color: #C6C6C6;
+    color: #161616;
+    border: 1px solid #FFFFFF;
+}
+
 QPushButton[class="danger_button"] {
     background-color: #da1e28;
 }
@@ -336,14 +353,18 @@ QPushButton[class="danger_button"]:pressed {
     background-color: #750e13;
 }
 
-QPushButton[class="green_button"] {
-    background-color: #11742f;
+QPushButton[class="ghost_button"] {
+    background: none;
+    color: #78A9FF;
 }
-QPushButton[class="green_button"]:hover {
-    background-color: #0e6027;
+QPushButton[class="ghost_button"]:hover {
+    background-color: #292929;
+    color: #A6C8FF;
 }
-QPushButton[class="green_button"]:pressed {
-    background-color: #0e6027;
+QPushButton[class="ghost_button"]:pressed {
+    background-color: #454545;
+    color: #A6C8FF;
+    border: 2px solid #FFFFFF;
 }
 
 QLineEdit {

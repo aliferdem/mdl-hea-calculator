@@ -26,7 +26,7 @@ import pandas as pd
 from datetime import datetime
 import xlsxwriter
 from PySide6.QtCore import (Qt, QTimer, QLocale, QThread, Signal, QSize, QPoint, QEvent)
-from PySide6.QtGui import (QPixmap, QDoubleValidator, QIcon, QFont, QMouseEvent)
+from PySide6.QtGui import (QPixmap, QDoubleValidator, QIcon, QFont, QMouseEvent, QAction)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QFileDialog,
     QGridLayout, QHBoxLayout, QLabel,
@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget, QSpacerItem,
     QSizePolicy, QRadioButton, QScrollArea,
     QStatusBar, QProgressBar, QDialog,
-    QComboBox)
+    QComboBox, QButtonGroup)
 
 from engine import Engine
 
@@ -175,9 +175,23 @@ class MDLHEAPP(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("MDL | HEA Phase Predictor")
-        self.setWindowFlag(Qt.FramelessWindowHint)
-        self.resize(1645, 800)
+        self.resize(1220, 660)
         self.settings = Settings()
+
+        menubar = self.menuBar()
+        file_menu = menubar.addMenu("File")
+
+        open_action = QAction("Import an Excel File", self)
+        open_action.triggered.connect(self.load_compositions_from_excel)
+        save_action = QAction("Save Project", self)
+        file_menu.addAction(open_action)
+        file_menu.addAction(save_action)
+
+        self.switch_theme_action = QAction("Dark Theme", self)
+        self.switch_theme_action.triggered.connect(self.switch_theme)
+        info_action = QAction("Info", self)
+        menubar.addAction(self.switch_theme_action)
+        menubar.addAction(info_action)
 
         self.composition_worker = None
         self.calculation_worker = None
@@ -189,52 +203,61 @@ class MDLHEAPP(QMainWindow):
         self.logo_label = QLabel()
         self.logo_label.setPixmap(QPixmap("ui/logo_dark.svg"))
 
-        self.setWindowIcon(QIcon("ui/icons/logo_icon.ico"))
+        self.setWindowIcon(QIcon("ui/icons/MDLHEAPP_logo.ico"))
 
         self.pTable_buttons = {}
         self.selected_elements = {}
 
+        self.button_group = QButtonGroup(self)
         self.single_radio = QRadioButton("Single Composition")
         self.single_radio.setObjectName("single_radio")
         self.single_radio.setChecked(True)
-        self.single_radio.setFixedHeight(35)
 
         self.range_radio = QRadioButton("Composition Range")
-        self.range_radio.setObjectName("range_radio")
-        self.range_radio.setFixedHeight(35)
+        self.range_radio.setObjectName("single_radio")
 
-        self.at_percent_radio = QRadioButton("At. %")
+        self.button_group.addButton(self.single_radio)
+        self.button_group.addButton(self.range_radio)
+
+        self.at_ratio_radio = QRadioButton("At. ratio")
+        self.at_ratio_radio.setStyleSheet("font-weight: normal; padding-left: 19px;")
+        self.at_ratio_radio.setFixedSize(105, 40)
+
+        self.at_percent_radio = QRadioButton("at%")
+        self.at_percent_radio.setStyleSheet("font-weight: normal; padding-left: 33px;")
         self.at_percent_radio.setChecked(True)
-        self.at_percent_radio.setFixedHeight(40)
-        self.at_ratio_radio = QRadioButton("At. Ratio")
-        self.at_ratio_radio.setFixedHeight(40)
+        self.at_percent_radio.setFixedSize(105, 40)
 
-        self.wt_percent_radio = QRadioButton("Wt. %")
-        self.wt_percent_radio.setFixedHeight(40)
+        self.wt_percent_radio = QRadioButton("wt%")
+        self.wt_percent_radio.setStyleSheet("font-weight: normal; padding-left: 32px;")
+        self.wt_percent_radio.setFixedSize(105, 40)
 
-        self.weight_radio = QRadioButton("Weight (g)")
-        self.weight_radio.setFixedSize(130, 40)
+        self.weight_radio = QRadioButton("Mass")
+        self.weight_radio.setStyleSheet("font-weight: normal; padding-left: 30px;")
+        self.weight_radio.setFixedSize(120, 40)
 
         self.total_label = QLabel("Total:")
         self.total_label.setStyleSheet("font-weight: bold;")
         self.total_atomic_label = QLabel("")
         self.total_weight_percent_label = QLabel("")
         self.total_weight_edit = self.validated_line_edit("0")
-        self.total_weight_edit.setProperty("class", "primary_text")
-        self.total_weight_edit.setFixedSize(80, 30)
-        self.step_size_label = QLabel("Step Size:")
-        self.step_size_label.setStyleSheet("font-weight: bold;")
         self.step_size_edit = self.validated_line_edit("5")
-        self.step_size_edit.setProperty("class", "primary_text")
-        self.step_size_edit.setFixedSize(80, 30)
+        self.step_size_edit.setPlaceholderText("step size")
+        self.step_size_edit.setFixedWidth(66)
+        self.from_at_edit = self.validated_line_edit("")
+        self.from_at_edit.setPlaceholderText("initial values")
+        self.from_at_edit.textChanged.connect(self.update_all_atomic_percent)
+        self.from_at_edit.setFixedWidth(90)
+        self.to_at_edit = self.validated_line_edit("")
+        self.to_at_edit.setPlaceholderText("last values")
+        self.to_at_edit.textChanged.connect(self.update_all_atomic_end)
+        self.to_at_edit.setFixedWidth(90)
 
-        self.restrict_button = QPushButton("Restrict")
-        self.restrict_button.setProperty("class", "danger_button")
-        self.restrict_button.setFixedSize(120, 38)
-        self.restrict_button.setLayoutDirection(Qt.RightToLeft)
-        self.restrict_button.setIcon(QIcon("ui/icons/filter--edit.svg"))
-        self.restrict_button.setIconSize(QSize(20, 20))
-        self.restrict_button.clicked.connect(self.show_restrictions_window)
+        self.filter_button = QPushButton("Filter")
+        self.filter_button.setProperty("class", "ghost_button")
+        self.filter_button.setFixedSize(65, 32)
+        self.filter_button.setLayoutDirection(Qt.RightToLeft)
+        self.filter_button.clicked.connect(self.show_restrictions_window)
 
         self.restriction_values = {}
 
@@ -251,76 +274,23 @@ class MDLHEAPP(QMainWindow):
     def initUI(self):
         current_theme = self.settings.get_theme()
 
+        parent_layout = QVBoxLayout()
+        parent_widget = QWidget()
+        parent_widget.setLayout(parent_layout)
+
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        main_scroll_area = QScrollArea()
+        main_scroll_area.setWidgetResizable(True)
+        main_scroll_area.setObjectName("main_scroll")
+        main_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        main_scroll_area.setViewportMargins(0, 0, 15, 0)
         main_widget = QWidget()
-        parent_layout = QVBoxLayout(main_widget)
-        parent_layout.setContentsMargins(0, 0, 0, 0)
+        main_widget.setLayout(main_layout)
+        main_scroll_area.setWidget(main_widget)
+        parent_layout.addWidget(main_scroll_area)
 
-        global_header_layout = QHBoxLayout()
-        global_header_layout.setContentsMargins(10, 0, 0, 0)
-        global_header_layout.setSpacing(0)
-        self.global_header_widget = QWidget()
-        self.global_header_widget.setProperty("class", "global_header")
-        self.global_header_widget.setLayout(global_header_layout)
-        self.global_header_widget.setFixedHeight(40)
-
-        global_header_layout.addWidget(self.logo_label)
-
-        self.upload_button = QPushButton(self)
-        self.upload_button.setProperty("class", "header_button")
-        self.upload_button.setFixedSize(39, 39)
-        self.upload_button.setIcon(QIcon("ui/icons/table--shortcut.svg"))
-        self.upload_button.setIconSize(QSize(20, 20))
-        self.upload_button.setToolTip("Upload an Excel file")
-        self.upload_button.clicked.connect(self.load_compositions_from_excel)
-        global_header_layout.addWidget(self.upload_button)
-
-        self.switch_theme_button = QPushButton(self)
-        self.switch_theme_button.setProperty("class", "header_button")
-        self.switch_theme_button.setFixedSize(39, 39)
-        self.switch_theme_button.setIconSize(QSize(20, 20))
-        self.switch_theme_button.clicked.connect(self.switch_theme)
-        global_header_layout.addWidget(self.switch_theme_button)
-
-        self.info_button = QPushButton(self)
-        self.info_button.setProperty("class", "header_button")
-        self.info_button.setFixedSize(39, 39)
-        self.info_button.setIcon(QIcon("ui/icons/information_dark.svg"))
-        self.info_button.setToolTip("Information")
-        self.info_button.setIconSize(QSize(20, 20))
-        self.info_button.clicked.connect(self.show_info)
-        global_header_layout.addWidget(self.info_button)
-
-        self.minimize_button = QPushButton(self)
-        self.minimize_button.setProperty("class", "header_button")
-        self.minimize_button.setFixedSize(39, 39)
-        self.minimize_button.setIcon(QIcon("ui/icons/subtract.svg"))
-        self.minimize_button.clicked.connect(self.window().showMinimized)
-        global_header_layout.addWidget(self.minimize_button)
-        
-        self.maximize_button = QPushButton(self)
-        self.maximize_button.setProperty("class", "header_button")
-        self.maximize_button.setFixedSize(39, 39)
-        self.maximize_button.setIcon(QIcon("ui/icons/maximize.svg"))
-        self.maximize_button.setIconSize(QSize(20, 20))
-        self.maximize_button.clicked.connect(self.window().showMaximized)
-        global_header_layout.addWidget(self.maximize_button)
-
-        self.normal_button = QPushButton(self)
-        self.normal_button.setProperty("class", "header_button")
-        self.normal_button.setFixedSize(39, 39)
-        self.normal_button.setIcon(QIcon("ui/icons/minimize.svg"))
-        self.normal_button.setIconSize(QSize(20, 20))
-        self.normal_button.clicked.connect(self.window().showNormal)
-        global_header_layout.addWidget(self.normal_button)
-        
-        self.close_button = QPushButton(self)
-        self.close_button.setProperty("class", "close_button")
-        self.close_button.setFixedSize(39, 39)
-        self.close_button.setIcon(QIcon("ui/icons/close.svg"))
-        self.close_button.clicked.connect(self.window().close)
-        global_header_layout.addWidget(self.close_button)
-
-        parent_layout.addWidget(self.global_header_widget)
         self.old_pos = None
 
         if current_theme == "dark":
@@ -328,29 +298,26 @@ class MDLHEAPP(QMainWindow):
             with open("ui/styles/styleSheet_dark.qss", "r") as f:
                 self.dark_stylesheet = f.read()
             self.setStyleSheet(self.dark_stylesheet)
-            self.switch_theme_button.setIcon(QIcon("ui/icons/light.svg"))
-            self.switch_theme_button.setToolTip("Light theme")
-            self.info_button.setIcon(QIcon("ui/icons/information_dark.svg"))
+            self.switch_theme_action.setText("Light Theme")
+            self.switch_theme_action.setToolTip("Switch to Light Theme")
         elif current_theme == "light":
             self.element_colors = self._read("ui/styles/element_colors_light.json")
             with open("ui/styles/styleSheet_light.qss", "r") as f:
                 self.light_stylesheet = f.read()
             self.setStyleSheet(self.light_stylesheet)
-            self.switch_theme_button.setIcon(QIcon("ui/icons/asleep.svg"))
-            self.switch_theme_button.setToolTip("Dark theme")
-            self.info_button.setIcon(QIcon("ui/icons/information_light.svg"))
+            self.switch_theme_action.setText("Dark Theme")
+            self.switch_theme_action.setToolTip("Switch to Dark Theme")
 
         top_layout = QHBoxLayout()
 
-        periodic_layout = QVBoxLayout()
-
+        periodic_layout = QHBoxLayout()
         # Periodic table
         self.table_frame = QGridLayout()
         self.add_elements_to_table()
 
         periodic_table_widget = QWidget()
         periodic_table_widget.setLayout(self.table_frame)
-        periodic_table_widget.setFixedHeight(420) # Default 440
+        periodic_table_widget.setFixedSize(660, 350) # Default 440
         periodic_layout.addWidget(periodic_table_widget)
         top_layout.addStretch(1)
         top_layout.addLayout(periodic_layout) 
@@ -359,24 +326,19 @@ class MDLHEAPP(QMainWindow):
         selected_frame_widget = QWidget()
         selected_frame_layout = QVBoxLayout(selected_frame_widget)
         selected_frame_layout.setSpacing(0)
-        selected_frame_layout.setContentsMargins(0, 0, 0, 0)
-        selected_frame_layout.addItem((QSpacerItem(0, 10, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
 
         # Radio Buttons
         radio_layout = QHBoxLayout()
         radio_layout.setSpacing(0)
         radio_layout.setContentsMargins(0, 0, 0, 0)
 
-        radio_spacer = QWidget()
-        radio_spacer.setFixedWidth(60)
-        radio_layout.addItem((QSpacerItem(60, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
+        radio_layout.addItem((QSpacerItem(70, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
         radio_layout.addWidget(self.single_radio, Qt.AlignmentFlag.AlignCenter)
         radio_layout.addWidget(self.range_radio, Qt.AlignmentFlag.AlignCenter)
-        radio_layout.addItem((QSpacerItem(60, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
 
         selected_frame_layout.addLayout(radio_layout)
 
-        selected_frame_layout.addItem((QSpacerItem(0, 20, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
+        selected_frame_layout.addItem((QSpacerItem(0, 10, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
 
         # Add radio buttons and labels to the first row
         first_row = QWidget()
@@ -384,9 +346,10 @@ class MDLHEAPP(QMainWindow):
         first_row_layout.setSpacing(0)
         first_row_layout.setContentsMargins(0, 0, 0, 0)
 
-        first_row_layout.addItem(QSpacerItem(20, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum))
         element_label = QLabel("Element")
-        element_label.setStyleSheet("font-weight: bold;")
+        element_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        element_label.setObjectName("element_label")
+        element_label.setFixedSize(65, 40)
         first_row_layout.addWidget(element_label)
 
         self.at_percent_radio.setChecked(True)
@@ -408,6 +371,7 @@ class MDLHEAPP(QMainWindow):
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
+        scroll_area.setObjectName("selected_elements_scroll")
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setViewportMargins(0, 0, 15, 0)
         scroll_content = QWidget()
@@ -421,71 +385,68 @@ class MDLHEAPP(QMainWindow):
         total_row_layout = QHBoxLayout(self.total_row)
         total_row_layout.setContentsMargins(10, 10, 10, 0)
 
-        total_row_layout.addItem((QSpacerItem(20, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
+        total_row_layout.addItem((QSpacerItem(4, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
         total_row_layout.addWidget(self.total_label)
-        total_row_layout.addItem((QSpacerItem(132, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
+        total_row_layout.addItem((QSpacerItem(133, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
         total_row_layout.addWidget(self.total_atomic_label)
-        total_row_layout.addItem((QSpacerItem(20, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
+        total_row_layout.addItem((QSpacerItem(47, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
         total_row_layout.addWidget(self.total_weight_percent_label)
+        total_row_layout.addItem((QSpacerItem(31, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
         total_row_layout.addWidget(self.total_weight_edit)
-        total_row_layout.addItem((QSpacerItem(26, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
+        total_row_layout.addItem((QSpacerItem(21, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
 
         selected_frame_layout.addWidget(self.total_row)
 
         clear_selected_button = QPushButton("Clear")
-        clear_selected_button.setProperty("class", "secondary_button")
-        clear_selected_button.setFixedSize(120, 38)
+        clear_selected_button.setProperty("class", "tertiary_button")
+        clear_selected_button.setFixedSize(139, 32)
         clear_selected_button.setLayoutDirection(Qt.RightToLeft)
-        clear_selected_button.setIcon(QIcon("ui/icons/erase.svg"))
-        clear_selected_button.setIconSize(QSize(20, 20))
         clear_selected_button.clicked.connect(self.clear_selected_elements)
 
         self.calculate_button = QPushButton("Calculate")
         self.calculate_button.setProperty("class", "primary_button")
-        self.calculate_button.setFixedSize(140,38)
+        self.calculate_button.setFixedSize(139,32)
         self.calculate_button.setLayoutDirection(Qt.RightToLeft)
-        self.calculate_button.setIcon(QIcon("ui/icons/calculation.svg"))
-        self.calculate_button.setIconSize(QSize(20, 20))
         self.calculate_button.clicked.connect(self.on_calculate_button_click)
 
-        self.restrict_button_container = QWidget()
-        restrict_button_layout = QHBoxLayout(self.restrict_button_container)
-        restrict_button_layout.setSpacing(15)
-        restrict_button_layout.setContentsMargins(10, 10, 0, 0)
-        restrict_button_layout.addStretch(1)
-        restrict_button_layout.addWidget(self.step_size_label)
-        restrict_button_layout.addWidget(self.step_size_edit)
-        restrict_button_layout.addItem((QSpacerItem(36, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
-        restrict_button_layout.addWidget(self.restrict_button)
+        self.step_size_container = QWidget()
+        step_size_layout = QHBoxLayout(self.step_size_container)
+        step_size_layout.setSpacing(15)
+        step_size_layout.setContentsMargins(10, 10, 0, 0)
+        step_size_layout.addItem((QSpacerItem(65, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
+        step_size_layout.addStretch(1)
+        step_size_layout.addWidget(self.from_at_edit)
+        step_size_layout.addWidget(self.step_size_edit)
+        step_size_layout.addWidget(self.to_at_edit)
+        step_size_layout.addStretch(1)
 
         selected_button_container = QWidget()
         selected_button_layout = QHBoxLayout(selected_button_container)
         selected_button_layout.setSpacing(2)
-        selected_button_layout.setContentsMargins(10, 10, 0, 10)
+        selected_button_layout.setContentsMargins(0, 10, 0, 0)
+        selected_button_layout.addWidget(self.filter_button)
         selected_button_layout.addStretch(1)
         selected_button_layout.addWidget(clear_selected_button)
-        selected_button_layout.addWidget(self.restrict_button)
         selected_button_layout.addWidget(self.calculate_button)
         
-        selected_frame_layout.addWidget(self.restrict_button_container)
+        selected_frame_layout.addWidget(self.step_size_container)
         selected_frame_layout.addWidget(selected_button_container)
-        selected_frame_widget.setFixedSize(550, 470)
+        selected_frame_widget.setFixedSize(518, 400)
         # selected_frame_widget.setFixedHeight(500)
-
-        top_layout.addStretch(2)
+        top_layout.addStretch(1)
         top_layout.addWidget(selected_frame_widget)
-        top_layout.addStretch(6)
+        top_layout.addStretch(2)
 
-        parent_layout.addLayout(top_layout)
+        main_layout.addLayout(top_layout)
 
         # Alloy information table
         bottom_layout = QVBoxLayout()
 
         alloy_table_layout = QHBoxLayout()
         self.alloy_table = QTableWidget(0, 16)
+        self.alloy_table.setMinimumHeight(500)
         self.alloy_table.setHorizontalHeaderLabels(["Alloy", "Density (g/cm³)", "δ", "γ", "ΔHₘᵢₓ (kJ/mol)", "VEC", "ΔSₘᵢₓ (kJ/mol)", "Tₘ (K)", 
                                                     "Ω", "Crystal Str.", "Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6"])
-        self.alloy_table.setStyleSheet("font-size: 10pt;")  # Set font size for the table
         alloy_table_layout.addItem((QSpacerItem(10, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
         alloy_table_layout.addWidget(self.alloy_table)
         alloy_table_layout.addItem((QSpacerItem(10, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
@@ -496,21 +457,16 @@ class MDLHEAPP(QMainWindow):
         bottom_buttons_layout.setSpacing(2)
         bottom_buttons_layout.addStretch(1)
         clear_alloy_button = QPushButton("Clear")
-        clear_alloy_button.setFixedSize(120,38)
+        clear_alloy_button.setFixedSize(163,40)
         clear_alloy_button.setLayoutDirection(Qt.RightToLeft)
-        clear_alloy_button.setIcon(QIcon("ui/icons/clean.svg"))
-        clear_alloy_button.setIconSize(QSize(23, 23))
-        clear_alloy_button.clicked.connect(self.on_calculate_button_click)
-        clear_alloy_button.setProperty("class", "secondary_button")
+        clear_alloy_button.setProperty("class", "tertiary_button")
         clear_alloy_button.clicked.connect(self.clear_alloy_info)
         bottom_buttons_layout.addWidget(clear_alloy_button)
 
         save_button = QPushButton("Save to Excel")
-        save_button.setProperty("class", "green_button")
-        save_button.setFixedSize(150, 38)
+        save_button.setProperty("class", "secondary_button")
+        save_button.setFixedSize(163, 40)
         save_button.setLayoutDirection(Qt.RightToLeft)
-        save_button.setIcon(QIcon("ui/icons/save.svg"))
-        save_button.setIconSize(QSize(20, 20))
         save_button.clicked.connect(self.save_to_excel)
         bottom_buttons_layout.addWidget(save_button)
         bottom_buttons_layout.addItem((QSpacerItem(10, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
@@ -527,46 +483,10 @@ class MDLHEAPP(QMainWindow):
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.status_bar.addWidget(self.status_label)
 
-        parent_layout.addLayout(bottom_layout)
+        main_layout.addLayout(bottom_layout)
 
-        self.setCentralWidget(main_widget)
+        self.setCentralWidget(parent_widget)
         self.toggle_input_mode()
-        self.update_window_state_buttons(self.windowState())
-
-    def update_window_state_buttons(self, state):
-        if state == Qt.WindowMaximized:
-            self.normal_button.setVisible(True)
-            self.maximize_button.setVisible(False)
-        else:
-            self.normal_button.setVisible(False)
-            self.maximize_button.setVisible(True)
-
-    def changeEvent(self, event):
-        if event.type() == QEvent.WindowStateChange:
-            self.update_window_state_buttons(self.windowState())
-        super().changeEvent(event)
-        event.accept()
-
-    def mousePressEvent(self, event: QMouseEvent):
-        if event.button() == Qt.LeftButton:
-            self.old_pos = event.globalPosition().toPoint()
-
-    def mouseMoveEvent(self, event: QMouseEvent):
-        if self.old_pos:
-            delta = QPoint(event.globalPosition().toPoint() - self.old_pos)
-            self.window().move(self.window().x() + delta.x(), self.window().y() + delta.y())
-            self.old_pos = event.globalPosition().toPoint()
-
-            # Update visibility of maximize and normal buttons based on window state
-            if self.window().windowState() == Qt.WindowMaximized:
-                self.normal_button.setVisible(True)
-                self.maximize_button.setVisible(False)
-            else:
-                self.normal_button.setVisible(False)
-                self.maximize_button.setVisible(True)
-
-    def mouseReleaseEvent(self, event: QMouseEvent):
-        self.old_pos = None
 
     def switch_theme(self):
         current_theme = self.settings.get_theme()
@@ -582,9 +502,9 @@ class MDLHEAPP(QMainWindow):
                     QPushButton {{
                         background-color: {color["normal"]}; 
                         color: #f4f4f4; 
-                        font-size: 14pt;
+                        font-size: 11pt;
                         text-align: center;
-                        padding: 5px;
+                        padding: 2px;
                     }}
                     QPushButton:hover {{
                         background-color: {color["hover"]};
@@ -595,9 +515,8 @@ class MDLHEAPP(QMainWindow):
             with open("ui/styles/styleSheet_dark.qss", "r") as f:
                 self.dark_stylesheet = f.read()
             self.setStyleSheet(self.dark_stylesheet)
-            self.switch_theme_button.setIcon(QIcon("ui/icons/light.svg"))
-            self.switch_theme_button.setToolTip("Light theme")
-            self.info_button.setIcon(QIcon("ui/icons/information_dark.svg"))
+            self.switch_theme_action.setText("Light Theme")
+            self.switch_theme_action.setToolTip("Switch to Light Theme")
         elif new_theme == "light":
             self.element_colors = self._read("ui/styles/element_colors_light.json")
             for element, button in self.pTable_buttons.items():
@@ -609,9 +528,9 @@ class MDLHEAPP(QMainWindow):
                         background-color: {color["normal"]}; 
                         color: {color["normal_font"]}; 
                         border-radius: 0px;
-                        font-size: 14pt;
+                        font-size: 11pt;
                         text-align: center;
-                        padding: 5px;
+                        padding: 2px;
                     }}
                     QPushButton:hover {{
                         background-color: {color["hover"]};
@@ -625,9 +544,8 @@ class MDLHEAPP(QMainWindow):
             with open("ui/styles/styleSheet_light.qss", "r") as f:
                 self.dark_stylesheet = f.read()
             self.setStyleSheet(self.dark_stylesheet)
-            self.switch_theme_button.setIcon(QIcon("ui/icons/asleep.svg"))
-            self.switch_theme_button.setToolTip("Dark theme")
-            self.info_button.setIcon(QIcon("ui/icons/information_light.svg"))
+            self.switch_theme_action.setText("Dark Theme")
+            self.switch_theme_action.setToolTip("Switch to Dark Theme")
 
     def show_info(self):
         # Implement your info display functionality
@@ -642,7 +560,7 @@ class MDLHEAPP(QMainWindow):
             color = self.element_colors.get(group, {"normal": "#333333", "hover": "#444444"})
             button = QPushButton(element)
             button.setCheckable(True)
-            button.setFixedSize(40, 40)
+            button.setFixedSize(32, 32)
 
             if current_theme == "dark":
                 button.setStyleSheet(
@@ -650,9 +568,9 @@ class MDLHEAPP(QMainWindow):
                     QPushButton {{
                         background-color: {color["normal"]}; 
                         color: #f4f4f4; 
-                        font-size: 14pt;
+                        font-size: 11pt;
                         text-align: center;
-                        padding: 5px;
+                        padding: 2px;
                     }}
                     QPushButton:hover {{
                         background-color: {color["hover"]};
@@ -667,9 +585,9 @@ class MDLHEAPP(QMainWindow):
                         background-color: {color["normal"]}; 
                         color: {color["normal_font"]}; 
                         border-radius: 0px;
-                        font-size: 14pt;
+                        font-size: 11pt;
                         text-align: center;
-                        padding: 5px;
+                        padding: 2px;
                     }}
                     QPushButton:hover {{
                         background-color: {color["hover"]};
@@ -685,8 +603,8 @@ class MDLHEAPP(QMainWindow):
             self.table_frame.addWidget(button, row, col)
             self.pTable_buttons[element] = button
 
-        # Add a spacer item between the second and third columns
-        spacer = QSpacerItem(60, 200, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        # spacer item between the second and third columns
+        spacer = QSpacerItem(40, 200, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.table_frame.addItem(spacer, 0, 2, 9, 1)
     
     def eventFilter(self, obj, event):
@@ -730,24 +648,30 @@ class MDLHEAPP(QMainWindow):
 
     def add_selected_element_to_frame(self, element):
         container = QWidget()
-        layout = QGridLayout()
+        layout = QHBoxLayout()
         container.setLayout(layout)
 
         label = QLabel(element)
-        label.setStyleSheet("padding-left: 15px; font-weight: bold;")
+        label.setStyleSheet("padding-left: 5px; font-weight: bold;")
 
         atomic_percent_edit = self.validated_line_edit("0")
         atomic_ratio_edit = self.validated_line_edit("0")
         weight_percent_edit = self.validated_line_edit("0")
         weight_edit = self.validated_line_edit("0")
-        atomic_percent_end_label = QLabel("to")
+        to_label = QLabel("to")
+        to_label.setFixedWidth(30)
+        to_label.setStyleSheet("color: rgba(255, 255, 255, 128);")
+        transparent_widget = QPushButton()
+        transparent_widget.setFixedSize(39, 24)
+        transparent_widget.setEnabled(False)
 
         self.selected_elements[element] = {
             "atomic_percent": atomic_percent_edit,
             "atomic_ratio": atomic_ratio_edit,
             "weight_percent": weight_percent_edit,
             "weight": weight_edit,
-            "to": atomic_percent_end_label
+            "tw": transparent_widget,
+            "to": to_label
         }
 
         atomic_percent_edit.textChanged.connect(lambda: self.update_ar_wp_w(element))
@@ -756,16 +680,22 @@ class MDLHEAPP(QMainWindow):
         weight_edit.textChanged.connect(lambda: self.update_ap_ar_wp(element))
         self.total_weight_edit.textChanged.connect(lambda: self.update_weight(element))
 
-        layout.addWidget(label, 0, 0, Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(atomic_ratio_edit, 0, 1, Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(atomic_percent_edit, 0, 2, Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(weight_percent_edit, 0, 3, Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(weight_edit, 0, 4, Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(atomic_ratio_edit, Qt.AlignmentFlag.AlignLeft)
+        layout.addItem((QSpacerItem(26, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
+        layout.addWidget(atomic_percent_edit, Qt.AlignmentFlag.AlignLeft)
+        layout.addItem((QSpacerItem(26, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
+        layout.addWidget(weight_percent_edit, Qt.AlignmentFlag.AlignLeft)
+        layout.addItem((QSpacerItem(26, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
+        layout.addWidget(weight_edit, Qt.AlignmentFlag.AlignLeft)
+        layout.addItem((QSpacerItem(3, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
 
         atomic_percent_end_edit = self.validated_line_edit("35")
+        atomic_percent_end_edit.setFixedSize(90, 24)
 
-        layout.addWidget(atomic_percent_end_label, 0, 5, Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(atomic_percent_end_edit, 0, 6, Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(to_label)
+        layout.addWidget(atomic_percent_end_edit)
+        layout.addWidget(transparent_widget)
         self.selected_elements[element]["atomic_end"] = atomic_percent_end_edit
 
         self.selected_elements_container.addWidget(container)
@@ -796,15 +726,15 @@ class MDLHEAPP(QMainWindow):
                 atomic_percent = float(edits["atomic_percent"].text() or 0)
                 atomic_ratio = (atomic_percent / max_percent) if max_percent != 0 else 0
                 edits["atomic_ratio"].blockSignals(True)
-                edits["atomic_ratio"].setText(f"{atomic_ratio:.6f}")
+                edits["atomic_ratio"].setText(f"{atomic_ratio:.4f}")
                 edits["atomic_ratio"].blockSignals(False)
                 weight_percent = self.atomic_to_weight_percent(element, atomic_percent)
                 edits["weight_percent"].blockSignals(True)
-                edits["weight_percent"].setText(f"{weight_percent:.6f}")
+                edits["weight_percent"].setText(f"{weight_percent:.4f}")
                 edits["weight_percent"].blockSignals(False)
                 weight = total_weight * (weight_percent / 100)
                 edits["weight"].blockSignals(True)
-                edits["weight"].setText(f"{weight:.6f}")
+                edits["weight"].setText(f"{weight:.4f}")
                 edits["weight"].blockSignals(False)
         elif self.at_ratio_radio.isChecked():
             total_atomic_ratio = sum(float(edit["atomic_ratio"].text() or 0) for edit in self.selected_elements.values())
@@ -815,13 +745,13 @@ class MDLHEAPP(QMainWindow):
                 weight_percent = self.atomic_to_weight_percent(element, atomic_percent)
                 weight = total_weight * (weight_percent / 100)
                 edits["atomic_percent"].blockSignals(True)
-                edits["atomic_percent"].setText(f"{atomic_percent:.6f}")
+                edits["atomic_percent"].setText(f"{atomic_percent:.4f}")
                 edits["atomic_percent"].blockSignals(False)
                 edits["weight_percent"].blockSignals(True)
-                edits["weight_percent"].setText(f"{weight_percent:.6f}")
+                edits["weight_percent"].setText(f"{weight_percent:.4f}")
                 edits["weight_percent"].blockSignals(False)
                 edits["weight"].blockSignals(True)
-                edits["weight"].setText(f"{weight:.6f}")
+                edits["weight"].setText(f"{weight:.4f}")
                 edits["weight"].blockSignals(False)
         elif self.wt_percent_radio.isChecked():
             max_percent = max((float(edit["atomic_percent"].text() or 0) for edit in self.selected_elements.values()), default=0)
@@ -831,14 +761,14 @@ class MDLHEAPP(QMainWindow):
                 atomic_percent = self.weight_to_atomic_percent(element, weight_percent)
                 atomic_ratio = (atomic_percent / max_percent) if max_percent != 0 else 0
                 edits["atomic_ratio"].blockSignals(True)
-                edits["atomic_ratio"].setText(f"{atomic_ratio:.6f}")
+                edits["atomic_ratio"].setText(f"{atomic_ratio:.4f}")
                 edits["atomic_ratio"].blockSignals(False)
                 edits["atomic_percent"].blockSignals(True)
-                edits["atomic_percent"].setText(f"{atomic_percent:.6f}")
+                edits["atomic_percent"].setText(f"{atomic_percent:.4f}")
                 edits["atomic_percent"].blockSignals(False)
                 weight = total_weight * (weight_percent / 100)
                 edits["weight"].blockSignals(True)
-                edits["weight"].setText(f"{weight:.6f}")
+                edits["weight"].setText(f"{weight:.4f}")
                 edits["weight"].blockSignals(False)
         elif self.weight_radio.isChecked():
             max_percent = max((float(edit["atomic_percent"].text() or 0) for edit in self.selected_elements.values()), default=0)
@@ -849,16 +779,16 @@ class MDLHEAPP(QMainWindow):
                 atomic_percent = self.weight_to_atomic_percent(element, weight_percent)
                 atomic_ratio = (atomic_percent / max_percent) if max_percent != 0 else 0
                 edits["atomic_ratio"].blockSignals(True)
-                edits["atomic_ratio"].setText(f"{atomic_ratio:.6f}")
+                edits["atomic_ratio"].setText(f"{atomic_ratio:.4f}")
                 edits["atomic_ratio"].blockSignals(False)
                 self.total_weight_edit.blockSignals(True)
-                self.total_weight_edit.setText(f"{total_weight:.6f}")
+                self.total_weight_edit.setText(f"{total_weight:.4f}")
                 self.total_weight_edit.blockSignals(False)
                 edits["weight_percent"].blockSignals(True)
-                edits["weight_percent"].setText(f"{weight_percent:.6f}")
+                edits["weight_percent"].setText(f"{weight_percent:.4f}")
                 edits["weight_percent"].blockSignals(False)
                 edits["atomic_percent"].blockSignals(True)
-                edits["atomic_percent"].setText(f"{atomic_percent:.6f}")
+                edits["atomic_percent"].setText(f"{atomic_percent:.4f}")
                 edits["atomic_percent"].blockSignals(False)
 
         max_percent = max((float(edit["atomic_percent"].text() or 0) for edit in self.selected_elements.values()), default=0)
@@ -882,14 +812,14 @@ class MDLHEAPP(QMainWindow):
             max_percent = max((float(edit["atomic_percent"].text() or 0) for edit in self.selected_elements.values()), default=0)
             atomic_ratio = (atomic_percent / max_percent) if max_percent != 0 else 0
             self.selected_elements[element]["atomic_ratio"].blockSignals(True)
-            self.selected_elements[element]["atomic_ratio"].setText(f"{atomic_ratio:.6f}")
+            self.selected_elements[element]["atomic_ratio"].setText(f"{atomic_ratio:.4f}")
             self.selected_elements[element]["atomic_ratio"].blockSignals(False)
             self.selected_elements[element]["weight_percent"].blockSignals(True)
-            self.selected_elements[element]["weight_percent"].setText(f"{weight_percent:.6f}")
+            self.selected_elements[element]["weight_percent"].setText(f"{weight_percent:.4f}")
             self.selected_elements[element]["weight_percent"].blockSignals(False)
             weight = total_weight * (weight_percent / 100)
             self.selected_elements[element]["weight"].blockSignals(True)
-            self.selected_elements[element]["weight"].setText(f"{weight:.6f}")
+            self.selected_elements[element]["weight"].setText(f"{weight:.4f}")
             self.selected_elements[element]["weight"].blockSignals(False)
         except ValueError:
             return 0
@@ -905,15 +835,15 @@ class MDLHEAPP(QMainWindow):
             total_weight = float(self.total_weight_edit.text() or 0)
             atomic_percent = (atomic_ratio / total_atomic_ratio * 100) if total_atomic_ratio != 0 else 0
             self.selected_elements[element]["atomic_percent"].blockSignals(True)
-            self.selected_elements[element]["atomic_percent"].setText(f"{atomic_percent:.6f}")
+            self.selected_elements[element]["atomic_percent"].setText(f"{atomic_percent:.4f}")
             self.selected_elements[element]["atomic_percent"].blockSignals(False)
             weight_percent = self.atomic_to_weight_percent(element, atomic_percent)
             self.selected_elements[element]["weight_percent"].blockSignals(True)
-            self.selected_elements[element]["weight_percent"].setText(f"{weight_percent:.6f}")
+            self.selected_elements[element]["weight_percent"].setText(f"{weight_percent:.4f}")
             self.selected_elements[element]["weight_percent"].blockSignals(False)
             weight = total_weight * (weight_percent / 100)
             self.selected_elements[element]["weight"].blockSignals(True)
-            self.selected_elements[element]["weight"].setText(f"{weight:.6f}")
+            self.selected_elements[element]["weight"].setText(f"{weight:.4f}")
             self.selected_elements[element]["weight"].blockSignals(False)
         except ValueError:
             return 0
@@ -929,15 +859,15 @@ class MDLHEAPP(QMainWindow):
             total_weight = float(self.total_weight_edit.text() or 0)
             max_percent = max((float(edit["atomic_percent"].text() or 0) for edit in self.selected_elements.values()), default=0)
             self.selected_elements[element]["atomic_percent"].blockSignals(True)
-            self.selected_elements[element]["atomic_percent"].setText(f"{atomic_percent:.6f}")
+            self.selected_elements[element]["atomic_percent"].setText(f"{atomic_percent:.4f}")
             self.selected_elements[element]["atomic_percent"].blockSignals(False)
             atomic_ratio = (atomic_percent / max_percent) if max_percent != 0 else 0
             self.selected_elements[element]["atomic_ratio"].blockSignals(True)
-            self.selected_elements[element]["atomic_ratio"].setText(f"{atomic_ratio:.6f}")
+            self.selected_elements[element]["atomic_ratio"].setText(f"{atomic_ratio:.4f}")
             self.selected_elements[element]["atomic_ratio"].blockSignals(False)
             weight = total_weight * (weight_percent / 100)
             self.selected_elements[element]["weight"].blockSignals(True)
-            self.selected_elements[element]["weight"].setText(f"{weight:.6f}")
+            self.selected_elements[element]["weight"].setText(f"{weight:.4f}")
             self.selected_elements[element]["weight"].blockSignals(False)
         except ValueError:
             return 0
@@ -959,16 +889,16 @@ class MDLHEAPP(QMainWindow):
             atomic_percent = self.weight_to_atomic_percent(element, weight_percent)
             atomic_ratio = (atomic_percent / max_percent) if max_percent != 0 else 0
             self.selected_elements[element]["atomic_percent"].blockSignals(True)
-            self.selected_elements[element]["atomic_percent"].setText(f"{atomic_percent:.6f}")
+            self.selected_elements[element]["atomic_percent"].setText(f"{atomic_percent:.4f}")
             self.selected_elements[element]["atomic_percent"].blockSignals(False)
             self.selected_elements[element]["atomic_ratio"].blockSignals(True)
-            self.selected_elements[element]["atomic_ratio"].setText(f"{atomic_ratio:.6f}")
+            self.selected_elements[element]["atomic_ratio"].setText(f"{atomic_ratio:.4f}")
             self.selected_elements[element]["atomic_ratio"].blockSignals(False)
             self.selected_elements[element]["weight_percent"].blockSignals(True)
-            self.selected_elements[element]["weight_percent"].setText(f"{weight_percent:.6f}")
+            self.selected_elements[element]["weight_percent"].setText(f"{weight_percent:.4f}")
             self.selected_elements[element]["weight_percent"].blockSignals(False)
             self.total_weight_edit.blockSignals(True)
-            self.total_weight_edit.setText(f"{total_weight:.6f}")
+            self.total_weight_edit.setText(f"{total_weight:.4f}")
             self.total_weight_edit.blockSignals(False)
         except ValueError:
             self.show_warning("Invalid input", "Please enter a valid number.")
@@ -983,7 +913,7 @@ class MDLHEAPP(QMainWindow):
                 total_weight = float(self.total_weight_edit.text() or 0)
                 weight = total_weight * (weight_percent / 100)
                 self.selected_elements[element]["weight"].blockSignals(True)
-                self.selected_elements[element]["weight"].setText(f"{weight:.6f}")
+                self.selected_elements[element]["weight"].setText(f"{weight:.4f}")
                 self.selected_elements[element]["weight"].blockSignals(False)
         except ValueError:
             self.show_warning("Invalid input", "Please enter a valid number.")
@@ -1025,6 +955,7 @@ class MDLHEAPP(QMainWindow):
             for edits in self.selected_elements.values():
                 edits["atomic_percent"].setVisible(True)
                 edits["atomic_percent"].setEnabled(True)
+                edits["atomic_percent"].setFixedSize(90, 24)
                 edits["atomic_percent"].setText("5")
                 edits["atomic_ratio"].setVisible(False)
                 edits["atomic_ratio"].setEnabled(False)
@@ -1035,48 +966,55 @@ class MDLHEAPP(QMainWindow):
                 edits["weight"].setVisible(False)
                 edits["weight"].setEnabled(False)
                 edits["to"].setVisible(True)
+                edits["tw"].setVisible(True)
                 if "atomic_end" in edits:
                     edits["atomic_end"].setVisible(True)
                     edits["atomic_end"].setEnabled(True)
-            self.calculate_button.setText("Explore")
-            self.calculate_button.setIcon(QIcon("ui/icons/explore.svg"))
-            self.restrict_button.setVisible(True)
-            self.restrict_button.setEnabled(True)
+            self.filter_button.setVisible(True)
+            self.filter_button.setEnabled(True)
+            self.at_percent_radio.setStyleSheet("font-weight: bold; padding-left: 164px;")
             self.at_percent_radio.setVisible(True)
             self.at_percent_radio.setChecked(True)
             self.at_percent_radio.setEnabled(False)
-            self.at_percent_radio.setText("Set At. % Range")
-            self.at_percent_radio.setFixedWidth(432)
+            self.at_percent_radio.setText("Set at% range")
+            self.at_percent_radio.setFixedWidth(435)
             self.at_ratio_radio.setVisible(False)
             self.wt_percent_radio.setVisible(False)
             self.wt_percent_radio.setChecked(False)
             self.weight_radio.setVisible(False)
             self.weight_radio.setChecked(False)
             self.total_row.setVisible(False)
-            self.restrict_button_container.setVisible(True)
+            self.step_size_container.setVisible(True)
         elif self.single_radio.isChecked():
+            self.at_percent_radio.setStyleSheet("font-weight: bold; padding-left: 33px;")
+            for radio in [self.at_percent_radio, self.at_ratio_radio, self.wt_percent_radio, self.weight_radio]:
+                if radio.isChecked():
+                    radio.setStyleSheet(radio.styleSheet().replace("font-weight: normal;", "font-weight: bold;"))
+                else:
+                    radio.setStyleSheet(radio.styleSheet().replace("font-weight: bold;", "font-weight: normal;"))
             for edits in self.selected_elements.values():
                 edits["atomic_percent"].setVisible(True)
+                edits["atomic_percent"].setFixedSize(73, 24)
                 edits["atomic_ratio"].setVisible(True)
                 edits["weight_percent"].setVisible(True)
                 self.total_weight_edit.setVisible(True)
                 edits["weight"].setVisible(True)
                 edits["to"].setVisible(False)
+                edits["tw"].setVisible(False)
                 if "atomic_end" in edits:
                     edits["atomic_end"].setVisible(False)
             self.calculate_button.setText("Calculate")
-            self.calculate_button.setIcon(QIcon("ui/icons/calculation.svg"))
-            self.restrict_button.setVisible(False)
-            self.restrict_button.setEnabled(False)
+            self.filter_button.setVisible(False)
+            self.filter_button.setEnabled(False)
             self.at_percent_radio.setVisible(True)
             self.at_percent_radio.setEnabled(True)
-            self.at_percent_radio.setText("At. %")
+            self.at_percent_radio.setText("at%")
             self.at_percent_radio.setFixedWidth(105)
             self.at_ratio_radio.setVisible(True)
             self.wt_percent_radio.setVisible(True)
             self.weight_radio.setVisible(True)
             self.total_row.setVisible(True)
-            self.restrict_button_container.setVisible(False)
+            self.step_size_container.setVisible(False)
             if self.at_percent_radio.isChecked():
                 for edits in self.selected_elements.values():
                     edits["atomic_percent"].setEnabled(True)
@@ -1106,6 +1044,16 @@ class MDLHEAPP(QMainWindow):
                     edits["weight_percent"].setEnabled(False)
                     edits["weight"].setEnabled(True)
                     self.total_weight_edit.setEnabled(False)
+
+    def update_all_atomic_percent(self, text):
+        # updates all atomic_percent line edits with the value from from_at_edit
+        for edits in self.selected_elements.values():
+            edits["atomic_percent"].setText(text)
+
+    def update_all_atomic_end(self, text):
+        # updates all atomic_end line edits with the value from to_at_edit
+        for edits in self.selected_elements.values():
+            edits["atomic_end"].setText(text)
 
     def toggle_element(self, element, button):
         if button.isChecked():
@@ -1162,7 +1110,7 @@ class MDLHEAPP(QMainWindow):
 
     def show_restrictions_window(self):
         dialog = QDialog(self)
-        dialog.setWindowTitle("Set Restrictions")
+        dialog.setWindowTitle("Filter results")
         layout_left = QVBoxLayout()
         layout_right = QVBoxLayout()
 
@@ -1175,11 +1123,9 @@ class MDLHEAPP(QMainWindow):
             checkbox.stateChanged.connect(lambda _, prop=property: self.toggle_restriction(prop))
             layout_left.addWidget(checkbox)
             min_edit = self.validated_line_edit("", 100, 30)
-            min_edit.setProperty("class", "primary_text")
             min_edit.setPlaceholderText("Min")
             min_edit.setEnabled(False)
             max_edit = self.validated_line_edit("", 100, 30)
-            max_edit.setProperty("class", "primary_text")
             max_edit.setPlaceholderText("Max")
             max_edit.setEnabled(False)
             hlayout = QHBoxLayout()
@@ -1564,7 +1510,7 @@ class MDLHEAPP(QMainWindow):
         df.to_excel(file_path, index=False)
         QMessageBox.information(self, "Save to Excel", f"Alloy information saved to {file_path}")
 
-    def validated_line_edit(self, initial_value: str = "", width: int = 75, height: int = 25) -> QLineEdit:
+    def validated_line_edit(self, initial_value: str = "", width: int = 73, height: int = 24) -> QLineEdit:
         line_edit = QLineEdit(initial_value)
         
         validator = QDoubleValidator()
