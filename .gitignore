@@ -176,4 +176,7 @@ pyrightconfig.json
 # __added__
 .vscode/
 archive/
+requirements.txt/
 test.py/
+HEA Phase Predictor splitter.py/
+HEA Phase Predictor old.py/

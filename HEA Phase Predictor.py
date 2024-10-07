@@ -1,19 +1,48 @@
 # HEA Phase Predictor
-# © 2024 Metals Development Laboratory, Department of Metallurgical and Materials Engineering, Middle East Technical University.
-# All rights reserved.
-# This software is proprietary and confidential.
-# Unauthorized copying of this file and accompanying files, via any medium, is strictly prohibited.
-# Licensed only for use by members of Metals Development Laboratory.
+# Copyright 2024 Ali Fethi Erdem
+# Metals Development Laboratory
+# Middle East Technical University (METU), Ankara, Türkiye
 
-# This version of the HEA Phase Predictor is based on an original application, HEACalculator, developed by Doguhan Sariturk.
-# Significant improvements and changes were made to enhance its functionality, with assistance from ChatGPT, 
-# for use by members of the Metals Development Laboratory.
+# This file is part of HEA Phase Predictor.
+
+# HEA Phase Predictor is free software: you can redistribute it and/or
+# modify it under the terms of the GNU General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# HEA Phase Predictor is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+
+# You should have received a copy of the GNU General Public License along
+# with HEA Phase Predictor. If not, see <https://www.gnu.org/licenses/>.
+
+# HEA Phase Predictor is a derivative of the "HEA Calculator" by Doğuhan
+# Sarıtürk, which is also licensed under the GNU General Public License v3.
+
+
+# This software includes components from Carbon Design System (v10)
+# licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+
+#       http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# For more information on the Carbon Design System, visit:
+#       https://carbondesignsystem.com/
 
 __author__ = "Ali Fethi Erdem"
 __version__ = "1.0"
 __email__ = "erdem.alifethi@gmail.com"
-__license__ = "Proprietary - For use only by members of the Metals Development Laboratory"
-__credits__ = "Original version developed by Doguhan Sariturk under the name of HEACalculator"
+__license__ = "GNU General Public License Version 3"
+__credits__ = "Original version developed by Doguhan Sariturk under the name of HEA Calculator"
 
 import json
 import tempfile
@@ -25,8 +54,8 @@ import sys
 import pandas as pd
 from datetime import datetime
 import xlsxwriter
-from PySide6.QtCore import (Qt, QTimer, QLocale, QThread, Signal, QSize, QPoint, QEvent)
-from PySide6.QtGui import (QPixmap, QDoubleValidator, QIcon, QFont, QMouseEvent, QAction)
+from PySide6.QtCore import (Qt, QTimer, QLocale, QThread, Signal)
+from PySide6.QtGui import (QPixmap, QDoubleValidator, QIcon, QFont, QAction)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QFileDialog,
     QGridLayout, QHBoxLayout, QLabel,
@@ -35,7 +64,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget, QSpacerItem,
     QSizePolicy, QRadioButton, QScrollArea,
     QStatusBar, QProgressBar, QDialog,
-    QComboBox, QButtonGroup)
+    QComboBox, QButtonGroup, QTabWidget)
 
 from engine import Engine
 
@@ -183,15 +212,14 @@ class MDLHEAPP(QMainWindow):
 
         open_action = QAction("Import an Excel File", self)
         open_action.triggered.connect(self.load_compositions_from_excel)
-        save_action = QAction("Save Project", self)
         file_menu.addAction(open_action)
-        file_menu.addAction(save_action)
 
         self.switch_theme_action = QAction("Dark Theme", self)
         self.switch_theme_action.triggered.connect(self.switch_theme)
-        info_action = QAction("Info", self)
+        about_action = QAction("About", self)
+        about_action.triggered.connect(self.about_dialog)
         menubar.addAction(self.switch_theme_action)
-        menubar.addAction(info_action)
+        menubar.addAction(about_action)
 
         self.composition_worker = None
         self.calculation_worker = None
@@ -292,16 +320,15 @@ class MDLHEAPP(QMainWindow):
         parent_layout.addWidget(main_scroll_area)
 
         self.old_pos = None
-
+        self.element_colors = self._read("ui/styles/element_colors.json")
+        
         if current_theme == "dark":
-            self.element_colors = self._read("ui/styles/element_colors_dark.json")
             with open("ui/styles/styleSheet_dark.qss", "r") as f:
                 self.dark_stylesheet = f.read()
             self.setStyleSheet(self.dark_stylesheet)
             self.switch_theme_action.setText("Light Theme")
             self.switch_theme_action.setToolTip("Switch to Light Theme")
         elif current_theme == "light":
-            self.element_colors = self._read("ui/styles/element_colors_light.json")
             with open("ui/styles/styleSheet_light.qss", "r") as f:
                 self.light_stylesheet = f.read()
             self.setStyleSheet(self.light_stylesheet)
@@ -368,6 +395,7 @@ class MDLHEAPP(QMainWindow):
 
         # Selected Elements Container
         self.selected_elements_container = QVBoxLayout()
+        self.selected_elements_container.setSpacing(1)
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
@@ -488,12 +516,166 @@ class MDLHEAPP(QMainWindow):
         self.setCentralWidget(parent_widget)
         self.toggle_input_mode()
 
+    def about_dialog(self):
+        # Create the dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("About HEAPP")
+        dialog.setFixedSize(384, 292)  # Set a fixed size for the dialog
+
+        tab_widget = QTabWidget(dialog)
+
+        about_tab = QWidget()
+        about_layout = QVBoxLayout(about_tab)
+        about_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        about_layout.setSpacing(20)
+        about_layout.setContentsMargins(5, 20, 5, 5)
+
+        tab_widget.addTab(about_tab, "About")
+        about_text = QLabel('''
+            <style>
+                a {
+                    color: #007bff; 
+                    text-decoration: none; /* Removes the underline */
+                }
+                a:hover {
+                    text-decoration: underline; /* Adds underline on hover */
+                }
+            </style>
+            <h1 style="text-align: center;">HEA Phase Predictor</h1>
+            <h4 style="text-align: center;">Version 1.0.0</h4>
+            <p style="text-align: center;">MDL | High-Entropy Alloy Phase Predictor</p>
+            <p style="text-align: center;">This software is developed within <a href="https://metumdl.framer.website/" target="_blank">Metals Development<br />
+                Laboratory (MDL)</a> at <a href="https://www.metu.edu.tr/" target="_blank">Middle East Technical University <br />
+                (METU)</a>. HEAPP is a derivative of HEA Calculator.</p>
+            <p style="text-align: center;">For more information, visit our website or contact us.</p>
+            ''')
+        about_text.setStyleSheet("font-size: 9pt;")
+        about_text.setOpenExternalLinks(True)
+        about_layout.addWidget(about_text)
+
+        components_tab = QWidget()
+        components_layout = QVBoxLayout(components_tab)
+        components_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        components_layout.setContentsMargins(5, 20, 5, 5)
+        components_text = QLabel('''
+            <style>
+                a {
+                    color: #007bff; 
+                    text-decoration: none; /* Removes the underline */
+                }
+                a:hover {
+                    text-decoration: underline; /* Adds underline on hover */
+                }
+            </style>
+            <table style="height: 145px; width: 239.531px;">
+            <tbody>
+            <tr>
+            <td style="width: 172px;"><a href="https://carbondesignsystem.com/" target="_blank" rel="noopener">Carbon Design System</a>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp;&nbsp;</td>
+            <td style="width: 46.5312px;">v10</td>
+            </tr>
+            <tr>
+            <td style="width: 172px;"><a href="https://wiki.qt.io/Qt_for_Python" target="_blank">PySide6</a></td>
+            <td style="width: 46.5312px;">6.7.3</td>
+            </tr>
+            <tr>
+            <td style="width: 172px;"><a href="https://nuitka.net/" target="_blank">Nuitka</a></td>
+            <td style="width: 46.5312px;">2.4.8</td>
+            </tr>
+            <tr>
+            <td style="width: 172px;"><a href="https://jrsoftware.org/isinfo.php" target="_blank">Inno Setup</a></td>
+            <td style="width: 46.5312px;">6.3.3</td>
+            </tr>
+            </tbody>
+            </table>
+            <p>&nbsp;</p>
+            ''')
+        components_text.setOpenExternalLinks(True)
+        components_layout.addWidget(components_text)
+
+        lab_logo = QLabel()
+        lab_logo_pixmap = QPixmap("ui/about_logo.svg")
+        lab_logo.setPixmap(lab_logo_pixmap)
+        lab_logo.setAlignment(Qt.AlignLeft)
+        about_layout.addWidget(lab_logo)
+        tab_widget.addTab(components_tab, "Components")
+
+        license_tab = QWidget()
+        license_layout = QVBoxLayout(license_tab)
+        license_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        license_layout.setContentsMargins(5, 5, 5, 5)
+
+        license_text = QLabel('''
+            <style>
+                a {
+                    color: #007bff; 
+                    text-decoration: none; /* Removes the underline */
+                }
+                a:hover {
+                    text-decoration: underline; /* Adds underline on hover */
+                }
+            </style>
+            <p>HEA Phase Predictor<br />Copyright &copy; 2024 Ali Fethi Erdem<br />Metals Development Laboratory<br />Middle East Technical University (METU), Ankara, T&uuml;rkiye</p>
+            <p>HEA Phase Predictor is licensed under the GNU General<br />Public License Version 3.</p>
+            <p>HEA Phase Predictor is a derivative of "HEA Calculator"<br />by Doğuhan Sarıt&uuml;rk, which is also licensed under the GNU<br />General Public License v3.</p>
+            <p>HEA Phase Predictor is free software: you can redistribute it<br />and/or modify it under the terms of the GNU General Public<br />License as published by the Free Software Foundation, either<br />version 3 of the License, or (at your option) any later version.</p>
+            <p>HEA Phase Predictor is distributed in the hope that it will be<br />useful, but WITHOUT ANY WARRANTY; without even the<br />implied warranty of MERCHANTABILITY or FITNESS FOR A<br />PARTICULAR PURPOSE. See the GNU General Public License<br />for more details.</p>
+            <p>You should have received a copy of the GNU General Public<br />License along with HEA Phase Predictor. If not, see<br /><a href="https://www.gnu.org/licenses/">&lt;https://www.gnu.org/licenses/&gt;</a>.</p>
+            <p><br />This software includes components from Carbon Design<br />System (v10) licensed under the Apache License, Version<br />2.0 (the "License"); you may not use this file except in<br />compliance with the License. You may obtain a copy of the<br />License at</p>
+            <p><a href="http://www.apache.org/licenses/LICENSE-2.0">http://www.apache.org/licenses/LICENSE-2.0</a></p>
+            <p>Unless required by applicable law or agreed to in writing,<br />software distributed under the License is distributed on an<br />"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF<br />ANY KIND, either express or implied. See the License for the<br />specific language governing permissions and limitations under<br />the License.</p>
+            <p>For more information on the Carbon Design System, visit:<br /><a href="https://carbondesignsystem.com/">https://carbondesignsystem.com/</a></p>
+            ''')
+        license_text.setOpenExternalLinks(True)
+        license_text.setStyleSheet("font-size: 8pt;")
+
+        scroll_area = QScrollArea()
+        scroll_area.setObjectName("dialog_scroll")
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        container = QWidget()
+        container.setLayout(QVBoxLayout())
+        container.layout().addWidget(license_text)
+
+        scroll_area.setWidget(container)
+
+        license_layout.addWidget(scroll_area)
+
+        tab_widget.addTab(license_tab, "License")
+
+        authors_tab = QWidget()
+        authors_layout = QVBoxLayout(authors_tab)
+        authors_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        authors_layout.setContentsMargins(5, 20, 5, 5)
+        authors_text = QLabel('''
+            <style>
+                a {
+                    color: #007bff; 
+                    text-decoration: none; /* Removes the underline */
+                }
+                a:hover {
+                    text-decoration: underline; /* Adds underline on hover */
+                }
+            </style>
+            <p>&copy; 2024 Ali Fethi Erdem<br /><a href="mailto:erdem.alifethi@gmail.com">erdem.alifethi@gmail.com</a></p>
+            <p>&copy; 2020 Doğuhan Sarıt&uuml;rk<br /><a href="mailto:dogu.sariturk@gmail.com">dogu.sariturk@gmail.com</a></p>
+            ''')
+        authors_text.setOpenExternalLinks(True)
+        authors_layout.addWidget(authors_text)
+
+        tab_widget.addTab(authors_tab, "Authors")
+
+        dialog_layout = QVBoxLayout(dialog)
+        dialog_layout.addWidget(tab_widget)
+
+        dialog.setLayout(dialog_layout)
+        dialog.exec()
+
     def switch_theme(self):
         current_theme = self.settings.get_theme()
         new_theme = "light" if current_theme == "dark" else "dark"
         self.settings.set_theme(new_theme)
         if new_theme == "dark":
-            self.element_colors = self._read("ui/styles/element_colors_dark.json")
             for element, button in self.pTable_buttons.items():
                 group = self.engine.periodic_table[element]["position"][2]
                 color = self.element_colors.get(group, {"normal": "#333333", "hover": "#444444"})
@@ -518,7 +700,6 @@ class MDLHEAPP(QMainWindow):
             self.switch_theme_action.setText("Light Theme")
             self.switch_theme_action.setToolTip("Switch to Light Theme")
         elif new_theme == "light":
-            self.element_colors = self._read("ui/styles/element_colors_light.json")
             for element, button in self.pTable_buttons.items():
                 group = self.engine.periodic_table[element]["position"][2]
                 color = self.element_colors.get(group, {"normal": "#333333", "hover": "#444444"})
@@ -660,7 +841,7 @@ class MDLHEAPP(QMainWindow):
         weight_edit = self.validated_line_edit("0")
         to_label = QLabel("to")
         to_label.setFixedWidth(30)
-        to_label.setStyleSheet("color: rgba(255, 255, 255, 128);")
+        to_label.setStyleSheet("color: rgba(255, 255, 255, 0);")
         transparent_widget = QPushButton()
         transparent_widget.setFixedSize(39, 24)
         transparent_widget.setEnabled(False)
@@ -734,7 +915,7 @@ class MDLHEAPP(QMainWindow):
                 edits["weight_percent"].blockSignals(False)
                 weight = total_weight * (weight_percent / 100)
                 edits["weight"].blockSignals(True)
-                edits["weight"].setText(f"{weight:.4f}")
+                edits["weight"].setText(f"{weight:.5f}")
                 edits["weight"].blockSignals(False)
         elif self.at_ratio_radio.isChecked():
             total_atomic_ratio = sum(float(edit["atomic_ratio"].text() or 0) for edit in self.selected_elements.values())
@@ -751,7 +932,7 @@ class MDLHEAPP(QMainWindow):
                 edits["weight_percent"].setText(f"{weight_percent:.4f}")
                 edits["weight_percent"].blockSignals(False)
                 edits["weight"].blockSignals(True)
-                edits["weight"].setText(f"{weight:.4f}")
+                edits["weight"].setText(f"{weight:.5f}")
                 edits["weight"].blockSignals(False)
         elif self.wt_percent_radio.isChecked():
             max_percent = max((float(edit["atomic_percent"].text() or 0) for edit in self.selected_elements.values()), default=0)
@@ -768,7 +949,7 @@ class MDLHEAPP(QMainWindow):
                 edits["atomic_percent"].blockSignals(False)
                 weight = total_weight * (weight_percent / 100)
                 edits["weight"].blockSignals(True)
-                edits["weight"].setText(f"{weight:.4f}")
+                edits["weight"].setText(f"{weight:.5f}")
                 edits["weight"].blockSignals(False)
         elif self.weight_radio.isChecked():
             max_percent = max((float(edit["atomic_percent"].text() or 0) for edit in self.selected_elements.values()), default=0)
@@ -782,7 +963,7 @@ class MDLHEAPP(QMainWindow):
                 edits["atomic_ratio"].setText(f"{atomic_ratio:.4f}")
                 edits["atomic_ratio"].blockSignals(False)
                 self.total_weight_edit.blockSignals(True)
-                self.total_weight_edit.setText(f"{total_weight:.4f}")
+                self.total_weight_edit.setText(f"{total_weight:.5f}")
                 self.total_weight_edit.blockSignals(False)
                 edits["weight_percent"].blockSignals(True)
                 edits["weight_percent"].setText(f"{weight_percent:.4f}")
@@ -819,7 +1000,7 @@ class MDLHEAPP(QMainWindow):
             self.selected_elements[element]["weight_percent"].blockSignals(False)
             weight = total_weight * (weight_percent / 100)
             self.selected_elements[element]["weight"].blockSignals(True)
-            self.selected_elements[element]["weight"].setText(f"{weight:.4f}")
+            self.selected_elements[element]["weight"].setText(f"{weight:.5f}")
             self.selected_elements[element]["weight"].blockSignals(False)
         except ValueError:
             return 0
@@ -843,7 +1024,7 @@ class MDLHEAPP(QMainWindow):
             self.selected_elements[element]["weight_percent"].blockSignals(False)
             weight = total_weight * (weight_percent / 100)
             self.selected_elements[element]["weight"].blockSignals(True)
-            self.selected_elements[element]["weight"].setText(f"{weight:.4f}")
+            self.selected_elements[element]["weight"].setText(f"{weight:.5f}")
             self.selected_elements[element]["weight"].blockSignals(False)
         except ValueError:
             return 0
@@ -867,7 +1048,7 @@ class MDLHEAPP(QMainWindow):
             self.selected_elements[element]["atomic_ratio"].blockSignals(False)
             weight = total_weight * (weight_percent / 100)
             self.selected_elements[element]["weight"].blockSignals(True)
-            self.selected_elements[element]["weight"].setText(f"{weight:.4f}")
+            self.selected_elements[element]["weight"].setText(f"{weight:.5f}")
             self.selected_elements[element]["weight"].blockSignals(False)
         except ValueError:
             return 0
@@ -898,7 +1079,7 @@ class MDLHEAPP(QMainWindow):
             self.selected_elements[element]["weight_percent"].setText(f"{weight_percent:.4f}")
             self.selected_elements[element]["weight_percent"].blockSignals(False)
             self.total_weight_edit.blockSignals(True)
-            self.total_weight_edit.setText(f"{total_weight:.4f}")
+            self.total_weight_edit.setText(f"{total_weight:.5f}")
             self.total_weight_edit.blockSignals(False)
         except ValueError:
             self.show_warning("Invalid input", "Please enter a valid number.")
@@ -913,7 +1094,7 @@ class MDLHEAPP(QMainWindow):
                 total_weight = float(self.total_weight_edit.text() or 0)
                 weight = total_weight * (weight_percent / 100)
                 self.selected_elements[element]["weight"].blockSignals(True)
-                self.selected_elements[element]["weight"].setText(f"{weight:.4f}")
+                self.selected_elements[element]["weight"].setText(f"{weight:.5f}")
                 self.selected_elements[element]["weight"].blockSignals(False)
         except ValueError:
             self.show_warning("Invalid input", "Please enter a valid number.")
@@ -1110,9 +1291,12 @@ class MDLHEAPP(QMainWindow):
 
     def show_restrictions_window(self):
         dialog = QDialog(self)
+        dialog.setFixedSize(378, 528)
         dialog.setWindowTitle("Filter results")
         layout_left = QVBoxLayout()
+        layout_left.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout_right = QVBoxLayout()
+        layout_right.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         properties = ["density", "delta", "gamma", "enthalpy_of_mixing", "vec", "mixing_entropy", "melting_temp", "omega"]
         properties_label = ["Density (g/cm³)", "δ", "γ", "ΔHₘᵢₓ (kJ/mol)", "VEC", "ΔSₘᵢₓ (kJ/mol)", "Tₘ (K)", "Ω"]
@@ -1122,10 +1306,12 @@ class MDLHEAPP(QMainWindow):
             checkbox = QCheckBox(property_label)
             checkbox.stateChanged.connect(lambda _, prop=property: self.toggle_restriction(prop))
             layout_left.addWidget(checkbox)
-            min_edit = self.validated_line_edit("", 100, 30)
+            min_edit = self.validated_line_edit("", 73, 24)
+            min_edit.setProperty("class", "gray10_line_edit")
             min_edit.setPlaceholderText("Min")
             min_edit.setEnabled(False)
-            max_edit = self.validated_line_edit("", 100, 30)
+            max_edit = self.validated_line_edit("", 73, 24)
+            max_edit.setProperty("class", "gray10_line_edit")
             max_edit.setPlaceholderText("Max")
             max_edit.setEnabled(False)
             hlayout = QHBoxLayout()
@@ -1150,7 +1336,7 @@ class MDLHEAPP(QMainWindow):
             checkbox.stateChanged.connect(lambda _, prop=dropdown: self.toggle_restriction(prop))
             layout_right.addWidget(checkbox)
             combobox = QComboBox()
-            combobox.setFixedSize(200, 30)
+            combobox.setFixedSize(160, 24)
             combobox.addItems(dropdown_restrictions[dropdown])
             combobox.setEnabled(False)
             layout_right.addWidget(combobox)
@@ -1159,16 +1345,40 @@ class MDLHEAPP(QMainWindow):
                 "dropdown": combobox}
 
         layout = QHBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        cancel_button = QPushButton("Cancel")
+        cancel_button.setStyleSheet("""
+            QPushButton {
+                text-align: left;   
+                padding-left: 18px;
+                padding-bottom: 20px;
+            }
+        """)
+        cancel_button.setFixedSize(189, 64)
+        cancel_button.setProperty("class", "secondary_button")
+        cancel_button.clicked.connect(dialog.reject)
         apply_button = QPushButton("Apply")
-        apply_button.setFixedSize(100, 38)
+        apply_button.setStyleSheet("""
+            QPushButton {
+                text-align: left;   
+                padding-left: 18px;
+                padding-bottom: 20px;
+            }
+        """)
+        apply_button.setFixedSize(189, 64)
         apply_button.setProperty("class", "primary_button")
         apply_button.clicked.connect(lambda: self.apply_restrictions(dialog))
         layout.addLayout(layout_left)
-        layout.addItem((QSpacerItem(40, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
+        layout.addItem((QSpacerItem(20, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
         layout.addLayout(layout_right)
         container = QVBoxLayout(dialog)
+        container.setContentsMargins(0, 0, 0, 0)
         container.addLayout(layout)
-        container.addWidget(apply_button, alignment=Qt.AlignmentFlag.AlignRight)
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(0)
+        button_layout.addWidget(cancel_button)
+        button_layout.addWidget(apply_button)
+        container.addLayout(button_layout)
 
         dialog.setLayout(container)
         dialog.exec()

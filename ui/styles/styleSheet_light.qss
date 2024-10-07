@@ -46,7 +46,7 @@ QScrollBar:vertical {
 }
 QScrollBar::handle:vertical {
     background: #E0E0E0;
-    border-left: 1px solid #ffffff;
+    border-left: none;
     border-radius: 0px;
     min-height: 40px;
 }
@@ -108,6 +108,14 @@ QScrollArea#selected_elements_scroll {
     padding: 0px;
     border-bottom: 2px solid #0F62FE;
 }
+
+QScrollArea#dialog_scroll {
+    border: none;
+    background-color: #f4f4f4;
+    border-radius: 0px;
+    padding: 0px;
+}
+
 QScrollArea QWidget {
     border-radius: 0px;
 }
@@ -145,9 +153,9 @@ QTableWidget::item:selected {
 }
 
 QDialog {
-    background-color: #ffffff;
+    background-color: #f4f4f4;
     border: 0px;
-    padding: 20px;
+    padding: 0px;
 }
 
 QProgressBar {
@@ -165,12 +173,12 @@ QProgressBar::chunk {
 QCheckBox {
     padding: 0px;
     color: #161616;
-    font-size: 12pt;
+    font-size: 10pt;
     border: 0px;
 }
 QCheckBox::indicator {
-    width: 20px;
-    height: 20px;
+    width: 16px;
+    height: 16px;
 }
 QCheckBox::indicator:unchecked {
     image: url(ui/icons/checkbox.svg);
@@ -180,33 +188,33 @@ QCheckBox::indicator:checked {
 }
 
 QComboBox {
-    background-color: #f4f4f4;
+    background-color: #ffffff;
     color: #161616;
     border-bottom: 1px solid #8d8d8d;
     padding: 5px;
     border-radius: 0px;
-    font-size: 12pt;
+    font-size: 10pt;
 }
 QComboBox:hover {
-    background-color: #e8e8e8;
+    background-color: #e5e5e5;
 }
 QComboBox:focus {
-    background-color: #e8e8e8;
-    border: 3px solid #0f62fe;
+    background-color: #ffffff;
+    border: 2px solid #0f62fe;
 }
 QComboBox:disabled {
-    background-color: #f4f4f4;
-    color: #bdbdbd;
+    background-color: #ffffff;
+    color: #c6c6c6;
     border-bottom: 0px;
 }
 QComboBox::drop-down {
+    background-color: #ffffff;
     subcontrol-origin: padding;
     subcontrol-position: top right;
     width: 16px;
-    background-color: #f4f4f4;
 }
 QComboBox::drop-down:hover {
-    background-color: #e8e8e8;
+    background-color: #e5e5e5;
 }
 QComboBox::down-arrow {
     image: url(ui/icons/chevron-down.svg);
@@ -216,17 +224,17 @@ QComboBox::down-arrow {
 
 QComboBox QAbstractItemView {
     color: #525252;
-    background-color: #f4f4f4;
-    selection-background-color: #e0e0e0;
+    background-color: #ffffff;
+    selection-background-color: #e5e5e5;
     selection-color: #161616;
 }
 QComboBox QAbstractItemView::item {
     color: #525252;
     padding: 5px;
-    background-color: #f4f4f4;
+    background-color: #ffffff;
 }
 QComboBox QAbstractItemView::item:hover {
-    background-color: #e8e8e8;
+    background-color: #e5e5e5;
     color: #161616;
 }
 QComboBox QAbstractItemView::item:selected {
@@ -299,6 +307,41 @@ QRadioButton#single_radio::indicator {
 }
 QRadioButton#single_radio:indicator:checked {
     image: url(ui/icons/radio-button--checked.svg);
+}
+
+
+QTabWidget {
+    background-color: #f4f4f4;
+    border-radius: 0px;
+    border: none;
+    color: #161616;
+    font-size: 9pt;
+}
+QTabBar::tab {
+    min-width: 80px;
+    max-width: 0px;
+    min-height: 15px;
+    max-height: 15px;
+    padding: 5px;
+    font-size: 10.5pt;
+}
+QTabBar::tab:!selected {
+    background-color: #f4f4f4;
+    border-radius: 0px;
+    border-bottom: 2px solid #E0E0E0;
+    color: #525252;
+    font-size: 10.5pt;
+}
+QTabBar::tab:selected {
+    border-bottom: 2px solid #0F62FE;
+    color: #161616;
+}
+QTabBar::tab:hover {
+    border-bottom: 2px solid #8D8D8D;
+    color: #525252;
+}
+QTabWidget::pane {
+    border: none;
 }
 
 
@@ -381,5 +424,25 @@ QLineEdit:focus {
 QLineEdit:disabled {
     background-color: #f4f4f4;
     color: #bdbdbd;
+    border-bottom: 0px;
+}
+
+QLineEdit[class="gray10_line_edit"] {
+    background-color: #ffffff;
+    color: #161616;
+    border: 0px;
+    border-bottom: 1px solid #8d8d8d;
+    font-size: 9pt;
+    padding: 4px;
+    border-top: 2px solid transparent;
+    border-left: 2px solid transparent;
+    border-right: 2px solid transparent;
+}
+QLineEdit[class="gray10_line_edit"]:focus {
+    border: 2px solid #0f62fe;
+}
+QLineEdit[class="gray10_line_edit"]:disabled {
+    background-color: #ffffff;
+    color: #c6c6c6;
     border-bottom: 0px;
 }

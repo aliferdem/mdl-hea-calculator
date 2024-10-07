@@ -41,7 +41,7 @@ QScrollBar:vertical {
 }
 QScrollBar::handle:vertical {
     background: #393939;
-    border-left: 1px solid #161616;
+    border-left: none;
     border-radius: 0px;
     min-height: 40px;
 }
@@ -104,6 +104,14 @@ QScrollArea#selected_elements_scroll {
     padding: 0px;
     border-bottom: 2px solid #4589ff;
 }
+
+QScrollArea#dialog_scroll {
+    border: none;
+    background-color: #262626;
+    border-radius: 0px;
+    padding: 0px;
+}
+
 QScrollArea QWidget {
     border-radius: 0px;
 }
@@ -149,7 +157,7 @@ QMainWindow {
 }
 
 QDialog {
-    background-color: #161616;
+    background-color: #262626;
     border: 0px;
     padding: 20px;
 }
@@ -169,11 +177,11 @@ QProgressBar::chunk {
 QCheckBox {
     padding: 0px;
     color: #f4f4f4;
-    font-size: 12pt;
+    font-size: 10pt;
 }
 QCheckBox::indicator {
-    width: 20px;
-    height: 20px;
+    width: 16px;
+    height: 16px;
 }
 QCheckBox::indicator:unchecked {
     image: url(ui/icons/checkbox-white.svg);
@@ -183,33 +191,33 @@ QCheckBox::indicator:checked {
 }
 
 QComboBox {
-    background-color: #262626;
+    background-color: #393939;
     color: #f4f4f4;
-    border-bottom: 1px solid #6f6f6f;
+    border-bottom: 1px solid #8d8d8d;
     padding: 5px;
     border-radius: 0px;
-    font-size: 12pt;
+    font-size: 10pt;
 }
 QComboBox:hover {
-    background-color: #333333;
+    background-color: #4c4c4c;
 }
 QComboBox:focus {
-    background-color: #333333;
-    border: 3px solid #ffffff;
+    background-color: #393939;
+    border: 2px solid #ffffff;
 }
 QComboBox:disabled {
-    background-color: #262626;
-    color: #5a5a5a;
+    background-color: #393939;
+    color: #6f6f6f;
     border-bottom: 0px;
 }
 QComboBox::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
     width: 16px;
-    background-color: #262626;
+    background-color: #393939;
 }
 QComboBox::drop-down:hover {
-    background-color: #333333;
+    background-color: #4c4c4c;
 }
 QComboBox::down-arrow {
     image: url(ui/icons/chevron-down-white.svg);
@@ -218,21 +226,21 @@ QComboBox::down-arrow {
 }
 QComboBox QAbstractItemView {
     color: #c6c6c6;
-    background-color: #262626;
-    selection-background-color: #474747;
-    selection-color: #c6c6c6;
+    background-color: #393939;
+    selection-background-color: #525252;
+    selection-color: #f4f4f4;
 }
 QComboBox QAbstractItemView::item {
     color: #f4f4f4;
     padding: 5px;
-    background-color: #262626;
+    background-color: #393939;
 }
 QComboBox QAbstractItemView::item:hover {
     background-color: #333333;
     color: #f4f4f4;
 }
 QComboBox QAbstractItemView::item:selected {
-    background-color: #474747;
+    background-color: #4c4c4c;
     color: #f4f4f4;
 }
 
@@ -306,6 +314,39 @@ QRadioButton#single_radio:indicator:checked {
     image: url(ui/icons/radio-button--checked_white.svg);
 }
 
+QTabWidget {
+    background-color: #262626;
+    border-radius: 0px;
+    border: none;
+    color: #f4f4f4;
+    font-size: 9pt;
+}
+QTabBar::tab {
+    min-width: 80px;
+    max-width: 0px;
+    min-height: 15px;
+    max-height: 15px;
+    padding: 5px;
+    font-size: 10.5pt;
+}
+QTabBar::tab:!selected {
+    background-color: #262626;
+    border-radius: 0px;
+    border-bottom: 2px solid #525252;
+    color: #c6c6c6;
+    font-size: 10.5pt;
+}
+QTabBar::tab:selected {
+    border-bottom: 2px solid #4589ff;
+    color: #f4f4f4;
+}
+QTabBar::tab:hover {
+    border-bottom: 2px solid #8d8d8d;
+    color: #f4f4f4;
+}
+QTabWidget::pane {
+    border: none;
+}
 
 QPushButton[class="primary_button"] {
     background-color: #0f62fe;
@@ -384,5 +425,25 @@ QLineEdit:focus {
 QLineEdit:disabled {
     background-color: #262626;
     color: #525252;
+    border-bottom: 0px;
+}
+
+QLineEdit[class="gray10_line_edit"] {
+    background-color: #393939;
+    color: #f4f4f4;
+    border: 0px;
+    border-bottom: 1px solid #8d8d8d;
+    font-size: 9pt;
+    padding: 4px;
+    border-top: 2px solid transparent;
+    border-left: 2px solid transparent;
+    border-right: 2px solid transparent;
+}
+QLineEdit[class="gray10_line_edit"]:focus {
+    border: 2px solid #ffffff;
+}
+QLineEdit[class="gray10_line_edit"]:disabled {
+    background-color: #393939;
+    color: #6f6f6f;
     border-bottom: 0px;
 }

@@ -1,45 +1,31 @@
-from PySide6.QtWidgets import QApplication, QScrollArea, QWidget, QVBoxLayout, QLabel
+import sys
+from PySide6.QtWidgets import QApplication, QWidget, QFrame, QVBoxLayout
 from PySide6.QtCore import Qt
-
-class FadeEffectWidget(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setStyleSheet("background-color: rgba(0, 0, 0, 150);")  # Semi-transparent black
+from ctypes import windll
 
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
 
-        layout = QVBoxLayout(self)
+        self.setWindowTitle("Custom Title Bar Color")
+        self.setWindowFlags(Qt.Window)  # Keep the default title bar
 
-        # Create a scroll area
-        self.scroll_area = QScrollArea(self)
-        self.scroll_area.setWidgetResizable(True)
+        # Use windll to change title bar color
+        user32 = windll.user32
+        user32.SetSysColor(17, 0x007BFF)  # Change title bar color to blue
 
-        # Create a content widget
-        content_widget = QWidget()
-        content_layout = QVBoxLayout(content_widget)
+        # Create main content area
+        self.content_area = QFrame()
+        self.content_area.setStyleSheet("background-color: #F0F0F0;")
 
-        # Add multiple labels for scrolling
-        for i in range(30):
-            content_layout.addWidget(QLabel(f"Item {i + 1}"))
-
-        self.scroll_area.setWidget(content_widget)
-        layout.addWidget(self.scroll_area)
-
-        # Create the fade effect widget and set its size
-        self.fade_effect_widget = FadeEffectWidget()
-        self.fade_effect_widget.setFixedHeight(50)  # Adjust height as needed
-        layout.addWidget(self.fade_effect_widget)
+        # Layout
+        layout = QVBoxLayout()
+        layout.addWidget(self.content_area)
 
         self.setLayout(layout)
-        self.resize(400, 300)
-
-        # Adjust the fade effect position
-        self.fade_effect_widget.raise_()  # Bring it to the front
 
 if __name__ == "__main__":
-    app = QApplication([])
+    app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
-    app.exec()
+    sys.exit(app.exec())
