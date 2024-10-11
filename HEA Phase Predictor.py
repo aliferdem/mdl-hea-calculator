@@ -547,7 +547,6 @@ class MDLHEAPP(QMainWindow):
             <p style="text-align: center;">This software is developed within <a href="https://metumdl.framer.website/" target="_blank">Metals Development<br />
                 Laboratory (MDL)</a> at <a href="https://www.metu.edu.tr/" target="_blank">Middle East Technical University <br />
                 (METU)</a>. HEAPP is a derivative of HEA Calculator.</p>
-            <p style="text-align: center;">For more information, visit our website or contact us.</p>
             ''')
         about_text.setStyleSheet("font-size: 9pt;")
         about_text.setOpenExternalLinks(True)
