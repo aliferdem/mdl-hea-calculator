@@ -1,59 +1,55 @@
 # HEA Phase Predictor
-# Copyright 2024 Ali Fethi Erdem
+# Copyright (c) 2024 Ali Fethi Erdem
 # Metals Development Laboratory
 # Middle East Technical University (METU), Ankara, Türkiye
-
+#
 # This file is part of HEA Phase Predictor.
-
+#
 # HEA Phase Predictor is free software: you can redistribute it and/or
 # modify it under the terms of the GNU General Public License as published
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-
+#
 # HEA Phase Predictor is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
 # General Public License for more details.
-
+#
 # You should have received a copy of the GNU General Public License along
 # with HEA Phase Predictor. If not, see <https://www.gnu.org/licenses/>.
-
+#
 # HEA Phase Predictor is a derivative of the "HEA Calculator" by Doğuhan
 # Sarıtürk, which is also licensed under the GNU General Public License v3.
-
-
+#
+#
 # This software includes components from Carbon Design System (v10)
 # licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
 # a copy of the License at
-
+#
 #       http://www.apache.org/licenses/LICENSE-2.0
-
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations
 # under the License.
-
+#
 # For more information on the Carbon Design System, visit:
 #       https://carbondesignsystem.com/
 
 __author__ = "Ali Fethi Erdem"
-__version__ = "1.0"
+__version__ = "1.0.0"
 __email__ = "erdem.alifethi@gmail.com"
 __license__ = "GNU General Public License Version 3"
 __credits__ = "Original version developed by Doguhan Sariturk under the name of HEA Calculator"
 
 import json
-import tempfile
-import itertools
-import time
 import os
 import re
 import sys
 import pandas as pd
 from datetime import datetime
-import xlsxwriter
 from PySide6.QtCore import (Qt, QTimer, QLocale, QThread, Signal)
 from PySide6.QtGui import (QPixmap, QDoubleValidator, QIcon, QFont, QAction)
 from PySide6.QtWidgets import (
@@ -67,141 +63,21 @@ from PySide6.QtWidgets import (
     QComboBox, QButtonGroup, QTabWidget)
 
 from engine import Engine
-
-class Settings:
-    def __init__(self):
-        self.settings_file = "user_settings.json"
-        self.default_settings = {"theme": "dark"}  # Default theme is dark
-        
-        # Load settings from file or use defaults if file doesn't exist
-        if os.path.exists(self.settings_file):
-            with open(self.settings_file, "r") as f:
-                self.settings = json.load(f)
-        else:
-            self.settings = self.default_settings
-
-    def get_theme(self):
-        return self.settings.get("theme", "dark")
-
-    def set_theme(self, theme):
-        self.settings["theme"] = theme
-        with open(self.settings_file, "w") as f:
-            json.dump(self.settings, f)
-
-class AlloyCalculationWorker(QThread):
-    update_progress = Signal(int, int, float)
-    finished = Signal()
-    all_results_ready = Signal(str, int)  # Added count parameter
-
-    def __init__(self, compositions, engine, restriction_values):
-        super().__init__()
-        self.compositions = compositions
-        self.engine = engine
-        self.restriction_values = restriction_values
-        self.stop_requested = False
-        self.temp_file = tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.json')
-        
-    def run(self):
-        start_time = time.time()
-        results = []
-        count_meeting_criteria = 0
-        for i, composition in enumerate(self.compositions):
-            if self.stop_requested:
-                break
-            alloy_name = "".join(f"{el}{MDLHEAPP._to_subscript(str(int(percent)))}" for el, percent in composition.items())
-            composition = {k: v / 100 for k, v in composition.items()}
-            values, meets_criteria = self.engine.calculate(composition, self.restriction_values)
-            if meets_criteria:
-                results.append((values, alloy_name))
-                count_meeting_criteria += 1
-            elapsed_time = time.time() - start_time
-            estimated_time = elapsed_time / (i + 1) * (len(self.compositions) - (i + 1))
-            self.update_progress.emit(i + 1, len(self.compositions), estimated_time)
-
-        json.dump(results, self.temp_file)
-        self.temp_file.close()
-        self.all_results_ready.emit(self.temp_file.name, count_meeting_criteria)
-        self.finished.emit()
-
-class CompositionGenerationWorker(QThread):
-    compositions_ready = Signal(list)
-
-    def __init__(self, selected_elements, step_size):
-        super().__init__()
-        self.selected_elements = selected_elements
-        self.step_size = step_size
-
-    def run(self):
-        compositions = []
-        keys, ranges = zip(*self.selected_elements.items())
-        ranges = [list(range(int(start), int(end) + 1, int(self.step_size))) for start, end in ranges]
-        for values in itertools.product(*ranges):
-            composition = dict(zip(keys, values))
-            if sum(composition.values()) == 100:
-                compositions.append(composition)
-        self.compositions_ready.emit(compositions)
-
-class ExcelWriterWorker(QThread):
-    progress = Signal(int, int)
-    finished = Signal(str)
-    
-    def __init__(self, file_name, file_path, headers):
-        super().__init__()
-        self.file_name = file_name
-        self.file_path = file_path
-        self.headers = headers
-
-    def run(self):
-        workbook = xlsxwriter.Workbook(self.file_path)
-        worksheet = workbook.add_worksheet()
-        
-        # Write headers
-        for col_num, header in enumerate(self.headers):
-            worksheet.write(0, col_num, header)
-        
-        row = 1
-        chunk_size = 100
-        total_processed = 0
-        total_chunks = sum(1 for _ in read_results_in_chunks(self.file_name, chunk_size))
-        
-        for chunk in read_results_in_chunks(self.file_name, chunk_size):
-            for values, alloy_name in chunk:
-                row_data = [
-                    alloy_name,
-                    values["density"],
-                    values["delta"],
-                    values["gamma"],
-                    values["enthalpy_of_mixing"],
-                    values["vec"],
-                    values["mixing_entropy"],
-                    values["melting_temp"],
-                    values["omega"],
-                    values["cstr"],
-                    values["model1"],
-                    values["model2"],
-                    values["model3"],
-                    values["model4"],
-                    values["model6"],
-                    values["model7"]
-                ]
-                for col_num, data in enumerate(row_data):
-                    worksheet.write(row, col_num, data)
-                row += 1
-                total_processed += 1
-                self.progress.emit(total_processed, total_chunks * chunk_size)
-        
-        workbook.close()
-        self.finished.emit(self.file_path)
-
-def read_results_in_chunks(file_name, chunk_size=100):
-    with open(file_name, 'r') as file:
-        data = json.load(file)
-        for i in range(0, len(data), chunk_size):
-            yield data[i:i + chunk_size]
+from ui.settings import Settings
+from workers.alloy_calculation import AlloyCalculationWorker
+from workers.composition_generation import CompositionGenerationWorker
+from workers.excel_writer import ExcelWriterWorker
+from utils.io_helpers import read_json
+from utils.ui_helpers import default_line_edit
+from ui.periodic_table import PeriodicTable
+from ui.about_dialog import AboutDialog
 
 class MDLHEAPP(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        self.settings = Settings()
+        self.periodic_table_widget = None
 
         self.setWindowTitle("MDL | HEA Phase Predictor")
         self.resize(1220, 660)
@@ -268,15 +144,15 @@ class MDLHEAPP(QMainWindow):
         self.total_label.setStyleSheet("font-weight: bold;")
         self.total_atomic_label = QLabel("")
         self.total_weight_percent_label = QLabel("")
-        self.total_weight_edit = self.validated_line_edit("0")
-        self.step_size_edit = self.validated_line_edit("5")
+        self.total_weight_edit = default_line_edit("0")
+        self.step_size_edit = default_line_edit("5")
         self.step_size_edit.setPlaceholderText("step size")
         self.step_size_edit.setFixedWidth(66)
-        self.from_at_edit = self.validated_line_edit("")
+        self.from_at_edit = default_line_edit("")
         self.from_at_edit.setPlaceholderText("initial values")
         self.from_at_edit.textChanged.connect(self.update_all_atomic_percent)
         self.from_at_edit.setFixedWidth(90)
-        self.to_at_edit = self.validated_line_edit("")
+        self.to_at_edit = default_line_edit("")
         self.to_at_edit.setPlaceholderText("last values")
         self.to_at_edit.textChanged.connect(self.update_all_atomic_end)
         self.to_at_edit.setFixedWidth(90)
@@ -290,10 +166,6 @@ class MDLHEAPP(QMainWindow):
         self.restriction_values = {}
 
         self.initUI()
-
-    def _read(self, file_name: str):
-        with open(file_name, "r") as f:
-            return json.load(f)
 
     def _to_subscript(num_str):
         subscript_map = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
@@ -320,7 +192,7 @@ class MDLHEAPP(QMainWindow):
         parent_layout.addWidget(main_scroll_area)
 
         self.old_pos = None
-        self.element_colors = self._read("ui/styles/element_colors.json")
+        self.element_colors = read_json("ui/styles/element_colors.json")
         
         if current_theme == "dark":
             with open("ui/styles/styleSheet_dark.qss", "r") as f:
@@ -337,17 +209,23 @@ class MDLHEAPP(QMainWindow):
 
         top_layout = QHBoxLayout()
 
-        periodic_layout = QHBoxLayout()
         # Periodic table
-        self.table_frame = QGridLayout()
-        self.add_elements_to_table()
+        periodic_table_frame = QHBoxLayout()
+        periodic_table_layout = QGridLayout()
+
+        self.periodic_table = PeriodicTable(
+            layout= periodic_table_layout,
+            engine= self.engine,
+            element_colors= self.element_colors,
+            callback= self.toggle_element
+        )
 
         periodic_table_widget = QWidget()
-        periodic_table_widget.setLayout(self.table_frame)
-        periodic_table_widget.setFixedSize(660, 350) # Default 440
-        periodic_layout.addWidget(periodic_table_widget)
+        periodic_table_widget.setLayout(periodic_table_layout)
+        periodic_table_widget.setFixedSize(660, 350)
+        periodic_table_frame.addWidget(periodic_table_widget)
         top_layout.addStretch(1)
-        top_layout.addLayout(periodic_layout) 
+        top_layout.addLayout(periodic_table_frame)
 
         # Selected elements and their percentages
         selected_frame_widget = QWidget()
@@ -517,157 +395,7 @@ class MDLHEAPP(QMainWindow):
         self.toggle_input_mode()
 
     def about_dialog(self):
-        # Create the dialog
-        dialog = QDialog(self)
-        dialog.setWindowTitle("About HEAPP")
-        dialog.setFixedSize(384, 292)  # Set a fixed size for the dialog
-
-        tab_widget = QTabWidget(dialog)
-
-        about_tab = QWidget()
-        about_layout = QVBoxLayout(about_tab)
-        about_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        about_layout.setSpacing(20)
-        about_layout.setContentsMargins(5, 20, 5, 5)
-
-        tab_widget.addTab(about_tab, "About")
-        about_text = QLabel('''
-            <style>
-                a {
-                    color: #007bff; 
-                    text-decoration: none; /* Removes the underline */
-                }
-                a:hover {
-                    text-decoration: underline; /* Adds underline on hover */
-                }
-            </style>
-            <h1 style="text-align: center;">HEA Phase Predictor</h1>
-            <h4 style="text-align: center;">Version 1.0.0</h4>
-            <p style="text-align: center;">MDL | High-Entropy Alloy Phase Predictor</p>
-            <p style="text-align: center;">This software is developed within <a href="https://metumdl.framer.website/" target="_blank">Metals Development<br />
-                Laboratory (MDL)</a> at <a href="https://www.metu.edu.tr/" target="_blank">Middle East Technical University <br />
-                (METU)</a>. HEAPP is a derivative of HEA Calculator.</p>
-            ''')
-        about_text.setStyleSheet("font-size: 9pt;")
-        about_text.setOpenExternalLinks(True)
-        about_layout.addWidget(about_text)
-
-        components_tab = QWidget()
-        components_layout = QVBoxLayout(components_tab)
-        components_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        components_layout.setContentsMargins(5, 20, 5, 5)
-        components_text = QLabel('''
-            <style>
-                a {
-                    color: #007bff; 
-                    text-decoration: none; /* Removes the underline */
-                }
-                a:hover {
-                    text-decoration: underline; /* Adds underline on hover */
-                }
-            </style>
-            <table style="height: 145px; width: 239.531px;">
-            <tbody>
-            <tr>
-            <td style="width: 172px;"><a href="https://carbondesignsystem.com/" target="_blank" rel="noopener">Carbon Design System</a>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp;&nbsp;</td>
-            <td style="width: 46.5312px;">v10</td>
-            </tr>
-            <tr>
-            <td style="width: 172px;"><a href="https://wiki.qt.io/Qt_for_Python" target="_blank">PySide6</a></td>
-            <td style="width: 46.5312px;">6.7.3</td>
-            </tr>
-            <tr>
-            <td style="width: 172px;"><a href="https://nuitka.net/" target="_blank">Nuitka</a></td>
-            <td style="width: 46.5312px;">2.4.8</td>
-            </tr>
-            <tr>
-            <td style="width: 172px;"><a href="https://jrsoftware.org/isinfo.php" target="_blank">Inno Setup</a></td>
-            <td style="width: 46.5312px;">6.3.3</td>
-            </tr>
-            </tbody>
-            </table>
-            <p>&nbsp;</p>
-            ''')
-        components_text.setOpenExternalLinks(True)
-        components_layout.addWidget(components_text)
-
-        lab_logo = QLabel()
-        lab_logo_pixmap = QPixmap("ui/about_logo.svg")
-        lab_logo.setPixmap(lab_logo_pixmap)
-        lab_logo.setAlignment(Qt.AlignLeft)
-        about_layout.addWidget(lab_logo)
-        tab_widget.addTab(components_tab, "Components")
-
-        license_tab = QWidget()
-        license_layout = QVBoxLayout(license_tab)
-        license_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        license_layout.setContentsMargins(5, 5, 5, 5)
-
-        license_text = QLabel('''
-            <style>
-                a {
-                    color: #007bff; 
-                    text-decoration: none; /* Removes the underline */
-                }
-                a:hover {
-                    text-decoration: underline; /* Adds underline on hover */
-                }
-            </style>
-            <p>HEA Phase Predictor<br />Copyright &copy; 2024 Ali Fethi Erdem<br />Metals Development Laboratory<br />Middle East Technical University (METU), Ankara, T&uuml;rkiye</p>
-            <p>HEA Phase Predictor is licensed under the GNU General<br />Public License Version 3.</p>
-            <p>HEA Phase Predictor is a derivative of "HEA Calculator"<br />by Doğuhan Sarıt&uuml;rk, which is also licensed under the GNU<br />General Public License v3.</p>
-            <p>HEA Phase Predictor is free software: you can redistribute it<br />and/or modify it under the terms of the GNU General Public<br />License as published by the Free Software Foundation, either<br />version 3 of the License, or (at your option) any later version.</p>
-            <p>HEA Phase Predictor is distributed in the hope that it will be<br />useful, but WITHOUT ANY WARRANTY; without even the<br />implied warranty of MERCHANTABILITY or FITNESS FOR A<br />PARTICULAR PURPOSE. See the GNU General Public License<br />for more details.</p>
-            <p>You should have received a copy of the GNU General Public<br />License along with HEA Phase Predictor. If not, see<br /><a href="https://www.gnu.org/licenses/">&lt;https://www.gnu.org/licenses/&gt;</a>.</p>
-            <p><br />This software includes components from Carbon Design<br />System (v10) licensed under the Apache License, Version<br />2.0 (the "License"); you may not use this file except in<br />compliance with the License. You may obtain a copy of the<br />License at</p>
-            <p><a href="http://www.apache.org/licenses/LICENSE-2.0">http://www.apache.org/licenses/LICENSE-2.0</a></p>
-            <p>Unless required by applicable law or agreed to in writing,<br />software distributed under the License is distributed on an<br />"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF<br />ANY KIND, either express or implied. See the License for the<br />specific language governing permissions and limitations under<br />the License.</p>
-            <p>For more information on the Carbon Design System, visit:<br /><a href="https://carbondesignsystem.com/">https://carbondesignsystem.com/</a></p>
-            ''')
-        license_text.setOpenExternalLinks(True)
-        license_text.setStyleSheet("font-size: 8pt;")
-
-        scroll_area = QScrollArea()
-        scroll_area.setObjectName("dialog_scroll")
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-
-        container = QWidget()
-        container.setLayout(QVBoxLayout())
-        container.layout().addWidget(license_text)
-
-        scroll_area.setWidget(container)
-
-        license_layout.addWidget(scroll_area)
-
-        tab_widget.addTab(license_tab, "License")
-
-        authors_tab = QWidget()
-        authors_layout = QVBoxLayout(authors_tab)
-        authors_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        authors_layout.setContentsMargins(5, 20, 5, 5)
-        authors_text = QLabel('''
-            <style>
-                a {
-                    color: #007bff; 
-                    text-decoration: none; /* Removes the underline */
-                }
-                a:hover {
-                    text-decoration: underline; /* Adds underline on hover */
-                }
-            </style>
-            <p>&copy; 2024 Ali Fethi Erdem<br /><a href="mailto:erdem.alifethi@gmail.com">erdem.alifethi@gmail.com</a></p>
-            <p>&copy; 2020 Doğuhan Sarıt&uuml;rk<br /><a href="mailto:dogu.sariturk@gmail.com">dogu.sariturk@gmail.com</a></p>
-            ''')
-        authors_text.setOpenExternalLinks(True)
-        authors_layout.addWidget(authors_text)
-
-        tab_widget.addTab(authors_tab, "Authors")
-
-        dialog_layout = QVBoxLayout(dialog)
-        dialog_layout.addWidget(tab_widget)
-
-        dialog.setLayout(dialog_layout)
+        dialog = AboutDialog(self)
         dialog.exec()
 
     def switch_theme(self):
@@ -726,66 +454,6 @@ class MDLHEAPP(QMainWindow):
             self.setStyleSheet(self.dark_stylesheet)
             self.switch_theme_action.setText("Dark Theme")
             self.switch_theme_action.setToolTip("Switch to Dark Theme")
-
-    def show_info(self):
-        # Implement your info display functionality
-        pass
-
-    def add_elements_to_table(self):
-        self.table_frame.setHorizontalSpacing(3)  # Default 5
-        self.table_frame.setVerticalSpacing(3)    # Default 5, border-radius: 10px
-        current_theme = self.settings.get_theme()
-        for element, data in self.engine.periodic_table.items():
-            row, col, group = data["position"]
-            color = self.element_colors.get(group, {"normal": "#333333", "hover": "#444444"})
-            button = QPushButton(element)
-            button.setCheckable(True)
-            button.setFixedSize(32, 32)
-
-            if current_theme == "dark":
-                button.setStyleSheet(
-                    f"""
-                    QPushButton {{
-                        background-color: {color["normal"]}; 
-                        color: #f4f4f4; 
-                        font-size: 11pt;
-                        text-align: center;
-                        padding: 2px;
-                    }}
-                    QPushButton:hover {{
-                        background-color: {color["hover"]};
-                    }}
-                    QPushButton:checked {{
-                        background-color: {color["hover"]};
-                    }}""")
-            elif current_theme == "light":
-                button.setStyleSheet(
-                    f"""
-                    QPushButton {{
-                        background-color: {color["normal"]}; 
-                        color: {color["normal_font"]}; 
-                        border-radius: 0px;
-                        font-size: 11pt;
-                        text-align: center;
-                        padding: 2px;
-                    }}
-                    QPushButton:hover {{
-                        background-color: {color["hover"]};
-                        color: {color["hover_font"]};
-                    }}
-                    QPushButton:checked {{
-                        background-color: #ffffff;
-                        border: 3px solid {color["hover"]};
-                        color: {color["hover"]};
-                    }}""")
-            button.installEventFilter(self)
-            button.clicked.connect(lambda _, el=element, btn=button: self.toggle_element(el, btn))
-            self.table_frame.addWidget(button, row, col)
-            self.pTable_buttons[element] = button
-
-        # spacer item between the second and third columns
-        spacer = QSpacerItem(40, 200, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.table_frame.addItem(spacer, 0, 2, 9, 1)
     
     def eventFilter(self, obj, event):
         if isinstance(obj, QPushButton):
@@ -834,10 +502,10 @@ class MDLHEAPP(QMainWindow):
         label = QLabel(element)
         label.setStyleSheet("padding-left: 5px; font-weight: bold;")
 
-        atomic_percent_edit = self.validated_line_edit("0")
-        atomic_ratio_edit = self.validated_line_edit("0")
-        weight_percent_edit = self.validated_line_edit("0")
-        weight_edit = self.validated_line_edit("0")
+        atomic_percent_edit = default_line_edit("0")
+        atomic_ratio_edit = default_line_edit("0")
+        weight_percent_edit = default_line_edit("0")
+        weight_edit = default_line_edit("0")
         to_label = QLabel("to")
         to_label.setFixedWidth(30)
         to_label.setStyleSheet("color: rgba(255, 255, 255, 0);")
@@ -870,7 +538,7 @@ class MDLHEAPP(QMainWindow):
         layout.addWidget(weight_edit, Qt.AlignmentFlag.AlignLeft)
         layout.addItem((QSpacerItem(3, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
 
-        atomic_percent_end_edit = self.validated_line_edit("35")
+        atomic_percent_end_edit = default_line_edit("35")
         atomic_percent_end_edit.setFixedSize(90, 24)
 
         layout.addWidget(to_label)
@@ -1305,11 +973,11 @@ class MDLHEAPP(QMainWindow):
             checkbox = QCheckBox(property_label)
             checkbox.stateChanged.connect(lambda _, prop=property: self.toggle_restriction(prop))
             layout_left.addWidget(checkbox)
-            min_edit = self.validated_line_edit("", 73, 24)
+            min_edit = default_line_edit("", 73, 24)
             min_edit.setProperty("class", "gray10_line_edit")
             min_edit.setPlaceholderText("Min")
             min_edit.setEnabled(False)
-            max_edit = self.validated_line_edit("", 73, 24)
+            max_edit = default_line_edit("", 73, 24)
             max_edit.setProperty("class", "gray10_line_edit")
             max_edit.setPlaceholderText("Max")
             max_edit.setEnabled(False)
@@ -1692,18 +1360,8 @@ class MDLHEAPP(QMainWindow):
     def clear_alloy_info(self):
         self.alloy_table.setRowCount(0)
 
-    def load_settings(self):
-        if os.path.exists("user_settings.json"):
-            with open("user_settings.json", "r") as file:
-                return json.load(file)
-        return {}
-
-    def save_settings(self, settings):
-        with open("user_settings.json", "w") as file:
-            json.dump(settings, file)
-            
     def save_to_excel(self):
-        settings = self.load_settings()
+        settings = self.settings.load_settings()
         directory = QFileDialog.getExistingDirectory(self, "Select Directory")
         if not directory:
             return
@@ -1718,21 +1376,6 @@ class MDLHEAPP(QMainWindow):
                                          "Ω", "Crystal Str.", "Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6"])
         df.to_excel(file_path, index=False)
         QMessageBox.information(self, "Save to Excel", f"Alloy information saved to {file_path}")
-
-    def validated_line_edit(self, initial_value: str = "", width: int = 73, height: int = 24) -> QLineEdit:
-        line_edit = QLineEdit(initial_value)
-        
-        validator = QDoubleValidator()
-        validator.setNotation(QDoubleValidator.Notation.StandardNotation)
-        
-        # Handling decimal points
-        english_locale = QLocale(QLocale.Language.English, QLocale.Country.UnitedStates)
-        validator.setLocale(english_locale)
-        
-        line_edit.setValidator(validator)
-        line_edit.setFixedSize(int(width), int(height))
-
-        return line_edit
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
