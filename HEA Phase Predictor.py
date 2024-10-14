@@ -1,45 +1,45 @@
 # HEA Phase Predictor
-# Copyright (c) 2024 Ali Fethi Erdem
-# Metals Development Laboratory
+# Copyright (C) 2024 Ali Fethi Erdem
+# Metals Development Laboratory,
 # Middle East Technical University (METU), Ankara, Türkiye
 #
-# This file is part of HEA Phase Predictor.
+# HEA Phase Predictor is a derivative work based on the HEA
+# Calculator, originally authored and copyrighted by Doğuhan
+# Sarıtürk, and licensed under the GNU General Public
+# License, Version 3 (GPLv3). The original HEA Calculator
+# remains the intellectual property of Doğuhan Sarıtürk and
+# is subject to the terms of the GPLv3.
 #
-# HEA Phase Predictor is free software: you can redistribute it and/or
-# modify it under the terms of the GNU General Public License as published
-# by the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# This program, HEA Phase Predictor, is free software: you can
+# redistribute it and/or modify it under the terms of the GNU
+# General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your
+# option) any later version.
 #
-# HEA Phase Predictor is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-# General Public License for more details.
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. For more details, refer to the GNU
+# General Public License.
 #
-# You should have received a copy of the GNU General Public License along
-# with HEA Phase Predictor. If not, see <https://www.gnu.org/licenses/>.
+# You should have received a copy of the GNU General Public
+# License along with this program. If not, you can find it at:
+# https://www.gnu.org/licenses/
 #
-# HEA Phase Predictor is a derivative of the "HEA Calculator" by Doğuhan
-# Sarıtürk, which is also licensed under the GNU General Public License v3.
+# The full license text can also be found in the root directory
+# of HEA Phase Predictor (HEAPP).
 #
+# Contact Information:
 #
-# This software includes components from Carbon Design System (v10)
-# licensed under the Apache License, Version 2.0 (the "License"); you may
-# not use this file except in compliance with the License. You may obtain
-# a copy of the License at
+# If you have any questions or concerns about the program or
+# its usage, please visit the Authors tab within the About
+# HEAPP window for further information.
 #
-#       http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-# License for the specific language governing permissions and limitations
-# under the License.
-#
-# For more information on the Carbon Design System, visit:
-#       https://carbondesignsystem.com/
+# By using or modifying this software, you agree to the terms
+# and conditions outlined in the GNU General Public License.
 
 __author__ = "Ali Fethi Erdem"
-__version__ = "1.0.0"
+__version__ = "0.9"
 __email__ = "erdem.alifethi@gmail.com"
 __license__ = "GNU General Public License Version 3"
 __credits__ = "Original version developed by Doguhan Sariturk under the name of HEA Calculator"
@@ -50,27 +50,26 @@ import re
 import sys
 import pandas as pd
 from datetime import datetime
-from PySide6.QtCore import (Qt, QTimer, QLocale, QThread, Signal)
-from PySide6.QtGui import (QPixmap, QDoubleValidator, QIcon, QFont, QAction)
+from PySide6.QtCore import (Qt, QTimer)
+from PySide6.QtGui import (QIcon, QFont, QAction)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QFileDialog,
     QGridLayout, QHBoxLayout, QLabel,
-    QLineEdit, QMainWindow, QMessageBox,
-    QPushButton, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget, QSpacerItem,
-    QSizePolicy, QRadioButton, QScrollArea,
-    QStatusBar, QProgressBar, QDialog,
-    QComboBox, QButtonGroup, QTabWidget)
+    QMainWindow, QMessageBox, QPushButton,
+    QTableWidget, QTableWidgetItem, QVBoxLayout,
+    QWidget, QSpacerItem, QSizePolicy,
+    QRadioButton, QScrollArea, QProgressBar,
+    QDialog, QComboBox, QButtonGroup)
 
 from engine import Engine
-from ui.settings import Settings
-from workers.alloy_calculation import AlloyCalculationWorker
-from workers.composition_generation import CompositionGenerationWorker
-from workers.excel_writer import ExcelWriterWorker
-from utils.io_helpers import read_json
-from utils.ui_helpers import default_line_edit
-from ui.periodic_table import PeriodicTable
-from ui.about_dialog import AboutDialog
+from Utils.settings import Settings
+from Workers.alloy_calculation import AlloyCalculationWorker
+from Workers.composition_generation import CompositionGenerationWorker
+from Workers.excel_writer import ExcelWriterWorker
+from Utils.io_helpers import read_json
+from Utils.ui_helpers import default_line_edit
+from Components.periodic_table import PeriodicTable
+from Components.about_dialog import AboutDialog
 
 class MDLHEAPP(QMainWindow):
     def __init__(self):
@@ -101,27 +100,11 @@ class MDLHEAPP(QMainWindow):
         self.calculation_worker = None
         self.dialog = None
 
-        # Engine
         self.engine = Engine()
-
-        self.logo_label = QLabel()
-        self.logo_label.setPixmap(QPixmap("ui/logo_dark.svg"))
 
         self.setWindowIcon(QIcon("ui/icons/MDLHEAPP_logo.ico"))
 
-        self.pTable_buttons = {}
         self.selected_elements = {}
-
-        self.button_group = QButtonGroup(self)
-        self.single_radio = QRadioButton("Single Composition")
-        self.single_radio.setObjectName("single_radio")
-        self.single_radio.setChecked(True)
-
-        self.range_radio = QRadioButton("Composition Range")
-        self.range_radio.setObjectName("single_radio")
-
-        self.button_group.addButton(self.single_radio)
-        self.button_group.addButton(self.range_radio)
 
         self.at_ratio_radio = QRadioButton("At. ratio")
         self.at_ratio_radio.setStyleSheet("font-weight: normal; padding-left: 19px;")
@@ -157,12 +140,6 @@ class MDLHEAPP(QMainWindow):
         self.to_at_edit.textChanged.connect(self.update_all_atomic_end)
         self.to_at_edit.setFixedWidth(90)
 
-        self.filter_button = QPushButton("Filter")
-        self.filter_button.setProperty("class", "ghost_button")
-        self.filter_button.setFixedSize(65, 32)
-        self.filter_button.setLayoutDirection(Qt.RightToLeft)
-        self.filter_button.clicked.connect(self.show_restrictions_window)
-
         self.restriction_values = {}
 
         self.initUI()
@@ -179,73 +156,84 @@ class MDLHEAPP(QMainWindow):
         parent_widget.setLayout(parent_layout)
 
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        main_layout.setSpacing(30)
 
-        main_scroll_area = QScrollArea()
-        main_scroll_area.setWidgetResizable(True)
-        main_scroll_area.setObjectName("main_scroll")
-        main_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        main_scroll_area.setViewportMargins(0, 0, 15, 0)
-        main_widget = QWidget()
-        main_widget.setLayout(main_layout)
-        main_scroll_area.setWidget(main_widget)
-        parent_layout.addWidget(main_scroll_area)
+        top_container = QHBoxLayout()
+        top_container.setSpacing(0)
+        top_container.setContentsMargins(0, 0, 0, 0)
 
-        self.old_pos = None
-        self.element_colors = read_json("ui/styles/element_colors.json")
-        
-        if current_theme == "dark":
-            with open("ui/styles/styleSheet_dark.qss", "r") as f:
-                self.dark_stylesheet = f.read()
-            self.setStyleSheet(self.dark_stylesheet)
-            self.switch_theme_action.setText("Light Theme")
-            self.switch_theme_action.setToolTip("Switch to Light Theme")
-        elif current_theme == "light":
-            with open("ui/styles/styleSheet_light.qss", "r") as f:
-                self.light_stylesheet = f.read()
-            self.setStyleSheet(self.light_stylesheet)
-            self.switch_theme_action.setText("Dark Theme")
-            self.switch_theme_action.setToolTip("Switch to Dark Theme")
+        # PARENT_TOP_LAYOUT [STARTS]
+        parent_top_widget = QWidget()
+        parent_top_widget.setFixedHeight(427)
+        parent_top_widget.setObjectName("parent_top")
+        parent_top_layout = QVBoxLayout(parent_top_widget)
+        parent_top_layout.setContentsMargins(0, 0, 0, 0)
+        parent_top_layout.setSpacing(0)
+        parent_top_widget.setMinimumWidth(1200)
+        parent_top_widget.setMaximumWidth(1366)
 
+        # PARENT_TOP_LAYOUT >> TOP_LAYOUT [STARTS]
         top_layout = QHBoxLayout()
+        top_layout.setContentsMargins(20, 10, 100, 5)
+        logo_label = QLabel("<span style='font-weight: normal;'>MDL</span> <b>HEA Phase Predictor</b>")
+        logo_label.setStyleSheet("font-size: 12pt;")
+        top_layout.addWidget(logo_label)
 
-        # Periodic table
+        self.content_switcher_group = QButtonGroup(self)
+        self.single_comp_radio = QRadioButton("Single Composition")
+        self.single_comp_radio.setFixedSize(175.5, 32)
+        self.single_comp_radio.setObjectName("single_comp_radio")
+        self.single_comp_radio.setChecked(True)
+        self.comp_range_radio = QRadioButton("Composition Range")
+        self.comp_range_radio.setFixedSize(175.5, 32)
+        self.comp_range_radio.setObjectName("comp_range_radio")
+        self.content_switcher_group.addButton(self.single_comp_radio)
+        self.content_switcher_group.addButton(self.comp_range_radio)
+
+        radio_layout = QHBoxLayout()
+        radio_layout.setSpacing(0)
+        radio_layout.setContentsMargins(0, 0, 0, 0)
+        radio_layout.addWidget(self.single_comp_radio, Qt.AlignmentFlag.AlignCenter)
+        radio_layout.addWidget(self.comp_range_radio, Qt.AlignmentFlag.AlignCenter)
+
+        top_layout.addStretch(1)
+        top_layout.addLayout(radio_layout)
+        parent_top_layout.addLayout(top_layout)
+        # PARENT_TOP_LAYOUT >> TOP_LAYOUT [ENDS]
+
+        # PARENT_TOP_LAYOUT >> MIDDLE_LAYOUT [STARTS]
+        middle_widget = QWidget()
+        middle_widget.setObjectName("parent_top_middle")
+        middle_layout = QHBoxLayout(middle_widget)
+        middle_layout.setContentsMargins(15, 0, 0, 0)
+        middle_widget.setFixedHeight(340)
+
         periodic_table_frame = QHBoxLayout()
         periodic_table_layout = QGridLayout()
+
+        self.element_colors = read_json("ui/styles/element_colors.json")
+        self.status_label = QLabel(self)
 
         self.periodic_table = PeriodicTable(
             layout= periodic_table_layout,
             engine= self.engine,
             element_colors= self.element_colors,
-            callback= self.toggle_element
+            callback= self.toggle_element,
+            status_label= self.status_label,
+            settings= self.settings
         )
 
         periodic_table_widget = QWidget()
         periodic_table_widget.setLayout(periodic_table_layout)
-        periodic_table_widget.setFixedSize(660, 350)
+        periodic_table_widget.setFixedSize(600, 320)
         periodic_table_frame.addWidget(periodic_table_widget)
-        top_layout.addStretch(1)
-        top_layout.addLayout(periodic_table_frame)
+        middle_layout.addLayout(periodic_table_frame)
 
-        # Selected elements and their percentages
         selected_frame_widget = QWidget()
         selected_frame_layout = QVBoxLayout(selected_frame_widget)
         selected_frame_layout.setSpacing(0)
 
-        # Radio Buttons
-        radio_layout = QHBoxLayout()
-        radio_layout.setSpacing(0)
-        radio_layout.setContentsMargins(0, 0, 0, 0)
-
-        radio_layout.addItem((QSpacerItem(70, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
-        radio_layout.addWidget(self.single_radio, Qt.AlignmentFlag.AlignCenter)
-        radio_layout.addWidget(self.range_radio, Qt.AlignmentFlag.AlignCenter)
-
-        selected_frame_layout.addLayout(radio_layout)
-
-        selected_frame_layout.addItem((QSpacerItem(0, 10, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
-
-        # Add radio buttons and labels to the first row
         first_row = QWidget()
         first_row_layout = QHBoxLayout(first_row)
         first_row_layout.setSpacing(0)
@@ -266,12 +254,11 @@ class MDLHEAPP(QMainWindow):
         self.at_percent_radio.toggled.connect(self.toggle_input_mode)
         self.wt_percent_radio.toggled.connect(self.toggle_input_mode)
         self.weight_radio.toggled.connect(self.toggle_input_mode)
-        self.single_radio.toggled.connect(self.toggle_input_mode)
-        self.range_radio.toggled.connect(self.toggle_input_mode)
+        self.single_comp_radio.toggled.connect(self.toggle_input_mode)
+        self.comp_range_radio.toggled.connect(self.toggle_input_mode)
 
         selected_frame_layout.addWidget(first_row)
 
-        # Selected Elements Container
         self.selected_elements_container = QVBoxLayout()
         self.selected_elements_container.setSpacing(1)
 
@@ -286,7 +273,6 @@ class MDLHEAPP(QMainWindow):
         selected_frame_layout.addWidget(scroll_area)
         scroll_content.setFixedWidth(scroll_area.width() - scroll_area.verticalScrollBar().sizeHint().width())
         scroll_area.resizeEvent = lambda event: scroll_content.setFixedWidth(scroll_area.width() - scroll_area.verticalScrollBar().sizeHint().width())
-        # Add total percentage labels to the last row
         self.total_row = QWidget()
         total_row_layout = QHBoxLayout(self.total_row)
         total_row_layout.setContentsMargins(10, 10, 10, 0)
@@ -303,18 +289,6 @@ class MDLHEAPP(QMainWindow):
 
         selected_frame_layout.addWidget(self.total_row)
 
-        clear_selected_button = QPushButton("Clear")
-        clear_selected_button.setProperty("class", "tertiary_button")
-        clear_selected_button.setFixedSize(139, 32)
-        clear_selected_button.setLayoutDirection(Qt.RightToLeft)
-        clear_selected_button.clicked.connect(self.clear_selected_elements)
-
-        self.calculate_button = QPushButton("Calculate")
-        self.calculate_button.setProperty("class", "primary_button")
-        self.calculate_button.setFixedSize(139,32)
-        self.calculate_button.setLayoutDirection(Qt.RightToLeft)
-        self.calculate_button.clicked.connect(self.on_calculate_button_click)
-
         self.step_size_container = QWidget()
         step_size_layout = QHBoxLayout(self.step_size_container)
         step_size_layout.setSpacing(15)
@@ -325,71 +299,144 @@ class MDLHEAPP(QMainWindow):
         step_size_layout.addWidget(self.step_size_edit)
         step_size_layout.addWidget(self.to_at_edit)
         step_size_layout.addStretch(1)
+        
+        selected_frame_layout.addWidget(self.step_size_container)
+        selected_frame_widget.setFixedSize(518, 326)
+        middle_layout.addStretch(1)
+        middle_layout.addWidget(selected_frame_widget)
+
+        parent_top_layout.addWidget(middle_widget)
+        # PARENT_TOP_LAYOUT >> MIDDLE_LAYOUT [ENDS]
+
+        # PARENT_TOP_LAYOUT >> BOTTOM_LAYOUT [STARTS]
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setContentsMargins(10, 0, 0, 0)
+        bottom_layout.setSpacing(0)
+
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        bottom_layout.addWidget(self.status_label)
+
+        clear_selected_button = QPushButton("Clear")
+        clear_selected_button.setProperty("class", "ghost_button")
+        clear_selected_button.setFixedSize(76, 40)
+        clear_selected_button.clicked.connect(self.clear_selected_elements)
+
+        self.calculate_button = QPushButton("Calculate")
+        self.calculate_button.setProperty("class", "primary_button")
+        self.calculate_button.setFixedSize(141,40)
+        self.calculate_button.clicked.connect(self.on_calculate_button_click)
+
+        self.filter_button = QPushButton("Filter")
+        self.filter_button.setProperty("class", "ghost_button")
+        self.filter_button.setFixedSize(76, 40)
+        self.filter_button.clicked.connect(self.show_restrictions_window)
 
         selected_button_container = QWidget()
+        selected_button_container.setFixedWidth(509)
         selected_button_layout = QHBoxLayout(selected_button_container)
-        selected_button_layout.setSpacing(2)
-        selected_button_layout.setContentsMargins(0, 10, 0, 0)
+        selected_button_layout.setSpacing(0)
+        selected_button_layout.setContentsMargins(0, 0, 0, 0)
         selected_button_layout.addWidget(self.filter_button)
         selected_button_layout.addStretch(1)
         selected_button_layout.addWidget(clear_selected_button)
         selected_button_layout.addWidget(self.calculate_button)
+
+        bottom_layout.addStretch(1)
+        bottom_layout.addWidget(selected_button_container)
+
+        parent_top_layout.addLayout(bottom_layout)
+
+        main_scroll_area = QScrollArea()
+        main_scroll_area.setWidgetResizable(True)
+        main_scroll_area.setObjectName("main_scroll")
+        main_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        main_scroll_area.setViewportMargins(0, 0, 15, 0)
+        main_widget = QWidget()
+        main_widget.setLayout(main_layout)
+        main_scroll_area.setWidget(main_widget)
+        parent_layout.addWidget(main_scroll_area)
+
+        self.old_pos = None
         
-        selected_frame_layout.addWidget(self.step_size_container)
-        selected_frame_layout.addWidget(selected_button_container)
-        selected_frame_widget.setFixedSize(518, 400)
-        # selected_frame_widget.setFixedHeight(500)
-        top_layout.addStretch(1)
-        top_layout.addWidget(selected_frame_widget)
-        top_layout.addStretch(2)
+        if current_theme == "dark":
+            with open("ui/styles/styleSheet_dark.qss", "r") as f:
+                self.dark_stylesheet = f.read()
+            self.setStyleSheet(self.dark_stylesheet)
+            self.switch_theme_action.setText("Light Theme")
+            self.switch_theme_action.setToolTip("Switch to Light Theme")
+        elif current_theme == "light":
+            with open("ui/styles/styleSheet_light.qss", "r") as f:
+                self.light_stylesheet = f.read()
+            self.setStyleSheet(self.light_stylesheet)
+            self.switch_theme_action.setText("Dark Theme")
+            self.switch_theme_action.setToolTip("Switch to Dark Theme")
 
-        main_layout.addLayout(top_layout)
+        top_container.addWidget(parent_top_widget)
+        main_layout.addLayout(top_container)
 
-        # Alloy information table
-        bottom_layout = QVBoxLayout()
+        # PARENT_BOTTOM_LAYOUT [STARTS]
+        parent_bottom_layout = QVBoxLayout()
+        parent_bottom_layout.setContentsMargins(0, 0, 0, 0)
+        parent_bottom_layout.setSpacing(0)
 
-        alloy_table_layout = QHBoxLayout()
-        self.alloy_table = QTableWidget(0, 16)
-        self.alloy_table.setMinimumHeight(500)
-        self.alloy_table.setHorizontalHeaderLabels(["Alloy", "Density (g/cm³)", "δ", "γ", "ΔHₘᵢₓ (kJ/mol)", "VEC", "ΔSₘᵢₓ (kJ/mol)", "Tₘ (K)", 
-                                                    "Ω", "Crystal Str.", "Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6"])
-        alloy_table_layout.addItem((QSpacerItem(10, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
-        alloy_table_layout.addWidget(self.alloy_table)
-        alloy_table_layout.addItem((QSpacerItem(10, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
+        btop_widget = QWidget()
+        btop_layout = QHBoxLayout(btop_widget)
+        btop_widget.setObjectName("parent_top")
+        btop_layout.setContentsMargins(10, 0, 0, 0)
+        btop_layout.setSpacing(0)
+        btop_widget.setMinimumWidth(1200)
+        btop_widget.setMaximumWidth(1366)
+        btop_widget.setFixedHeight(32)
 
-        bottom_layout.addLayout(alloy_table_layout)
+        self.table_label = QLabel("")
+        self.table_label.setObjectName("table_label")
+        btop_layout.addWidget(self.table_label)
+        btop_layout.addStretch()
 
         bottom_buttons_layout = QHBoxLayout()
-        bottom_buttons_layout.setSpacing(2)
-        bottom_buttons_layout.addStretch(1)
+        bottom_buttons_layout.setSpacing(0)
         clear_alloy_button = QPushButton("Clear")
-        clear_alloy_button.setFixedSize(163,40)
-        clear_alloy_button.setLayoutDirection(Qt.RightToLeft)
-        clear_alloy_button.setProperty("class", "tertiary_button")
+        clear_alloy_button.setFixedSize(76,32)
+        clear_alloy_button.setProperty("class", "ghost_button")
         clear_alloy_button.clicked.connect(self.clear_alloy_info)
         bottom_buttons_layout.addWidget(clear_alloy_button)
-
         save_button = QPushButton("Save to Excel")
         save_button.setProperty("class", "secondary_button")
-        save_button.setFixedSize(163, 40)
-        save_button.setLayoutDirection(Qt.RightToLeft)
+        save_button.setFixedSize(141, 32)
         save_button.clicked.connect(self.save_to_excel)
         bottom_buttons_layout.addWidget(save_button)
-        bottom_buttons_layout.addItem((QSpacerItem(10, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
 
-        bottom_layout.addLayout(bottom_buttons_layout)
-        # Status bar
-        self.status_bar = QStatusBar(self)
-        self.setStatusBar(self.status_bar)
-        self.status_bar.setMinimumHeight(30)
-        self.status_bar.setMaximumHeight(30)
+        btop_layout.addLayout(bottom_buttons_layout)
+        parent_bottom_layout.addWidget(btop_widget)
 
-        # Label for status bar
-        self.status_label = QLabel(self)
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self.status_bar.addWidget(self.status_label)
+        self.alloy_table = QTableWidget(0, 16)
+        self.alloy_table.verticalHeader().setVisible(False)
+        self.alloy_table.setShowGrid(False)
+        self.alloy_table.setColumnWidth(0, 140)
+        self.alloy_table.setColumnWidth(1, 94)
+        self.alloy_table.setColumnWidth(2, 74)
+        self.alloy_table.setColumnWidth(3, 74)
+        self.alloy_table.setColumnWidth(4, 97)
+        self.alloy_table.setColumnWidth(5, 46)
+        self.alloy_table.setColumnWidth(6, 96)
+        self.alloy_table.setColumnWidth(7, 67)
+        self.alloy_table.setColumnWidth(8, 74)
+        self.alloy_table.setColumnWidth(9, 99)
+        self.alloy_table.setColumnWidth(10, 58)
+        self.alloy_table.setColumnWidth(11, 62)
+        self.alloy_table.setColumnWidth(12, 60)
+        self.alloy_table.setColumnWidth(13, 59)
+        self.alloy_table.setColumnWidth(14, 59)
+        self.alloy_table.setColumnWidth(15, 120)
+        self.alloy_table.setMinimumHeight(336)
+        self.alloy_table.setMinimumWidth(1200)
+        self.alloy_table.setMaximumWidth(1366)
+        self.alloy_table.setHorizontalHeaderLabels(["Alloy", "Density (g/cm³)", "δ", "γ", "ΔHₘᵢₓ (kJ/mol)", "VEC", "ΔSₘᵢₓ (kJ/mol)", "Tₘ (K)", 
+                                                    "Ω", "Crystal Str.", "Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6"])
 
-        main_layout.addLayout(bottom_layout)
+        self.alloy_table.cellClicked.connect(self.update_label)
+        parent_bottom_layout.addWidget(self.alloy_table)
+        main_layout.addLayout(parent_bottom_layout)
 
         self.setCentralWidget(parent_widget)
         self.toggle_input_mode()
@@ -403,7 +450,7 @@ class MDLHEAPP(QMainWindow):
         new_theme = "light" if current_theme == "dark" else "dark"
         self.settings.set_theme(new_theme)
         if new_theme == "dark":
-            for element, button in self.pTable_buttons.items():
+            for element, button in self.periodic_table.buttons.items():
                 group = self.engine.periodic_table[element]["position"][2]
                 color = self.element_colors.get(group, {"normal": "#333333", "hover": "#444444"})
                 button.setStyleSheet(
@@ -427,7 +474,7 @@ class MDLHEAPP(QMainWindow):
             self.switch_theme_action.setText("Light Theme")
             self.switch_theme_action.setToolTip("Switch to Light Theme")
         elif new_theme == "light":
-            for element, button in self.pTable_buttons.items():
+            for element, button in self.periodic_table.buttons.items():
                 group = self.engine.periodic_table[element]["position"][2]
                 color = self.element_colors.get(group, {"normal": "#333333", "hover": "#444444"})
                 button.setStyleSheet(
@@ -454,45 +501,13 @@ class MDLHEAPP(QMainWindow):
             self.setStyleSheet(self.dark_stylesheet)
             self.switch_theme_action.setText("Dark Theme")
             self.switch_theme_action.setToolTip("Switch to Dark Theme")
-    
-    def eventFilter(self, obj, event):
-        if isinstance(obj, QPushButton):
-            if event.type() == event.Type.Enter:
-                element = obj.text()
-                group = self.engine.periodic_table[element]["position"][2]
-                color = self.element_colors.get(group, {"normal": "#333333", "hover": "#444444"})
-                properties = self.engine.periodic_table[element]["properties"]
-                position = self.engine.periodic_table[element]["position"]
 
-                melting_point = properties.get("melting_point", "N/A")
-                density = properties.get("density", "N/A")
-                atomic_weight = properties.get("atomic_weight", "N/A")
-                atomic_radius = properties.get("atomic_radius", "N/A")
-                nvalence = properties.get("nvalence", "N/A")
-
-                properties_text = (
-                    f"<b>{properties['atomic_number']}</b> {position[2]} | "
-                    f"<b>Tₘ =</b> {melting_point} K | "
-                    f"<b>ρ =</b> {density} g/cm³ | "
-                    f"<b>At. Mass =</b> {atomic_weight} u | "
-                    f"<b>At. Radius =</b> {atomic_radius} pm | "
-                    f"<b>VEC =</b> {nvalence}"
-                )
-                self.status_label.show()
-                self.status_label.setText(properties_text)
-                self.status_label.setStyleSheet(
-                    f"""
-                    QLabel {{
-                        background-color: {color["hover"]}; 
-                        color: #f4f4f4;
-                        border-radius: 0px;
-                        font-size: 10pt;
-                        padding: 2px;
-                    }}"""
-                )
-            elif event.type() == event.Type.Leave:
-                self.status_label.hide()
-        return super().eventFilter(obj, event)
+    def update_label(self, row, column):
+        item = self.alloy_table.item(row, column)
+        if item:
+            self.table_label.setText(f"{item.text()}")
+        else:
+            self.table_label.setText("N/A")
 
     def add_selected_element_to_frame(self, element):
         container = QWidget()
@@ -786,10 +801,11 @@ class MDLHEAPP(QMainWindow):
     
     def show_warning(self, title, message):
         self.status_label.setText(f"<b>{title}: </b>{message}")
+        self.status_label.setObjectName("status_error")
         self.status_label.setStyleSheet("""
             QLabel {
-                background-color: #ba1b23; 
-                color: #ffffff; 
+                background-color: none; 
+                color: #ba1b23; 
                 border-radius: 0px;
                 font-size: 10pt;
                 padding: 2px;
@@ -799,7 +815,7 @@ class MDLHEAPP(QMainWindow):
         QTimer.singleShot(1300, lambda: self.status_label.hide())
 
     def toggle_input_mode(self):
-        if self.range_radio.isChecked():
+        if self.comp_range_radio.isChecked():
             for edits in self.selected_elements.values():
                 edits["atomic_percent"].setVisible(True)
                 edits["atomic_percent"].setEnabled(True)
@@ -820,7 +836,7 @@ class MDLHEAPP(QMainWindow):
                     edits["atomic_end"].setEnabled(True)
             self.filter_button.setVisible(True)
             self.filter_button.setEnabled(True)
-            self.at_percent_radio.setStyleSheet("font-weight: bold; padding-left: 164px;")
+            self.at_percent_radio.setStyleSheet("padding-left: 164px;")
             self.at_percent_radio.setVisible(True)
             self.at_percent_radio.setChecked(True)
             self.at_percent_radio.setEnabled(False)
@@ -833,13 +849,8 @@ class MDLHEAPP(QMainWindow):
             self.weight_radio.setChecked(False)
             self.total_row.setVisible(False)
             self.step_size_container.setVisible(True)
-        elif self.single_radio.isChecked():
-            self.at_percent_radio.setStyleSheet("font-weight: bold; padding-left: 33px;")
-            for radio in [self.at_percent_radio, self.at_ratio_radio, self.wt_percent_radio, self.weight_radio]:
-                if radio.isChecked():
-                    radio.setStyleSheet(radio.styleSheet().replace("font-weight: normal;", "font-weight: bold;"))
-                else:
-                    radio.setStyleSheet(radio.styleSheet().replace("font-weight: bold;", "font-weight: normal;"))
+        elif self.single_comp_radio.isChecked():
+            self.at_percent_radio.setStyleSheet("padding-left: 33px;")
             for edits in self.selected_elements.values():
                 edits["atomic_percent"].setVisible(True)
                 edits["atomic_percent"].setFixedSize(73, 24)
@@ -927,7 +938,7 @@ class MDLHEAPP(QMainWindow):
                 if curr_label == element:
                     self.selected_elements_container.takeAt(i).widget().deleteLater()
                     break
-            if self.single_radio.isChecked():
+            if self.single_comp_radio.isChecked():
                 total_elements = len(self.selected_elements)
                 if total_elements > 0:
                     equ_atomic_percent = 100 / total_elements
@@ -935,13 +946,13 @@ class MDLHEAPP(QMainWindow):
                         edits["atomic_percent"].blockSignals(True)
                         edits["atomic_percent"].setText(f"{equ_atomic_percent:.2f}")
                         edits["atomic_percent"].blockSignals(False)
-            elif self.range_radio.isChecked():
+            elif self.comp_range_radio.isChecked():
                 for edits in self.selected_elements.values():
                     edits["atomic_percent"].setText("5")
                 self.update_all_percentages()
 
     def clear_selected_elements(self):
-        for button in self.pTable_buttons.values():
+        for button in self.periodic_table.buttons.values():
             button.setChecked(False)
         for i in reversed(range(self.selected_elements_container.count())):
             self.selected_elements_container.itemAt(i).widget().setParent(None)
@@ -951,7 +962,7 @@ class MDLHEAPP(QMainWindow):
 
     def on_calculate_button_click(self):
         self.stop_requested = False
-        if self.single_radio.isChecked():
+        if self.single_comp_radio.isChecked():
             self.update_alloy_info()
         else:
             self.generate_alloy_compositions()
@@ -1084,7 +1095,7 @@ class MDLHEAPP(QMainWindow):
             for element, edits in self.selected_elements.items():
                 try:
                     atomic_percent = float(edits["atomic_percent"].text())
-                    if self.range_radio.isChecked() and "atomic_end" in edits:
+                    if self.comp_range_radio.isChecked() and "atomic_end" in edits:
                         atomic_percent_end = float(edits["atomic_end"].text())
                         selected_elements[element] = (atomic_percent, atomic_percent_end)
                     else:

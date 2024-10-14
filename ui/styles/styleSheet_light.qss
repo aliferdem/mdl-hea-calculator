@@ -1,12 +1,20 @@
-QMenuBar {
+QWidget#parent_top {
     background-color: #ffffff;
+}
+QWidget#parent_top_middle {
+    border-top: 1px solid #E0E0E0;
+    border-bottom: 1px solid #E0E0E0;
+}
+
+QMenuBar {
+    background-color: #f4f4f4;
     color: #161616;
     font-size: 9pt;
-    border-bottom: 1px solid #f4f4f4;
+    border-bottom: 1px solid #e0e0e0;
 }
 
 QMenuBar::item {
-    background-color: #ffffff;
+    background-color: #f4f4f4;
     color: #525252;
     padding: 5px 10px;
 }
@@ -34,7 +42,7 @@ QMenu::item:selected {
 }
 
 QMainWindow {
-    background-color: #ffffff;
+    background-color: #f4f4f4f4;
     color: #ffffff;
 }
 
@@ -97,7 +105,7 @@ QScrollBar::sub-line:horizontal, QScrollBar::add-line:horizontal {
 
 QScrollArea#main_scroll {
     border: none;
-    background-color: #ffffff;
+    background-color: #f4f4f4;
     border-radius: 0px;
     padding: 0px;
 }
@@ -106,12 +114,13 @@ QScrollArea#selected_elements_scroll {
     background-color: #ffffff;
     border-radius: 0px;
     padding: 0px;
-    border-bottom: 2px solid #0F62FE;
+    border-bottom: 1px solid #161616;
+    border-top: 1px solid #E0E0E0;
 }
 
 QScrollArea#dialog_scroll {
     border: none;
-    background-color: #f4f4f4;
+    background-color: #ffffff;
     border-radius: 0px;
     padding: 0px;
 }
@@ -121,10 +130,9 @@ QScrollArea QWidget {
 }
 
 QTableWidget {
-    border-bottom: 3px solid #6f6f6f;
-    background-color: #f4f4f4;
+    background-color: #ffffff;
     border-radius: 0px;
-    font-size: 10pt;
+    font-size: 9pt;
     color: #161616;
 }
 QHeaderView {
@@ -134,18 +142,20 @@ QHeaderView::section {
     background-color: #e0e0e0;
     padding: 4px;
     border: 0px;
-    font-size: 10pt;
+    font-size: 9pt;
     color: #161616;
+    font-weight: bold;
+    text-align: left;
     border-radius: 0px;
 }
 QTableView QTableCornerButton::section {
-    background: #f4f4f4;
+    background: #e0e0e0;
 }
 QTableWidget::item {
     padding: 8px;
+    color: #161616;
     border: none;
-    color: #525252;
-    border-bottom: 1px solid #eeeeee;
+    border-bottom: 1px solid #e0e0e0;
 }
 QTableWidget::item:selected {
     background-color: #0062ff;
@@ -154,6 +164,12 @@ QTableWidget::item:selected {
 
 QDialog {
     background-color: #f4f4f4;
+    border: 0px;
+    padding: 0px;
+}
+
+QDialog#aboutDialog {
+    background-color: #ffffff;
     border: 0px;
     padding: 0px;
 }
@@ -252,9 +268,16 @@ QLabel {
     font-size: 10.5pt;
     color: #161616;
 }
+QLabel a {
+    color: #0f62fe;
+}
+
+QLabel#table_label {
+    font-size: 13pt;
+    color: #8d8d8d;
+}
 
 QLabel#element_label {
-    border-bottom: 2px solid #E0E0E0;
     font-weight: bold;
     font-size: 10.5pt;
     color: #525252;
@@ -265,39 +288,18 @@ QPushButton {
     border-radius: 0px;
     font-size: 11pt;
     text-align: left;
-    padding: 4px 14px 4px 4px;
+    padding: 4px 4px 4px 14px;
     border: 2px solid transparent;
 }
 
 QRadioButton {
-    background-color: #ffffff;
-    border-radius: 0px;
-    border-bottom: 2px solid #E0E0E0;
-    color: #525252;
-    font-size: 10.5pt;
-}
-QRadioButton::indicator {
-    image: none;
-    width: 0px;
-    height: 0px;
-}
-QRadioButton::checked {
-    border-bottom: 2px solid #0F62FE;
-    color: #161616;
-}
-QRadioButton:hover {
-    border-bottom: 2px solid #8D8D8D;
-    color: #525252;
-}
-
-QRadioButton#single_radio {
     padding: 0px;
     color: #161616;
     font-size: 9pt;
     border: none;
     background-color: none;
 }
-QRadioButton#single_radio::indicator {
+QRadioButton::indicator {
     width: 20px;
     height: 20px;
     image: url(ui/icons/radio-button.svg);
@@ -305,13 +307,54 @@ QRadioButton#single_radio::indicator {
     subcontrol-position: left;
     border: none;
 }
-QRadioButton#single_radio:indicator:checked {
+QRadioButton:indicator:checked {
     image: url(ui/icons/radio-button--checked.svg);
 }
 
+QRadioButton#single_comp_radio {
+    background-color: none;
+    border-top-left-radius: 4px;
+    border-bottom-left-radius: 4px;
+    border: 1px solid #161616;
+    padding: 0px;
+    color: #525252;
+    font-size: 13px;
+}
+QRadioButton#single_comp_radio::indicator {
+    image: none;
+}
+QRadioButton#single_comp_radio:checked {
+    background-color: #161616;
+    color: #ffffff;
+}
+QRadioButton#single_comp_radio:hover {
+    background-color: #161616;
+    color: #ffffff;
+}
+
+QRadioButton#comp_range_radio {
+    background-color: none;
+    border-top-right-radius: 4px;
+    border-bottom-right-radius: 4px;
+    border: 1px solid #161616;
+    padding: 0px;
+    color: #525252;
+    font-size: 13px;
+}
+QRadioButton#comp_range_radio::indicator {
+    image: none;
+}
+QRadioButton#comp_range_radio:checked {
+    background-color: #161616;
+    color: #ffffff;
+}
+QRadioButton#comp_range_radio:hover {
+    background-color: #161616;
+    color: #ffffff;
+}
 
 QTabWidget {
-    background-color: #f4f4f4;
+    background-color: none;
     border-radius: 0px;
     border: none;
     color: #161616;
@@ -326,7 +369,7 @@ QTabBar::tab {
     font-size: 10.5pt;
 }
 QTabBar::tab:!selected {
-    background-color: #f4f4f4;
+    background-color: none;
     border-radius: 0px;
     border-bottom: 2px solid #E0E0E0;
     color: #525252;

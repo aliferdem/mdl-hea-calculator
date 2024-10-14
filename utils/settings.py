@@ -3,7 +3,7 @@
 # This source code is licensed under the terms described in the LICENSE file in
 # the root directory of this source tree.
 #
-# ui/settings.py
+# Utils/settings.py
 
 import json
 import os

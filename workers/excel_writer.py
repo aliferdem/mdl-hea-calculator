@@ -3,11 +3,11 @@
 # This source code is licensed under the terms described in the LICENSE file in
 # the root directory of this source tree.
 #
-# workers/excel_writer.py
+# Workers/excel_writer.py
 
 import xlsxwriter
 from PySide6.QtCore import QThread, Signal
-from utils.io_helpers import read_results_in_chunks
+from Utils.io_helpers import read_results_in_chunks
 
 class ExcelWriterWorker(QThread):
     progress = Signal(int, int)

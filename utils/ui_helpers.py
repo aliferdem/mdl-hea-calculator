@@ -3,7 +3,7 @@
 # This source code is licensed under the terms described in the LICENSE file in
 # the root directory of this source tree.
 #
-# utils/ui_helpers.py
+# Utils/ui_helpers.py
 
 from PySide6.QtWidgets import QLineEdit
 from PySide6.QtGui import QDoubleValidator

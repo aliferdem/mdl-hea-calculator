@@ -194,14 +194,14 @@ class MDLHEAPP(QMainWindow):
         self.pTable_buttons = {}
         self.selected_elements = {}
 
-        self.single_radio = QRadioButton("Single Composition")
-        self.single_radio.setObjectName("single_radio")
-        self.single_radio.setChecked(True)
-        self.single_radio.setFixedHeight(35)
+        self.single_comp_radio = QRadioButton("Single Composition")
+        self.single_comp_radio.setObjectName("single_comp_radio")
+        self.single_comp_radio.setChecked(True)
+        self.single_comp_radio.setFixedHeight(35)
 
-        self.range_radio = QRadioButton("Composition Range")
-        self.range_radio.setObjectName("range_radio")
-        self.range_radio.setFixedHeight(35)
+        self.comp_range_radio = QRadioButton("Composition Range")
+        self.comp_range_radio.setObjectName("comp_range_radio")
+        self.comp_range_radio.setFixedHeight(35)
 
         self.at_percent_radio = QRadioButton("At. %")
         self.at_percent_radio.setChecked(True)
@@ -370,8 +370,8 @@ class MDLHEAPP(QMainWindow):
         radio_spacer = QWidget()
         radio_spacer.setFixedWidth(60)
         radio_layout.addItem((QSpacerItem(60, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
-        radio_layout.addWidget(self.single_radio, Qt.AlignmentFlag.AlignCenter)
-        radio_layout.addWidget(self.range_radio, Qt.AlignmentFlag.AlignCenter)
+        radio_layout.addWidget(self.single_comp_radio, Qt.AlignmentFlag.AlignCenter)
+        radio_layout.addWidget(self.comp_range_radio, Qt.AlignmentFlag.AlignCenter)
         radio_layout.addItem((QSpacerItem(60, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)))
 
         selected_frame_layout.addLayout(radio_layout)
@@ -398,8 +398,8 @@ class MDLHEAPP(QMainWindow):
         self.at_percent_radio.toggled.connect(self.toggle_input_mode)
         self.wt_percent_radio.toggled.connect(self.toggle_input_mode)
         self.weight_radio.toggled.connect(self.toggle_input_mode)
-        self.single_radio.toggled.connect(self.toggle_input_mode)
-        self.range_radio.toggled.connect(self.toggle_input_mode)
+        self.single_comp_radio.toggled.connect(self.toggle_input_mode)
+        self.comp_range_radio.toggled.connect(self.toggle_input_mode)
 
         selected_frame_layout.addWidget(first_row)
 
@@ -1021,7 +1021,7 @@ class MDLHEAPP(QMainWindow):
         QTimer.singleShot(1300, lambda: self.status_label.hide())
 
     def toggle_input_mode(self):
-        if self.range_radio.isChecked():
+        if self.comp_range_radio.isChecked():
             for edits in self.selected_elements.values():
                 edits["atomic_percent"].setVisible(True)
                 edits["atomic_percent"].setEnabled(True)
@@ -1054,7 +1054,7 @@ class MDLHEAPP(QMainWindow):
             self.weight_radio.setChecked(False)
             self.total_row.setVisible(False)
             self.restrict_button_container.setVisible(True)
-        elif self.single_radio.isChecked():
+        elif self.single_comp_radio.isChecked():
             for edits in self.selected_elements.values():
                 edits["atomic_percent"].setVisible(True)
                 edits["atomic_ratio"].setVisible(True)
@@ -1131,7 +1131,7 @@ class MDLHEAPP(QMainWindow):
                 if curr_label == element:
                     self.selected_elements_container.takeAt(i).widget().deleteLater()
                     break
-            if self.single_radio.isChecked():
+            if self.single_comp_radio.isChecked():
                 total_elements = len(self.selected_elements)
                 if total_elements > 0:
                     equ_atomic_percent = 100 / total_elements
@@ -1139,7 +1139,7 @@ class MDLHEAPP(QMainWindow):
                         edits["atomic_percent"].blockSignals(True)
                         edits["atomic_percent"].setText(f"{equ_atomic_percent:.2f}")
                         edits["atomic_percent"].blockSignals(False)
-            elif self.range_radio.isChecked():
+            elif self.comp_range_radio.isChecked():
                 for edits in self.selected_elements.values():
                     edits["atomic_percent"].setText("5")
                 self.update_all_percentages()
@@ -1155,7 +1155,7 @@ class MDLHEAPP(QMainWindow):
 
     def on_calculate_button_click(self):
         self.stop_requested = False
-        if self.single_radio.isChecked():
+        if self.single_comp_radio.isChecked():
             self.update_alloy_info()
         else:
             self.generate_alloy_compositions()
@@ -1261,7 +1261,7 @@ class MDLHEAPP(QMainWindow):
             for element, edits in self.selected_elements.items():
                 try:
                     atomic_percent = float(edits["atomic_percent"].text())
-                    if self.range_radio.isChecked() and "atomic_end" in edits:
+                    if self.comp_range_radio.isChecked() and "atomic_end" in edits:
                         atomic_percent_end = float(edits["atomic_end"].text())
                         selected_elements[element] = (atomic_percent, atomic_percent_end)
                     else:

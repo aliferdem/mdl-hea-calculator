@@ -3,7 +3,7 @@
 # This source code is licensed under the terms described in the LICENSE file in
 # the root directory of this source tree.
 #
-# ui/about_dialog.py
+# Components/about_dialog.py
 
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QTabWidget, QWidget, QScrollArea
 from PySide6.QtGui import QPixmap
@@ -14,6 +14,7 @@ class AboutDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("About HEAPP")
         self.setFixedSize(384, 292)
+        self.setObjectName("aboutDialog")
         self.initUI()
 
     def initUI(self):
@@ -25,24 +26,21 @@ class AboutDialog(QDialog):
         about_layout.setContentsMargins(5, 20, 5, 5)
         about_text = QLabel('''
             <style>
-                a {
-                    color: #007bff; 
-                    text-decoration: none; /* Removes the underline */
-                }
-                a:hover {
-                    text-decoration: underline; /* Adds underline on hover */
-                }
+                h2, h3, p { text-align: center; }
+                .normal { font-weight: normal; }
             </style>
-            <h1 style="text-align: center;">HEA Phase Predictor</h1>
-            <h4 style="text-align: center;">Version 1.0.0</h4>
-            <p style="text-align: center;">MDL | High-Entropy Alloy Phase Predictor</p>
-            <p style="text-align: center;">This software is developed within <a href="https://metumdl.framer.website/" target="_blank">Metals Development<br />
-                Laboratory (MDL)</a> at <a href="https://www.metu.edu.tr/" target="_blank">Middle East Technical University <br />
-                (METU)</a>. HEAPP is a derivative of HEA Calculator.</p>
+
+            <h2><span class="normal">MDL</span> <strong>HEA Phase Predictor</strong></h2>
+            <h3><span class="normal">Version 1.1.0</span></h3>
+            <p>MDL | High-Entropy Alloy Phase Predictor</p>
+            <p>This software is developed within Metals Development<br />Laboratory (MDL) at 
+                Middle East Technical University (METU).</p>
+            <p>HEAPP is a derivative of HEA Calculator.</p>
             ''')
         about_text.setStyleSheet("font-size: 9pt;")
         about_text.setOpenExternalLinks(True)
         about_layout.addWidget(about_text)
+        about_layout.addStretch()
 
         lab_logo = QLabel()
         lab_logo_pixmap = QPixmap("ui/about_logo.svg")
@@ -60,11 +58,8 @@ class AboutDialog(QDialog):
         components_text = QLabel('''
             <style>
                 a {
-                    color: #007bff; 
-                    text-decoration: none; /* Removes the underline */
-                }
-                a:hover {
-                    text-decoration: underline; /* Adds underline on hover */
+                    color: #4589ff; 
+                    text-decoration: none;
                 }
             </style>
             <table style="height: 145px; width: 239.531px;">
@@ -97,31 +92,31 @@ class AboutDialog(QDialog):
         license_tab = QWidget()
         license_layout = QVBoxLayout(license_tab)
         license_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        license_layout.setContentsMargins(5, 5, 5, 5)
+        license_layout.setContentsMargins(0, 0, 0, 0)
 
         license_text = QLabel('''
             <style>
                 a {
-                    color: #007bff; 
-                    text-decoration: none; /* Removes the underline */
-                }
-                a:hover {
-                    text-decoration: underline; /* Adds underline on hover */
+                    color: #4589ff;
                 }
             </style>
-            <p>HEA Phase Predictor<br />Copyright &copy; 2024 Ali Fethi Erdem<br />Metals Development Laboratory<br />Middle East Technical University (METU), Ankara, T&uuml;rkiye</p>
-            <p>HEA Phase Predictor is licensed under the GNU General<br />Public License Version 3.</p>
-            <p>HEA Phase Predictor is a derivative of "HEA Calculator"<br />by Doğuhan Sarıt&uuml;rk, which is also licensed under the GNU<br />General Public License v3.</p>
-            <p>HEA Phase Predictor is free software: you can redistribute it<br />and/or modify it under the terms of the GNU General Public<br />License as published by the Free Software Foundation, either<br />version 3 of the License, or (at your option) any later version.</p>
-            <p>HEA Phase Predictor is distributed in the hope that it will be<br />useful, but WITHOUT ANY WARRANTY; without even the<br />implied warranty of MERCHANTABILITY or FITNESS FOR A<br />PARTICULAR PURPOSE. See the GNU General Public License<br />for more details.</p>
-            <p>You should have received a copy of the GNU General Public<br />License along with HEA Phase Predictor. If not, see<br /><a href="https://www.gnu.org/licenses/">&lt;https://www.gnu.org/licenses/&gt;</a>.</p>
-            <p><br />This software includes components from Carbon Design<br />System (v10) licensed under the Apache License, Version<br />2.0 (the "License"); you may not use this file except in<br />compliance with the License. You may obtain a copy of the<br />License at</p>
-            <p><a href="http://www.apache.org/licenses/LICENSE-2.0">http://www.apache.org/licenses/LICENSE-2.0</a></p>
-            <p>Unless required by applicable law or agreed to in writing,<br />software distributed under the License is distributed on an<br />"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF<br />ANY KIND, either express or implied. See the License for the<br />specific language governing permissions and limitations under<br />the License.</p>
-            <p>For more information on the Carbon Design System, visit:<br /><a href="https://carbondesignsystem.com/">https://carbondesignsystem.com/</a></p>
+            <div style="text-align: center; padding-top: 10px;">
+            <p style="text-align: left;">HEA Phase Predictor<br />Copyright &copy; 2024 Ali Fethi Erdem<br />Metals Development Laboratory,<br />Middle East Technical University (METU), Ankara, T&uuml;rkiye</p>
+            <p style="text-align: left;"><em>HEA Phase Predictor is a derivative work based on the HEA</em><br /><em>Calculator, originally authored and copyrighted by Doğuhan</em><br /><em>Sarıt&uuml;rk, and licensed under the GNU General Public</em><br /><em>License, Version 3 (GPLv3). The original HEA Calculator</em><br /><em>remains the intellectual property of Doğuhan Sarıt&uuml;rk and</em><br /><em>is subject to the terms of the GPLv3.</em></p>
+            <hr />
+            <p style="text-align: left;">This program, <em>HEA Phase Predictor</em>, is free software: you can<br />redistribute it and/or modify it under the terms of the <strong>GNU<br />General Public License</strong> as published by the <strong>Free Software<br />Foundation</strong>, either version 3 of the License, or (at your<br />option) any later version.</p>
+            <p style="text-align: left;">This program is distributed in the hope that it will be useful,<br />but <strong>WITHOUT ANY WARRANTY</strong>; without even the implied<br />warranty of <strong>MERCHANTABILITY</strong> or <strong>FITNESS FOR A<br />PARTICULAR PURPOSE</strong>. For more details, refer to the <strong>GNU<br />General Public License</strong>.</p>
+            <p style="text-align: left;">You should have received a copy of the GNU General Public<br />License along with this program. If not, you can find it at:<br /><a href="https://www.gnu.org/licenses/" target="_new" rel="noopener">https://www.gnu.org/licenses/</a></p>
+            <p style="text-align: left;">The full license text can also be found in the root directory<br />of HEA Phase Predictor (HEAPP).</p>
+            <hr />
+            <h4 style="text-align: left;">Contact Information:</h4>
+            <p style="text-align: left;">If you have any questions or concerns about the program or<br />its usage, please visit the <strong>Authors</strong> tab within the <strong>About<br />HEAPP</strong> window for further information.</p>
+            <hr />
+            <p style="text-align: left;">By using or modifying this software, you agree to the terms<br />and conditions outlined in the <strong>GNU General Public License</strong>.</p>
+            </div>
             ''')
         license_text.setOpenExternalLinks(True)
-        license_text.setStyleSheet("font-size: 8pt;")
+        license_text.setStyleSheet("font-size: 9pt;")
 
         scroll_area = QScrollArea()
         scroll_area.setObjectName("dialog_scroll")
@@ -145,7 +140,7 @@ class AboutDialog(QDialog):
         authors_text = QLabel('''
             <style>
                 a {
-                    color: #007bff; 
+                    color: #4589ff; 
                     text-decoration: none; /* Removes the underline */
                 }
                 a:hover {

@@ -3,7 +3,7 @@
 # This source code is licensed under the terms described in the LICENSE file in
 # the root directory of this source tree.
 #
-# utils/io_helpers.py
+# Utils/io_helpers.py
 
 import json
 import os
