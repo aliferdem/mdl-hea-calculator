@@ -31,7 +31,7 @@ class AboutDialog(QDialog):
             </style>
 
             <h2><span class="normal">MDL</span> <strong>HEA Phase Predictor</strong></h2>
-            <h3><span class="normal">Version 1.1.0</span></h3>
+            <h3><span class="normal">Version 0.9</span></h3>
             <p>MDL | High-Entropy Alloy Phase Predictor</p>
             <p>This software is developed within Metals Development<br />Laboratory (MDL) at 
                 Middle East Technical University (METU).</p>
@@ -65,19 +65,19 @@ class AboutDialog(QDialog):
             <table style="height: 145px; width: 239.531px;">
             <tbody>
             <tr>
-            <td style="width: 172px;"><a href="https://carbondesignsystem.com/" target="_blank" rel="noopener">Carbon Design System</a>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp;&nbsp;</td>
+            <td style="width: 330px;"><a href="https://carbondesignsystem.com/" target="_blank" rel="noopener">Carbon Design System</a>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;</td>
             <td style="width: 46.5312px;">v10</td>
             </tr>
             <tr>
-            <td style="width: 172px;"><a href="https://wiki.qt.io/Qt_for_Python" target="_blank">PySide6</a></td>
+            <td style="width: 330px;"><a href="https://wiki.qt.io/Qt_for_Python" target="_blank">PySide6</a></td>
             <td style="width: 46.5312px;">6.7.3</td>
             </tr>
             <tr>
-            <td style="width: 172px;"><a href="https://nuitka.net/" target="_blank">Nuitka</a></td>
+            <td style="width: 330px;"><a href="https://nuitka.net/" target="_blank">Nuitka</a></td>
             <td style="width: 46.5312px;">2.4.8</td>
             </tr>
             <tr>
-            <td style="width: 172px;"><a href="https://jrsoftware.org/isinfo.php" target="_blank">Inno Setup</a></td>
+            <td style="width: 330px;"><a href="https://jrsoftware.org/isinfo.php" target="_blank">Inno Setup</a></td>
             <td style="width: 46.5312px;">6.3.3</td>
             </tr>
             </tbody>
@@ -85,6 +85,7 @@ class AboutDialog(QDialog):
             <p>&nbsp;</p>
             ''')
         components_text.setOpenExternalLinks(True)
+        components_text.setStyleSheet("font-size: 12pt;")
         components_layout.addWidget(components_text)
 
         tab_widget.addTab(components_tab, "Components")
@@ -151,6 +152,7 @@ class AboutDialog(QDialog):
             <p>&copy; 2020 Doğuhan Sarıt&uuml;rk<br /><a href="mailto:dogu.sariturk@gmail.com">dogu.sariturk@gmail.com</a></p>
             ''')
         authors_text.setOpenExternalLinks(True)
+        authors_text.setStyleSheet("font-size: 11pt;")
         authors_layout.addWidget(authors_text)
 
         tab_widget.addTab(authors_tab, "Authors")
