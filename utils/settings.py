@@ -10,7 +10,7 @@ import os
 
 class Settings:
     def __init__(self):
-        self.settings_file = "user_settings.json"
+        self.settings_file = "Data/user_settings.json"
         self.default_settings = {"theme": "dark"}
         self.settings = self.load_settings()
 

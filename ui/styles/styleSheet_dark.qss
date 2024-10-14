@@ -164,10 +164,17 @@ QMainWindow {
 }
 
 QDialog {
-    background-color: #161616;
+    background-color: #262626;
     border: 0px;
     padding: 20px;
 }
+
+QDialog#aboutDialog {
+    background-color: #161616;
+    border: 0px;
+    padding: 0px;
+}
+
 
 QProgressBar {
     background-color: #262626;
