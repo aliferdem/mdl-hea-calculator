@@ -31,6 +31,7 @@ class ExcelWriterWorker(QThread):
         chunk_size = 100
         total_processed = 0
         total_chunks = sum(1 for _ in read_results_in_chunks(self.file_name, chunk_size))
+        total_rows = total_chunks * chunk_size
 
         for chunk in read_results_in_chunks(self.file_name, chunk_size):
             for values, alloy_name in chunk:
@@ -55,8 +56,8 @@ class ExcelWriterWorker(QThread):
                 for col_num, data in enumerate(row_data):
                     worksheet.write(row, col_num, data)
                 row += 1
-                total_processed += 1
-                self.progress.emit(total_processed, total_chunks * chunk_size)
+                if total_processed % 100 == 0 or total_processed == total_rows:
+                    self.progress.emit(total_processed, total_rows)
 
         workbook.close()
         self.finished.emit(self.file_path)

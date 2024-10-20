@@ -27,6 +27,8 @@ class AlloyCalculationWorker(QThread):
         start_time = time.time()
         results = []
         count_meeting_criteria = 0
+        total_compositions = len(self.compositions)
+
         for i, composition in enumerate(self.compositions):
             if self.stop_requested:
                 break
@@ -39,9 +41,10 @@ class AlloyCalculationWorker(QThread):
                 results.append((values, alloy_name))
                 count_meeting_criteria += 1
 
-            elapsed_time = time.time() - start_time
-            estimated_time = elapsed_time / (i + 1) * (len(self.compositions) - (i + 1))
-            self.update_progress.emit(i + 1, len(self.compositions), estimated_time)
+            if (i + 1) % 100 == 0 or i == total_compositions - 1:
+                elapsed_time = time.time() - start_time
+                estimated_time = elapsed_time / (i + 1) * (total_compositions - (i + 1))
+                self.update_progress.emit(i + 1, total_compositions, estimated_time)
 
         json.dump(results, self.temp_file)
         self.temp_file.close()

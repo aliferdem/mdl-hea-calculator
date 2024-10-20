@@ -89,7 +89,7 @@ class MDLHEAPP(QMainWindow):
         open_action.triggered.connect(self.load_compositions_from_excel)
         file_menu.addAction(open_action)
 
-        self.switch_theme_action = QAction("Dark Theme", self)
+        self.switch_theme_action = QAction("Dark mode", self)
         self.switch_theme_action.triggered.connect(self.switch_theme)
         about_action = QAction("About", self)
         about_action.triggered.connect(self.about_dialog)
@@ -362,14 +362,14 @@ class MDLHEAPP(QMainWindow):
             with open("ui/styles/styleSheet_dark.qss", "r") as f:
                 self.dark_stylesheet = f.read()
             self.setStyleSheet(self.dark_stylesheet)
-            self.switch_theme_action.setText("Light Theme")
-            self.switch_theme_action.setToolTip("Switch to Light Theme")
+            self.switch_theme_action.setText("Light mode")
+            self.switch_theme_action.setToolTip("Switch to light mode")
         elif current_theme == "light":
             with open("ui/styles/styleSheet_light.qss", "r") as f:
                 self.light_stylesheet = f.read()
             self.setStyleSheet(self.light_stylesheet)
-            self.switch_theme_action.setText("Dark Theme")
-            self.switch_theme_action.setToolTip("Switch to Dark Theme")
+            self.switch_theme_action.setText("Dark mode")
+            self.switch_theme_action.setToolTip("Switch to dark mode")
 
         top_container.addWidget(parent_top_widget)
         main_layout.addLayout(top_container)
@@ -432,7 +432,7 @@ class MDLHEAPP(QMainWindow):
         self.alloy_table.setMinimumWidth(1200)
         self.alloy_table.setMaximumWidth(1366)
         self.alloy_table.setHorizontalHeaderLabels(["Alloy", "Density (g/cm³)", "δ", "γ", "ΔHₘᵢₓ (kJ/mol)", "VEC", "ΔSₘᵢₓ (kJ/mol)", "Tₘ (K)", 
-                                                    "Ω", "Crystal Str.", "Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6"])
+                                                    "Ω", "Crystal Str.", "R1", "R2", "R3", "R4", "R5", "R6"])
 
         self.alloy_table.cellClicked.connect(self.update_label)
         parent_bottom_layout.addWidget(self.alloy_table)
@@ -471,8 +471,8 @@ class MDLHEAPP(QMainWindow):
             with open("ui/styles/styleSheet_dark.qss", "r") as f:
                 self.dark_stylesheet = f.read()
             self.setStyleSheet(self.dark_stylesheet)
-            self.switch_theme_action.setText("Light Theme")
-            self.switch_theme_action.setToolTip("Switch to Light Theme")
+            self.switch_theme_action.setText("Light mode")
+            self.switch_theme_action.setToolTip("Switch to Light mode")
         elif new_theme == "light":
             for element, button in self.periodic_table.buttons.items():
                 group = self.engine.periodic_table[element]["position"][2]
@@ -499,8 +499,8 @@ class MDLHEAPP(QMainWindow):
             with open("ui/styles/styleSheet_light.qss", "r") as f:
                 self.dark_stylesheet = f.read()
             self.setStyleSheet(self.dark_stylesheet)
-            self.switch_theme_action.setText("Dark Theme")
-            self.switch_theme_action.setToolTip("Switch to Dark Theme")
+            self.switch_theme_action.setText("Dark mode")
+            self.switch_theme_action.setToolTip("Switch to Dark mode")
 
     def update_label(self, row, column):
         item = self.alloy_table.item(row, column)
@@ -1004,7 +1004,7 @@ class MDLHEAPP(QMainWindow):
 
         cstrs = ["FCC", "BCC", "BCC + FCC", "HCP"]
         models = ["SS", "IM", "Mixed"]
-        dropdown_labels = ["Crystal Str.", "Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6"]
+        dropdown_labels = ["Crystal Str.", "R1", "R2", "R3", "R4", "R5", "R6"]
         dropdown_restrictions = {"cstr": cstrs, "model1": models, "model2": models, "model3": models, "model4": models,
                                  "model6": models, "model7": models}
         self.cat_res_edits = {} # Categorical restrictions' edits
@@ -1290,7 +1290,7 @@ class MDLHEAPP(QMainWindow):
         file_path = os.path.join(directory, file_name)
         
         headers = ["Alloy", "Density (g/cm³)", "δ", "γ", "ΔHₘᵢₓ (kJ/mol)", "VEC", "ΔSₘᵢₓ (kJ/mol)", "Tₘ (K)", 
-                   "Ω", "Crystal Str.", "Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6"]
+                   "Ω", "Crystal Str.", "R1", "R2", "R3", "R4", "R5", "R6"]
 
         self.excel_worker = ExcelWriterWorker(self.temp_file_name, file_path, headers)
         self.excel_worker.progress.connect(self.update_progress)
@@ -1384,7 +1384,7 @@ class MDLHEAPP(QMainWindow):
             data.append(row_data)
 
         df = pd.DataFrame(data, columns=["Alloy", "Density (g/cm³)", "δ", "γ", "ΔHₘᵢₓ (kJ/mol)", "VEC", "ΔSₘᵢₓ (kJ/mol)", "Tₘ (K)", 
-                                         "Ω", "Crystal Str.", "Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6"])
+                                         "Ω", "Crystal Str.", "R1", "R2", "R3", "R4", "R5", "R6"])
         df.to_excel(file_path, index=False)
         QMessageBox.information(self, "Save to Excel", f"Alloy information saved to {file_path}")
 
