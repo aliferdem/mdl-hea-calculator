@@ -316,8 +316,9 @@ QRadioButton#single_comp_radio {
     border-top-left-radius: 4px;
     border-bottom-left-radius: 4px;
     border: 1px solid #f4f4f4;
+    border-right: none;
     padding: 0px;
-    color: #f4f4f4;
+    color: #c6c6c6;
     font-size: 13px;
 }
 QRadioButton#single_comp_radio::indicator {
@@ -327,9 +328,13 @@ QRadioButton#single_comp_radio:checked {
     background-color: #f4f4f4;
     color: #161616;
 }
-QRadioButton#single_comp_radio:hover {
+QRadioButton#single_comp_radio:checked:hover {
     background-color: #f4f4f4;
     color: #161616;
+}
+QRadioButton#single_comp_radio:hover {
+    background-color: #474747;
+    color: #f4f4f4;
 }
 
 QRadioButton#comp_range_radio {
@@ -337,8 +342,9 @@ QRadioButton#comp_range_radio {
     border-top-right-radius: 4px;
     border-bottom-right-radius: 4px;
     border: 1px solid #f4f4f4;
+    border-left: none;
     padding: 0px;
-    color: #f4f4f4;
+    color: #c6c6c6;
     font-size: 13px;
 }
 QRadioButton#comp_range_radio::indicator {
@@ -348,9 +354,13 @@ QRadioButton#comp_range_radio:checked {
     background-color: #f4f4f4;
     color: #161616;
 }
-QRadioButton#comp_range_radio:hover {
+QRadioButton#comp_range_radio:checked:hover {
     background-color: #f4f4f4;
     color: #161616;
+}
+QRadioButton#comp_range_radio:hover {
+    background-color: #474747;
+    color: #f4f4f4;
 }
 
 QTabWidget {
@@ -371,16 +381,22 @@ QTabBar::tab {
 QTabBar::tab:!selected {
     background-color: none;
     border-radius: 0px;
-    border-bottom: 2px solid #525252;
+    border-bottom: 2px solid #393939;
     color: #c6c6c6;
     font-size: 10.5pt;
+}
+QTabBar::tab:selected:hover {
+    border-bottom: 2px solid #4589ff;
+    color: #f4f4f4;
+    font-weight: bold;
 }
 QTabBar::tab:selected {
     border-bottom: 2px solid #4589ff;
     color: #f4f4f4;
+    font-weight: bold;
 }
 QTabBar::tab:hover {
-    border-bottom: 2px solid #8d8d8d;
+    border-bottom: 2px solid #6f6f6f;
     color: #f4f4f4;
 }
 QTabWidget::pane {

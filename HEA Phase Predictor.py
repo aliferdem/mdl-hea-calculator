@@ -400,7 +400,7 @@ class MDLHEAPP(QMainWindow):
         clear_alloy_button.setProperty("class", "ghost_button")
         clear_alloy_button.clicked.connect(self.clear_alloy_info)
         bottom_buttons_layout.addWidget(clear_alloy_button)
-        save_button = QPushButton("Save to Excel")
+        save_button = QPushButton("Export")
         save_button.setProperty("class", "secondary_button")
         save_button.setFixedSize(141, 32)
         save_button.clicked.connect(self.save_to_excel)
@@ -410,24 +410,25 @@ class MDLHEAPP(QMainWindow):
         parent_bottom_layout.addWidget(btop_widget)
 
         self.alloy_table = QTableWidget(0, 16)
+        self.alloy_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.alloy_table.verticalHeader().setVisible(False)
         self.alloy_table.setShowGrid(False)
-        self.alloy_table.setColumnWidth(0, 140)
-        self.alloy_table.setColumnWidth(1, 94)
-        self.alloy_table.setColumnWidth(2, 74)
-        self.alloy_table.setColumnWidth(3, 74)
-        self.alloy_table.setColumnWidth(4, 97)
-        self.alloy_table.setColumnWidth(5, 46)
-        self.alloy_table.setColumnWidth(6, 96)
+        self.alloy_table.setColumnWidth(0, 149)
+        self.alloy_table.setColumnWidth(1, 97)
+        self.alloy_table.setColumnWidth(2, 75)#
+        self.alloy_table.setColumnWidth(3, 75)#
+        self.alloy_table.setColumnWidth(4, 100)
+        self.alloy_table.setColumnWidth(5, 46)#
+        self.alloy_table.setColumnWidth(6, 99)
         self.alloy_table.setColumnWidth(7, 67)
-        self.alloy_table.setColumnWidth(8, 74)
+        self.alloy_table.setColumnWidth(8, 75)#
         self.alloy_table.setColumnWidth(9, 99)
-        self.alloy_table.setColumnWidth(10, 58)
-        self.alloy_table.setColumnWidth(11, 62)
-        self.alloy_table.setColumnWidth(12, 60)
-        self.alloy_table.setColumnWidth(13, 59)
-        self.alloy_table.setColumnWidth(14, 59)
-        self.alloy_table.setColumnWidth(15, 120)
+        self.alloy_table.setColumnWidth(10, 36)#
+        self.alloy_table.setColumnWidth(11, 36)
+        self.alloy_table.setColumnWidth(12, 36)
+        self.alloy_table.setColumnWidth(13, 63)
+        self.alloy_table.setColumnWidth(14, 36)
+        self.alloy_table.setColumnWidth(15, 126)
         self.alloy_table.setMinimumHeight(336)
         self.alloy_table.setMinimumWidth(1200)
         self.alloy_table.setMaximumWidth(1366)
@@ -1321,9 +1322,9 @@ class MDLHEAPP(QMainWindow):
         if os.path.exists(self.temp_file_name):
             os.remove(self.temp_file_name)  # Delete the temporary file
         if file_path:
-            QMessageBox.information(self, "Save to Excel", f"Alloy information saved to {file_path}")
+            QMessageBox.information(self, "Export to Excel", f"Alloy information saved to {file_path}")
         else:
-            QMessageBox.information(self, "Save to Excel", "Excel file saving was canceled.")
+            QMessageBox.information(self, "Export to Excel", "Excel file saving was canceled.")
 
     def stop_calculation(self):
         if self.calculation_worker:
