@@ -1,13 +1,14 @@
-# Copyright (c) Ali Fethi Erdem.
+# Copyright (c) Metals Development Laboratory.
 #
 # This source code is licensed under the terms described in the LICENSE file in
 # the root directory of this source tree.
 #
-# Workers/excel_writer.py
+# workers/excel_writer.py
 
 import xlsxwriter
 from PySide6.QtCore import QThread, Signal
-from Utils.io_helpers import read_results_in_chunks
+from utils.io_helpers import read_results_in_chunks
+import json
 
 class ExcelWriterWorker(QThread):
     progress = Signal(int, int)
@@ -27,37 +28,42 @@ class ExcelWriterWorker(QThread):
         for col_num, header in enumerate(self.headers):
             worksheet.write(0, col_num, header)
 
-        row = 1
-        chunk_size = 100
-        total_processed = 0
-        total_chunks = sum(1 for _ in read_results_in_chunks(self.file_name, chunk_size))
-        total_rows = total_chunks * chunk_size
+        row = 1  # Start writing from the first row after the header
+        with open(self.file_name, 'r') as temp_file:
+            results = json.load(temp_file)  # Load all results from temp JSON
 
-        for chunk in read_results_in_chunks(self.file_name, chunk_size):
-            for values, alloy_name in chunk:
-                row_data = [
-                    alloy_name,
-                    values["density"],
-                    values["delta"],
-                    values["gamma"],
-                    values["enthalpy_of_mixing"],
-                    values["vec"],
-                    values["mixing_entropy"],
-                    values["melting_temp"],
-                    values["omega"],
-                    values["cstr"],
-                    values["model1"],
-                    values["model2"],
-                    values["model3"],
-                    values["model4"],
-                    values["model6"],
-                    values["model7"]
-                ]
-                for col_num, data in enumerate(row_data):
-                    worksheet.write(row, col_num, data)
-                row += 1
-                if total_processed % 100 == 0 or total_processed == total_rows:
-                    self.progress.emit(total_processed, total_rows)
+        total_rows = len(results)
+
+        for idx, (values, alloy_name) in enumerate(results):
+            row_data = [
+                alloy_name,
+                values["density"],
+                values["melting_temp"],
+                values["enthalpy_of_mixing"],
+                values["mixing_entropy"],
+                values["omega"],
+                values["delta"],
+                values["gamma"],
+                values["lambda"],
+                values["phi_model7"],
+                values["phi_model8"],
+                values["vec"],
+                values["cstr"],
+                values["model1"],
+                values["model2"],
+                values["model3"],
+                values["model4"],
+                values["model5"],
+                values["model6"],
+                values["model7"],
+                values["model8"]
+            ]
+            for col_num, data in enumerate(row_data):
+                worksheet.write(row, col_num, data)
+            row += 1
+
+            if idx % 100 == 0 or idx == total_rows - 1:
+                self.progress.emit(idx + 1, total_rows)  # Update progress
 
         workbook.close()
-        self.finished.emit(self.file_path)
+        self.finished.emit(self.file_path)  # Signal completion

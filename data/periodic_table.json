@@ -140,7 +140,8 @@
       "atomic_weight": 24.305,
       "density": 1.74,
       "atomic_radius": 150.0,
-      "nvalence": 2
+      "nvalence": 2,
+      "lattice_parameter": 3.2094
     }
   },
   "Al": {
@@ -152,7 +153,8 @@
       "atomic_weight": 26.98154,
       "density": 2.7,
       "atomic_radius": 143.0,
-      "nvalence": 3
+      "nvalence": 3,
+      "lattice_parameter": 4.0495
     }
   },
   "Si": {
@@ -164,7 +166,8 @@
       "atomic_weight": 28.0855,
       "density": 2.33,
       "atomic_radius": 110.0,
-      "nvalence": 4
+      "nvalence": 4,
+      "lattice_parameter": 5.431
     }
   },
   "P": {
@@ -247,7 +250,7 @@
       "atomic_volume": 15.0,
       "atomic_weight": 44.9559,
       "density": 3,
-      "atomic_radius": 160.0,
+      "atomic_radius": 164.0,
       "nvalence": 3
     }
   },
@@ -305,7 +308,7 @@
       "atomic_number": 26,
       "melting_point": 1811,
       "atomic_volume": 7.09,
-      "atomic_weight": 55.847,
+      "atomic_weight": 55.845,
       "density": 7.86,
       "atomic_radius": 127.0,
       "nvalence": 8
@@ -319,7 +322,7 @@
       "atomic_volume": 6.7,
       "atomic_weight": 58.9332,
       "density": 8.9,
-      "atomic_radius": 135.0,
+      "atomic_radius": 125.0,
       "nvalence": 9
     }
   },
@@ -355,8 +358,9 @@
       "atomic_volume": 9.2,
       "atomic_weight": 65.38,
       "density": 7.14,
-      "atomic_radius": 135.0,
-      "nvalence": 12
+      "atomic_radius": 139.0,
+      "nvalence": 12,
+      "lattice_parameter": 2.6649
     }
   },
   "Ga": {
@@ -368,7 +372,8 @@
       "atomic_weight": 69.72,
       "density": 5.91,
       "atomic_radius": 130.0,
-      "nvalence": 3
+      "nvalence": 3,
+      "lattice_parameter": 4.5197
     }
   },
   "Ge": {
@@ -380,7 +385,8 @@
       "atomic_weight": 72.59,
       "density": 5.32,
       "atomic_radius": 125.0,
-      "nvalence": 4
+      "nvalence": 4,
+      "lattice_parameter": 5.658
     }
   },
   "As": {
@@ -392,7 +398,8 @@
       "atomic_weight": 74.9216,
       "density": 5.72,
       "atomic_radius": 115.0,
-      "nvalence": 5
+      "nvalence": 5,
+      "lattice_parameter": 3.7598
     }
   },
   "Se": {
@@ -404,7 +411,8 @@
       "atomic_weight": 78.96,
       "density": 4.8,
       "atomic_radius": 115.0,
-      "nvalence": 6
+      "nvalence": 6,
+      "lattice_parameter": 9.054
     }
   },
   "Br": {
@@ -499,7 +507,7 @@
       "atomic_volume": 9.4,
       "atomic_weight": 95.94,
       "density": 10.2,
-      "atomic_radius": 145.0,
+      "atomic_radius": 140.0,
       "nvalence": 6
     }
   },
@@ -572,7 +580,8 @@
       "atomic_weight": 112.41,
       "density": 8.65,
       "atomic_radius": 155.0,
-      "nvalence": 12
+      "nvalence": 12,
+      "lattice_parameter": 2.9794
     }
   },
   "In": {
@@ -584,7 +593,8 @@
       "atomic_weight": 114.82,
       "density": 7.31,
       "atomic_radius": 155.0,
-      "nvalence": 3
+      "nvalence": 3,
+      "lattice_parameter": 3.254
     }
   },
   "Sn": {
@@ -620,7 +630,8 @@
       "atomic_weight": 127.6,
       "density": 6.24,
       "atomic_radius": 140.0,
-      "nvalence": 6
+      "nvalence": 6,
+      "lattice_parameter": 4.4572
     }
   },
   "I": {
@@ -956,7 +967,8 @@
       "atomic_weight": 200.59,
       "density": 13.53,
       "atomic_radius": 150.0,
-      "nvalence": 12
+      "nvalence": 12,
+      "lattice_parameter": 3.005
     }
   },
   "Tl": {
@@ -992,7 +1004,8 @@
       "atomic_weight": 208.9804,
       "density": 9.8,
       "atomic_radius": 160.0,
-      "nvalence": 5
+      "nvalence": 5,
+      "lattice_parameter": 4.546
     }
   },
   "Po": {

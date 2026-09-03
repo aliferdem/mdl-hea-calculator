@@ -324,7 +324,7 @@ class MDLHEAPP(QMainWindow):
         self.old_pos = None
 
         if current_theme == "dark":
-            self.element_colors = self._read("ui/styles/element_colors_dark.json")
+            self.element_colors = self._read("ui/styles/element_colors.json")
             with open("ui/styles/styleSheet_dark.qss", "r") as f:
                 self.dark_stylesheet = f.read()
             self.setStyleSheet(self.dark_stylesheet)
@@ -573,7 +573,7 @@ class MDLHEAPP(QMainWindow):
         new_theme = "light" if current_theme == "dark" else "dark"
         self.settings.set_theme(new_theme)
         if new_theme == "dark":
-            self.element_colors = self._read("ui/styles/element_colors_dark.json")
+            self.element_colors = self._read("ui/styles/element_colors.json")
             for element, button in self.pTable_buttons.items():
                 group = self.engine.periodic_table[element]["position"][2]
                 color = self.element_colors.get(group, {"normal": "#333333", "hover": "#444444"})

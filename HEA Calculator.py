@@ -1,16 +1,15 @@
-# HEA Phase Predictor
-# Copyright (C) 2024 Ali Fethi Erdem
-# Metals Development Laboratory,
+# HEA Calculator
+# Copyright (C) 2024 Metals Development Laboratory
 # Middle East Technical University (METU), Ankara, Türkiye
 #
-# HEA Phase Predictor is a derivative work based on the HEA
-# Calculator, originally authored and copyrighted by Doğuhan
-# Sarıtürk, and licensed under the GNU General Public
-# License, Version 3 (GPLv3). The original HEA Calculator
-# remains the intellectual property of Doğuhan Sarıtürk and
-# is subject to the terms of the GPLv3.
+# HEA Calculator is a scientific tool developed as an enhanced version of
+# the original HEA Calculator, which was authored and copyrighted by
+# Doğuhan Sarıtürk. This modified version was created to expand its
+# functionality and improve usability. The original HEA Calculator, along with
+# all intellectual property rights, remains the property of Doğuhan Sarıtürk and
+# is licensed under the GNU General Public License, Version 3 (GPLv3).
 #
-# This program, HEA Phase Predictor, is free software: you can
+# This program, HEA Calculator, is free software: you can
 # redistribute it and/or modify it under the terms of the GNU
 # General Public License as published by the Free Software
 # Foundation, either version 3 of the License, or (at your
@@ -27,7 +26,7 @@
 # https://www.gnu.org/licenses/
 #
 # The full license text can also be found in the root directory
-# of HEA Phase Predictor (HEAPP).
+# of HEA Calculator.
 #
 # Contact Information:
 #
@@ -39,10 +38,10 @@
 # and conditions outlined in the GNU General Public License.
 
 __author__ = "Ali Fethi Erdem"
-__version__ = "0.9"
+__version__ = "0.9.8"
 __email__ = "erdem.alifethi@gmail.com"
 __license__ = "GNU General Public License Version 3"
-__credits__ = "Original version developed by Doguhan Sariturk under the name of HEA Calculator"
+__credits__ = "Original version developed by Doguhan Sariturk"
 
 import json
 import os
@@ -50,7 +49,7 @@ import re
 import sys
 import pandas as pd
 from datetime import datetime
-from PySide6.QtCore import (Qt, QTimer)
+from PySide6.QtCore import (Qt, QTimer, QSize)
 from PySide6.QtGui import (QIcon, QFont, QAction)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QFileDialog,
@@ -59,17 +58,17 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QVBoxLayout,
     QWidget, QSpacerItem, QSizePolicy,
     QRadioButton, QScrollArea, QProgressBar,
-    QDialog, QComboBox, QButtonGroup)
+    QDialog, QComboBox, QButtonGroup, QHeaderView)
 
 from engine import Engine
-from Utils.settings import Settings
-from Workers.alloy_calculation import AlloyCalculationWorker
-from Workers.composition_generation import CompositionGenerationWorker
-from Workers.excel_writer import ExcelWriterWorker
-from Utils.io_helpers import read_json
-from Utils.ui_helpers import default_line_edit
-from Components.periodic_table import PeriodicTable
-from Components.about_dialog import AboutDialog
+from utils.settings import Settings
+from workers.alloy_calculation import AlloyCalculationWorker
+from workers.composition_generation import CompositionGenerationWorker
+from workers.excel_writer import ExcelWriterWorker
+from utils.io_helpers import read_json
+from utils.ui_helpers import default_line_edit
+from components.periodic_table import PeriodicTable
+from components.about_dialog import AboutDialog
 
 class MDLHEAPP(QMainWindow):
     def __init__(self):
@@ -78,7 +77,7 @@ class MDLHEAPP(QMainWindow):
         self.settings = Settings()
         self.periodic_table_widget = None
 
-        self.setWindowTitle("MDL | HEA Phase Predictor")
+        self.setWindowTitle("MDL | HEA Calculator")
         self.resize(1220, 660)
         self.settings = Settings()
 
@@ -140,7 +139,27 @@ class MDLHEAPP(QMainWindow):
         self.to_at_edit.textChanged.connect(self.update_all_atomic_end)
         self.to_at_edit.setFixedWidth(90)
 
+        self.prev_button = QPushButton("")
+        self.prev_button.setProperty("class", "prev_next_button")
+        self.prev_button.setFixedSize(48, 48)
+        self.prev_button.setLayoutDirection(Qt.RightToLeft)
+        self.prev_button.setIcon(QIcon("ui/icons/caret--left.svg"))
+        self.prev_button.setIconSize(QSize(20, 20))
+
+        self.next_button = QPushButton("")
+        self.next_button.setProperty("class", "prev_next_button")
+        self.next_button.setFixedSize(48, 48)
+        self.next_button.setLayoutDirection(Qt.RightToLeft)
+        self.next_button.setIcon(QIcon("ui/icons/caret--right.svg"))
+        self.next_button.setIconSize(QSize(20, 20))
+
         self.restriction_values = {}
+
+        # self.alloy_table pagination variables
+        self.total_items = 0
+        self.items_per_page = 20
+        self.current_page = 1
+        self.total_pages = 1
 
         self.initUI()
 
@@ -156,8 +175,12 @@ class MDLHEAPP(QMainWindow):
         parent_widget.setLayout(parent_layout)
 
         main_layout = QVBoxLayout()
-        main_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         main_layout.setSpacing(30)
+
+        center_layout = QHBoxLayout()
+        center_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        center_layout.addLayout(main_layout)
 
         top_container = QHBoxLayout()
         top_container.setSpacing(0)
@@ -171,13 +194,13 @@ class MDLHEAPP(QMainWindow):
         parent_top_layout.setContentsMargins(0, 0, 0, 0)
         parent_top_layout.setSpacing(0)
         parent_top_widget.setMinimumWidth(1200)
-        parent_top_widget.setMaximumWidth(1366)
+        parent_top_widget.setMaximumWidth(1440)
 
         # PARENT_TOP_LAYOUT >> TOP_LAYOUT [STARTS]
         top_layout = QHBoxLayout()
-        top_layout.setContentsMargins(20, 10, 100, 5)
-        logo_label = QLabel("<span style='font-weight: normal;'>MDL</span> <b>HEA Phase Predictor</b>")
-        logo_label.setStyleSheet("font-size: 12pt;")
+        top_layout.setContentsMargins(25, 10, 100, 5)
+        logo_label = QLabel("<span style='font-weight: normal;'>MDL</span> <b>HEA Calculator</b>")
+        logo_label.setStyleSheet("font-size: 13pt;")
         top_layout.addWidget(logo_label)
 
         self.content_switcher_group = QButtonGroup(self)
@@ -310,7 +333,7 @@ class MDLHEAPP(QMainWindow):
 
         # PARENT_TOP_LAYOUT >> BOTTOM_LAYOUT [STARTS]
         bottom_layout = QHBoxLayout()
-        bottom_layout.setContentsMargins(10, 0, 0, 0)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
         bottom_layout.setSpacing(0)
 
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -331,9 +354,9 @@ class MDLHEAPP(QMainWindow):
         self.filter_button.setFixedSize(76, 40)
         self.filter_button.clicked.connect(self.show_restrictions_window)
 
-        selected_button_container = QWidget()
-        selected_button_container.setFixedWidth(509)
-        selected_button_layout = QHBoxLayout(selected_button_container)
+        self.selected_button_container = QWidget()
+        self.selected_button_container.setFixedWidth(509)
+        selected_button_layout = QHBoxLayout(self.selected_button_container)
         selected_button_layout.setSpacing(0)
         selected_button_layout.setContentsMargins(0, 0, 0, 0)
         selected_button_layout.addWidget(self.filter_button)
@@ -342,7 +365,7 @@ class MDLHEAPP(QMainWindow):
         selected_button_layout.addWidget(self.calculate_button)
 
         bottom_layout.addStretch(1)
-        bottom_layout.addWidget(selected_button_container)
+        bottom_layout.addWidget(self.selected_button_container)
 
         parent_top_layout.addLayout(bottom_layout)
 
@@ -352,7 +375,7 @@ class MDLHEAPP(QMainWindow):
         main_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         main_scroll_area.setViewportMargins(0, 0, 15, 0)
         main_widget = QWidget()
-        main_widget.setLayout(main_layout)
+        main_widget.setLayout(center_layout)
         main_scroll_area.setWidget(main_widget)
         parent_layout.addWidget(main_scroll_area)
 
@@ -364,12 +387,16 @@ class MDLHEAPP(QMainWindow):
             self.setStyleSheet(self.dark_stylesheet)
             self.switch_theme_action.setText("Light mode")
             self.switch_theme_action.setToolTip("Switch to light mode")
+            self.prev_button.setIcon(QIcon("ui/icons/caret--left_white.svg"))
+            self.next_button.setIcon(QIcon("ui/icons/caret--right_white.svg"))
         elif current_theme == "light":
             with open("ui/styles/styleSheet_light.qss", "r") as f:
                 self.light_stylesheet = f.read()
             self.setStyleSheet(self.light_stylesheet)
             self.switch_theme_action.setText("Dark mode")
             self.switch_theme_action.setToolTip("Switch to dark mode")
+            self.prev_button.setIcon(QIcon("ui/icons/caret--left.svg"))
+            self.next_button.setIcon(QIcon("ui/icons/caret--right.svg"))
 
         top_container.addWidget(parent_top_widget)
         main_layout.addLayout(top_container)
@@ -385,8 +412,8 @@ class MDLHEAPP(QMainWindow):
         btop_layout.setContentsMargins(10, 0, 0, 0)
         btop_layout.setSpacing(0)
         btop_widget.setMinimumWidth(1200)
-        btop_widget.setMaximumWidth(1366)
-        btop_widget.setFixedHeight(32)
+        btop_widget.setMaximumWidth(1440)
+        btop_widget.setFixedHeight(40)
 
         self.table_label = QLabel("")
         self.table_label.setObjectName("table_label")
@@ -396,22 +423,34 @@ class MDLHEAPP(QMainWindow):
         bottom_buttons_layout = QHBoxLayout()
         bottom_buttons_layout.setSpacing(0)
         clear_alloy_button = QPushButton("Clear")
-        clear_alloy_button.setFixedSize(76,32)
+        clear_alloy_button.setFixedSize(76,40)
         clear_alloy_button.setProperty("class", "ghost_button")
         clear_alloy_button.clicked.connect(self.clear_alloy_info)
         bottom_buttons_layout.addWidget(clear_alloy_button)
         save_button = QPushButton("Export")
         save_button.setProperty("class", "secondary_button")
-        save_button.setFixedSize(141, 32)
+        save_button.setFixedSize(141, 40)
         save_button.clicked.connect(self.save_to_excel)
         bottom_buttons_layout.addWidget(save_button)
 
         btop_layout.addLayout(bottom_buttons_layout)
         parent_bottom_layout.addWidget(btop_widget)
 
-        self.alloy_table = QTableWidget(0, 16)
+        self.alloy_table = QTableWidget(0, 21)
         self.alloy_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        header_font = QFont("IBM Plex Sans Semibold")
+        self.alloy_table.horizontalHeader().setFont(header_font)
+        self.alloy_table.horizontalHeader().setFixedHeight(33)
+        self.alloy_table.verticalHeader().setDefaultSectionSize(32)
+        self.alloy_table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        for col in range(self.alloy_table.columnCount()):
+            self.alloy_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+
+
         self.alloy_table.verticalHeader().setVisible(False)
+        # self.alloy_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.alloy_table.setShowGrid(False)
         self.alloy_table.setColumnWidth(0, 149)
         self.alloy_table.setColumnWidth(1, 97)
@@ -429,14 +468,61 @@ class MDLHEAPP(QMainWindow):
         self.alloy_table.setColumnWidth(13, 63)
         self.alloy_table.setColumnWidth(14, 36)
         self.alloy_table.setColumnWidth(15, 126)
-        self.alloy_table.setMinimumHeight(336)
         self.alloy_table.setMinimumWidth(1200)
-        self.alloy_table.setMaximumWidth(1366)
-        self.alloy_table.setHorizontalHeaderLabels(["Alloy", "Density (g/cm³)", "δ", "γ", "ΔHₘᵢₓ (kJ/mol)", "VEC", "ΔSₘᵢₓ (kJ/mol)", "Tₘ (K)", 
-                                                    "Ω", "Crystal Str.", "R1", "R2", "R3", "R4", "R5", "R6"])
+        self.alloy_table.setMaximumWidth(1440)
+        self.alloy_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.alloy_table.setHorizontalHeaderLabels(["Alloy", "Density (g/cm³)", "Tₘ (K)", "ΔHₘᵢₓ (kJ/mol)", "ΔSₘᵢₓ (kJ/mol)", "Ω", "δ", "γ",
+                                                    "Λ", "ϕ", "Φ", "VEC", "Crystal Str.", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"])
 
         self.alloy_table.cellClicked.connect(self.update_label)
         parent_bottom_layout.addWidget(self.alloy_table)
+
+        # Add pagination controls at the bottom
+        self.pagination_label = QLabel("1 - 10 of 0 items")
+        self.pagination_label.setProperty("class", "pagination_items")
+        self.page_label = QLabel("Page 1 of 1")
+        self.page_label.setProperty("class", "pagination_layout")
+        self.items_label = QLabel("Items per page:  ")
+        self.items_label.setStyleSheet("font-size: 11pt;")
+        
+        self.items_per_page_combo = QComboBox()
+        self.items_per_page_combo.addItems(["10", "20", "50", "100"])
+        self.items_per_page_combo.setCurrentText("20")
+        self.items_per_page_combo.setObjectName("items_per_page_combo")
+        self.items_per_page_combo.setFixedSize(66, 48)
+        self.items_per_page_combo.currentIndexChanged.connect(self.change_items_per_page)
+
+        self.prev_button.clicked.connect(self.prev_page)
+        self.next_button.clicked.connect(self.next_page)
+        
+        # Add pagination controls to the bottom layout
+        items_per_page_layout = QHBoxLayout()
+        items_per_page_layout.setContentsMargins(16, 0, 0, 0)
+        pagination_layout = QHBoxLayout()
+        pagination_layout.setContentsMargins(0, 0, 0, 0)
+        pagination_layout.setSpacing(0)
+        pagination_widget = QWidget()
+        pagination_widget.setFixedHeight(48)
+        pagination_widget.setObjectName("pagination")
+        pagination_widget.setLayout(pagination_layout)
+        pagination_widget.setMinimumWidth(1200)
+        pagination_widget.setMaximumWidth(1440)
+
+        items_per_page_layout.addWidget(self.items_label)
+        items_per_page_layout.addWidget(self.items_per_page_combo)
+        pagination_layout.addLayout(items_per_page_layout)
+
+        pagination_layout.addWidget(self.pagination_label)
+        pagination_layout.addStretch()
+        pagination_layout.addWidget(self.page_label)
+        pagination_layout.addWidget(self.prev_button)
+        pagination_layout.addWidget(self.next_button)
+        
+        parent_bottom_layout.addWidget(pagination_widget)
+        
+        # Call to update pagination details initially
+        self.update_pagination()
+
         main_layout.addLayout(parent_bottom_layout)
 
         self.setCentralWidget(parent_widget)
@@ -474,6 +560,8 @@ class MDLHEAPP(QMainWindow):
             self.setStyleSheet(self.dark_stylesheet)
             self.switch_theme_action.setText("Light mode")
             self.switch_theme_action.setToolTip("Switch to Light mode")
+            self.prev_button.setIcon(QIcon("ui/icons/caret--left_white.svg"))
+            self.next_button.setIcon(QIcon("ui/icons/caret--right_white.svg"))
         elif new_theme == "light":
             for element, button in self.periodic_table.buttons.items():
                 group = self.engine.periodic_table[element]["position"][2]
@@ -502,6 +590,8 @@ class MDLHEAPP(QMainWindow):
             self.setStyleSheet(self.dark_stylesheet)
             self.switch_theme_action.setText("Dark mode")
             self.switch_theme_action.setToolTip("Switch to Dark mode")
+            self.prev_button.setIcon(QIcon("ui/icons/caret--left.svg"))
+            self.next_button.setIcon(QIcon("ui/icons/caret--right.svg"))
 
     def update_label(self, row, column):
         item = self.alloy_table.item(row, column)
@@ -566,17 +656,36 @@ class MDLHEAPP(QMainWindow):
         self.selected_elements_container.setAlignment(Qt.AlignmentFlag.AlignTop)
         total_elements = len(self.selected_elements)
         if total_elements > 0:
-            if self.at_percent_radio.isChecked():
-                equ_atomic_percent = 100/total_elements
-                for edits in self.selected_elements.values():
-                    edits["atomic_percent"].blockSignals(True)
-                    edits["atomic_percent"].setText(f"{equ_atomic_percent:.2f}")
-                    edits["atomic_percent"].blockSignals(False)
-            elif self.at_ratio_radio.isChecked():
+            equ_atomic_percent = 100/total_elements
+            if self.at_ratio_radio.isChecked():
                 for edits in self.selected_elements.values():
                     edits["atomic_ratio"].blockSignals(True)
                     edits["atomic_ratio"].setText("1.00")
                     edits["atomic_ratio"].blockSignals(False)
+                    self.update_all_percentages()
+            elif self.at_percent_radio.isChecked():
+                for edits in self.selected_elements.values():
+                    edits["atomic_percent"].blockSignals(True)
+                    edits["atomic_percent"].setText(f"{equ_atomic_percent:.2f}")
+                    edits["atomic_percent"].blockSignals(False)
+                    self.update_all_percentages()
+            elif self.wt_percent_radio.isChecked():
+                for edits in self.selected_elements.values():
+                    edits["weight_percent"].blockSignals(True)
+                    edits["weight_percent"].setText(f"{equ_atomic_percent:.2f}")
+                    edits["weight_percent"].blockSignals(False)
+                    self.update_all_percentages()
+            elif self.wt_percent_radio.isChecked():
+                for edits in self.selected_elements.values():
+                    edits["weight_percent"].blockSignals(True)
+                    edits["weight_percent"].setText(f"{equ_atomic_percent:.2f}")
+                    edits["weight_percent"].blockSignals(False)
+                    self.update_all_percentages()
+            if self.weight_radio.isChecked():
+                for edits in self.selected_elements.values():
+                    edits["weight"].blockSignals(True)
+                    edits["weight"].setText("1.00")
+                    edits["weight"].blockSignals(False)
                     self.update_all_percentages()
         self.update_all_percentages()
 
@@ -801,19 +910,75 @@ class MDLHEAPP(QMainWindow):
         return atomic_percent
     
     def show_warning(self, title, message):
-        self.status_label.setText(f"<b>{title}: </b>{message}")
+        current_theme = self.settings.get_theme()
+        
+        if current_theme == "dark":
+            bg_color = "#f5f5f5"
+            text_color = "#161616"
+            alert_color = "#da1e28"
+            icon_path = "ui/icons/error--filled.svg"
+        else:
+            bg_color = "#393939"
+            text_color = "#f4f4f4"
+            alert_color = "#fa4d56"
+            icon_path = "ui/icons/error--filled_light.svg"
+
+        # Sağdaki butonları (Filter, Clear, Calculate) tamamen gizle
+        self.selected_button_container.hide()
+        
+        # status_label'ı ebeveyn genişliğine zorla
+        self.status_label.setMinimumWidth(self.status_label.parentWidget().width())
+        self.status_label.setFixedHeight(40)
+        
+        # Eğreti HTML tablosu yerine, QLabel içine dinamik ve gerçek bir layout kuruyoruz
+        if not hasattr(self.status_label, 'warning_layout'):
+            self.status_label.warning_layout = QHBoxLayout(self.status_label)
+            self.status_label.warning_layout.setContentsMargins(10, 0, 14, 0)
+            self.status_label.warning_layout.setSpacing(8)
+            
+            self.status_label.icon_lbl = QLabel()
+            self.status_label.icon_lbl.setFixedSize(24, 24)
+            
+            self.status_label.text_lbl = QLabel()
+            
+            self.status_label.warning_layout.addWidget(self.status_label.icon_lbl)
+            self.status_label.warning_layout.addWidget(self.status_label.text_lbl)
+            self.status_label.warning_layout.addStretch()
+            
+        # SVG'yi Qt'nin kendi C++ vektör motoruyla tam 16x16 renderla (Asla sündürülmez)
+        self.status_label.icon_lbl.setPixmap(QIcon(icon_path).pixmap(16, 16))
+        self.status_label.icon_lbl.show()
+        
+        # Metni alt label'a ata ve HTML'den bağımsız olarak stillendir
+        self.status_label.text_lbl.setText(f"<b>{title}</b> {message}")
+        self.status_label.text_lbl.setStyleSheet(f"color: {text_color}; font-size: 10pt; border: none; background-color: transparent;")
+        self.status_label.text_lbl.show()
+        
+        # Ana label'ın kendi metnini boşalt ki yazılar üst üste binmesin
+        self.status_label.setText("")
         self.status_label.setObjectName("status_error")
-        self.status_label.setStyleSheet("""
-            QLabel {
-                background-color: none; 
-                color: #ba1b23; 
+        
+        # Ana label'a sadece arkaplan ve sol kırmızı çizgiyi veriyoruz
+        self.status_label.setStyleSheet(f"""
+            QLabel#status_error {{
+                background-color: {bg_color}; 
+                border-left: 4px solid {alert_color};
                 border-radius: 0px;
-                font-size: 10pt;
-                padding: 2px;
-            }""")
+            }}""")
         self.status_label.show()
-        # Clear status message (5 seconds)
-        QTimer.singleShot(1300, lambda: self.status_label.hide())
+        
+        # 3 saniye sonra her şeyi orijinal haline döndür
+        def restore_state():
+            self.status_label.hide()
+            self.status_label.setStyleSheet("")
+            self.status_label.setObjectName("") # KİLİDİ AÇIYORUZ
+            self.status_label.setMinimumWidth(0) # Genişlik kilidini kaldır
+            if hasattr(self.status_label, 'warning_layout'):
+                self.status_label.icon_lbl.hide()
+                self.status_label.text_lbl.hide()
+            self.selected_button_container.show() # Butonları geri getir
+            
+        QTimer.singleShot(3000, restore_state)
 
     def toggle_input_mode(self):
         if self.comp_range_radio.isChecked():
@@ -963,6 +1128,41 @@ class MDLHEAPP(QMainWindow):
 
     def on_calculate_button_click(self):
         self.stop_requested = False
+        
+        # 1. GÜVENLİK KONTROLÜ: En az 2 element seçilmiş olmalı
+        if len(self.selected_elements) < 2:
+            self.show_warning("Error", "Please select at least two elements to form an alloy.")
+            return
+
+        # 2. GÜVENLİK KONTROLÜ: Single Composition modundaysak toplam %100 mü kontrolü
+        if self.single_comp_radio.isChecked():
+            try:
+                # O anki aktif girdi moduna göre at% veya wt% toplamını hesaplıyoruz
+                if self.wt_percent_radio.isChecked() or self.weight_radio.isChecked():
+                    total_percent = sum(float(edit["weight_percent"].text() or 0) for edit in self.selected_elements.values())
+                else:
+                    total_percent = sum(float(edit["atomic_percent"].text() or 0) for edit in self.selected_elements.values())
+                
+                # Float sapmalarına karşı 0.01'lik bir tolerans payı bırakıyoruz
+                if abs(total_percent - 100.0) > 0.01:
+                    self.show_warning("Error", f"Total percentage is {total_percent:.2f}%. It must be exactly 100%.")
+                    return
+            except ValueError:
+                self.show_warning("Error", "Invalid input values detected.")
+                return
+
+        # 3. GÜVENLİK KONTROLÜ: Eğer Range modundaysak adım boyutunu doğrula
+        if self.comp_range_radio.isChecked():
+            try:
+                step_size = float(self.step_size_edit.text())
+                if step_size <= 0:
+                    self.show_warning("Error", "Step size must be greater than 0.")
+                    return
+            except ValueError:
+                self.show_warning("Error", "Invalid step size.")
+                return
+
+        # Tüm kontrollerden başarıyla geçildiyse hesaplamayı başlat
         if self.single_comp_radio.isChecked():
             self.update_alloy_info()
         else:
@@ -1224,11 +1424,11 @@ class MDLHEAPP(QMainWindow):
         self.dialog.setLayout(layout)
         self.dialog.show()
 
-        self.worker = AlloyCalculationWorker(compositions, self.engine, self.restriction_values)
-        self.worker.update_progress.connect(self.update_progress)
-        self.worker.all_results_ready.connect(self.on_calculation_finished)
-        self.worker.finished.connect(self.on_worker_finished)
-        self.worker.start()
+        self.calculation_worker = AlloyCalculationWorker(compositions, self.engine, self.restriction_values)
+        self.calculation_worker.update_progress.connect(self.update_progress)
+        self.calculation_worker.all_results_ready.connect(self.on_calculation_finished)
+        self.calculation_worker.finished.connect(self.on_worker_finished)
+        self.calculation_worker.start()
 
     def update_progress(self, current, total, estimated_time):
         self.progress_bar.setValue(current)
@@ -1248,35 +1448,103 @@ class MDLHEAPP(QMainWindow):
     def on_worker_finished(self):
         self.dialog.accept()
 
+    def adjust_table_height(self):
+        """Adjusts the table height based on the number of rows displayed per page."""
+        # Calculate the actual number of rows in the current page
+        row_count = min(self.items_per_page, self.total_items - (self.current_page - 1) * self.items_per_page)
+        header_height = self.alloy_table.horizontalHeader().height()
+        table_height = header_height + 2
+
+        if row_count < 10:
+            table_height = self.alloy_table.horizontalHeader().height() + 385
+        else:
+            row_height = self.alloy_table.verticalHeader().defaultSectionSize()
+            table_height = row_count * row_height + header_height
+
+        self.alloy_table.setFixedHeight(table_height)
+        self.alloy_table.updateGeometry()
+
     def handle_all_results(self):
         if self.count_meeting_criteria <= 20000:
-            self.load_results_to_table(self.temp_file_name)
+            # Set total_items and pages for pagination
+            self.temp_file_name = self.temp_file_name
+            with open(self.temp_file_name, 'r') as temp_file:
+                results = json.load(temp_file)
+                self.total_items = len(results)
+                self.total_pages = (self.total_items // self.items_per_page) + (self.total_items % self.items_per_page > 0)
+            self.update_pagination()
+            self.load_results_to_table()
         else:
             self.save_results_to_excel()
 
-    def load_results_to_table(self, temp_file_name):
-        with open(temp_file_name, 'r') as temp_file:
-            results = json.load(temp_file)
-            for values, alloy_name in results:
-                row_position = self.alloy_table.rowCount()
-                self.alloy_table.insertRow(row_position)
-                self.alloy_table.setItem(row_position, 0, QTableWidgetItem(alloy_name))
-                self.alloy_table.setItem(row_position, 1, QTableWidgetItem("{:.6f}".format(values["density"])))
-                self.alloy_table.setItem(row_position, 2, QTableWidgetItem("{:.6f}".format(values["delta"])))
-                self.alloy_table.setItem(row_position, 3, QTableWidgetItem("{:.6f}".format(values["gamma"])))
-                self.alloy_table.setItem(row_position, 4, QTableWidgetItem("{:.6f}".format(values["enthalpy_of_mixing"])))
-                self.alloy_table.setItem(row_position, 5, QTableWidgetItem("{:.2f}".format(values["vec"])))
-                self.alloy_table.setItem(row_position, 6, QTableWidgetItem("{:.6f}".format(values["mixing_entropy"])))
-                self.alloy_table.setItem(row_position, 7, QTableWidgetItem("{:.2f}".format(values["melting_temp"])))
-                self.alloy_table.setItem(row_position, 8, QTableWidgetItem("{:.6f}".format(values["omega"])))
-                self.alloy_table.setItem(row_position, 9, QTableWidgetItem(values["cstr"]))
-                self.alloy_table.setItem(row_position, 10, QTableWidgetItem(values["model1"]))
-                self.alloy_table.setItem(row_position, 11, QTableWidgetItem(values["model2"]))
-                self.alloy_table.setItem(row_position, 12, QTableWidgetItem(values["model3"]))
-                self.alloy_table.setItem(row_position, 13, QTableWidgetItem(values["model4"]))
-                self.alloy_table.setItem(row_position, 14, QTableWidgetItem(values["model6"]))
-                self.alloy_table.setItem(row_position, 15, QTableWidgetItem(values["model7"]))
-        os.remove(temp_file_name)  # Delete the temporary file
+    def load_results_to_table(self):
+        """Load the data for the current page from the JSON file."""
+        if not self.temp_file_name:
+            return
+
+        start_index = (self.current_page - 1) * self.items_per_page
+        end_index = start_index + self.items_per_page
+
+        self.alloy_table.setRowCount(0)
+        with open(self.temp_file_name, 'r') as temp_file:
+            results = json.load(temp_file)[start_index:end_index]
+
+        for values, alloy_name in results:
+            row_position = self.alloy_table.rowCount()
+            self.alloy_table.insertRow(row_position)
+            self.alloy_table.setItem(row_position, 0, QTableWidgetItem(alloy_name))
+            self.alloy_table.setItem(row_position, 1, QTableWidgetItem("{:.2f}".format(values["density"])))
+            self.alloy_table.setItem(row_position, 2, QTableWidgetItem("{:.0f}".format(values["melting_temp"])))
+            self.alloy_table.setItem(row_position, 3, QTableWidgetItem("{:.2f}".format(values["enthalpy_of_mixing"])))
+            self.alloy_table.setItem(row_position, 4, QTableWidgetItem("{:.2f}".format(values["mixing_entropy"])))
+            self.alloy_table.setItem(row_position, 5, QTableWidgetItem("{:.2f}".format(values["omega"])))
+            self.alloy_table.setItem(row_position, 6, QTableWidgetItem("{:.2f}".format(values["delta"])),)
+            self.alloy_table.setItem(row_position, 7, QTableWidgetItem("{:.2f}".format(values["gamma"])))
+            self.alloy_table.setItem(row_position, 8, QTableWidgetItem("{:.2f}".format(values["lambda"])))
+            self.alloy_table.setItem(row_position, 9, QTableWidgetItem("{:.2f}".format(values["phi_model7"])))
+            self.alloy_table.setItem(row_position, 10, QTableWidgetItem("{:.2f}".format(values["phi_model8"])))
+            self.alloy_table.setItem(row_position, 11, QTableWidgetItem("{:.2f}".format(values["vec"])))
+            self.alloy_table.setItem(row_position, 12, QTableWidgetItem(values["cstr"]))
+            self.alloy_table.setItem(row_position, 13, QTableWidgetItem(values["model1"]))
+            self.alloy_table.setItem(row_position, 14, QTableWidgetItem(values["model2"]))
+            self.alloy_table.setItem(row_position, 15, QTableWidgetItem(values["model3"]))
+            self.alloy_table.setItem(row_position, 16, QTableWidgetItem(values["model4"]))
+            self.alloy_table.setItem(row_position, 17, QTableWidgetItem(values["model5"]))
+            self.alloy_table.setItem(row_position, 18, QTableWidgetItem(values["model6"]))
+            self.alloy_table.setItem(row_position, 19, QTableWidgetItem(values["model7"]))
+            self.alloy_table.setItem(row_position, 20, QTableWidgetItem(values["model8"]))
+        
+        self.update_pagination()
+        self.adjust_table_height()
+
+    def change_items_per_page(self):
+        """Update items per page and reload table with pagination applied."""
+        self.items_per_page = int(self.items_per_page_combo.currentText())
+        self.total_pages = (self.total_items // self.items_per_page) + (self.total_items % self.items_per_page > 0)
+        self.current_page = 1
+        self.load_results_to_table()
+
+    def update_pagination(self):
+        """Update the pagination label and button states."""
+        start_item = (self.current_page - 1) * self.items_per_page + 1
+        end_item = min(self.current_page * self.items_per_page, self.total_items)
+        self.pagination_label.setText(f"{start_item} - {end_item} of {self.total_items} items")
+        self.page_label.setText(f"Page {self.current_page} of {self.total_pages}")
+
+        self.prev_button.setEnabled(self.current_page > 1)
+        self.next_button.setEnabled(self.current_page < self.total_pages)
+
+    def prev_page(self):
+        """Navigate to the previous page and load data."""
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.load_results_to_table()
+
+    def next_page(self):
+        """Navigate to the next page and load data."""
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            self.load_results_to_table()
 
     def save_results_to_excel(self):
         selected_elements_str = ''.join(self.selected_elements.keys())
@@ -1290,8 +1558,8 @@ class MDLHEAPP(QMainWindow):
 
         file_path = os.path.join(directory, file_name)
         
-        headers = ["Alloy", "Density (g/cm³)", "δ", "γ", "ΔHₘᵢₓ (kJ/mol)", "VEC", "ΔSₘᵢₓ (kJ/mol)", "Tₘ (K)", 
-                   "Ω", "Crystal Str.", "R1", "R2", "R3", "R4", "R5", "R6"]
+        headers = ["Alloy", "Density (g/cm³)", "Tₘ (K)", "ΔHₘᵢₓ (kJ/mol)", "ΔSₘᵢₓ (kJ/mol)", "Ω", "δ", "γ",
+                     "Λ", "ϕ", "Φ", "VEC", "Crystal Str.", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"]
 
         self.excel_worker = ExcelWriterWorker(self.temp_file_name, file_path, headers)
         self.excel_worker.progress.connect(self.update_progress)
@@ -1350,44 +1618,69 @@ class MDLHEAPP(QMainWindow):
             row_position = self.alloy_table.rowCount()
             self.alloy_table.insertRow(row_position)
             self.alloy_table.setItem(row_position, 0, QTableWidgetItem(alloy_name))
-            self.alloy_table.setItem(row_position, 1, QTableWidgetItem("{:.6f}".format(values["density"])))
-            self.alloy_table.setItem(row_position, 2, QTableWidgetItem("{:.6f}".format(values["delta"])))
-            self.alloy_table.setItem(row_position, 3, QTableWidgetItem("{:.6f}".format(values["gamma"])),)
-            self.alloy_table.setItem(row_position, 4, QTableWidgetItem("{:.6f}".format(values["enthalpy_of_mixing"])))
-            self.alloy_table.setItem(row_position, 5, QTableWidgetItem("{:.2f}".format(values["vec"])))
-            self.alloy_table.setItem(row_position, 6, QTableWidgetItem("{:.6f}".format(values["mixing_entropy"])))
-            self.alloy_table.setItem(row_position, 7, QTableWidgetItem("{:.2f}".format(values["melting_temp"])))
-            self.alloy_table.setItem(row_position, 8, QTableWidgetItem("{:.6f}".format(values["omega"])))
-            self.alloy_table.setItem(row_position, 9, QTableWidgetItem(values["cstr"]))
-            self.alloy_table.setItem(row_position, 10, QTableWidgetItem(values["model1"]))
-            self.alloy_table.setItem(row_position, 11, QTableWidgetItem(values["model2"]))
-            self.alloy_table.setItem(row_position, 12, QTableWidgetItem(values["model3"]))
-            self.alloy_table.setItem(row_position, 13, QTableWidgetItem(values["model4"]))
-            self.alloy_table.setItem(row_position, 14, QTableWidgetItem(values["model6"]))
-            self.alloy_table.setItem(row_position, 15, QTableWidgetItem(values["model7"]))
+            self.alloy_table.setItem(row_position, 1, QTableWidgetItem("{:.2f}".format(values["density"])))
+            self.alloy_table.setItem(row_position, 2, QTableWidgetItem("{:.0f}".format(values["melting_temp"])))
+            self.alloy_table.setItem(row_position, 3, QTableWidgetItem("{:.2f}".format(values["enthalpy_of_mixing"])))
+            self.alloy_table.setItem(row_position, 4, QTableWidgetItem("{:.2f}".format(values["mixing_entropy"])))
+            self.alloy_table.setItem(row_position, 5, QTableWidgetItem("{:.2f}".format(values["omega"])))
+            self.alloy_table.setItem(row_position, 6, QTableWidgetItem("{:.2f}".format(values["delta"])),)
+            self.alloy_table.setItem(row_position, 7, QTableWidgetItem("{:.2f}".format(values["gamma"])))
+            self.alloy_table.setItem(row_position, 8, QTableWidgetItem("{:.2f}".format(values["lambda"])))
+            self.alloy_table.setItem(row_position, 9, QTableWidgetItem("{:.2f}".format(values["phi_model7"])))
+            self.alloy_table.setItem(row_position, 10, QTableWidgetItem("{:.2f}".format(values["phi_model8"])))
+            self.alloy_table.setItem(row_position, 11, QTableWidgetItem("{:.2f}".format(values["vec"])))
+            self.alloy_table.setItem(row_position, 12, QTableWidgetItem(values["cstr"]))
+            self.alloy_table.setItem(row_position, 13, QTableWidgetItem(values["model1"]))
+            self.alloy_table.setItem(row_position, 14, QTableWidgetItem(values["model2"]))
+            self.alloy_table.setItem(row_position, 15, QTableWidgetItem(values["model3"]))
+            self.alloy_table.setItem(row_position, 16, QTableWidgetItem(values["model4"]))
+            self.alloy_table.setItem(row_position, 17, QTableWidgetItem(values["model5"]))
+            self.alloy_table.setItem(row_position, 18, QTableWidgetItem(values["model6"]))
+            self.alloy_table.setItem(row_position, 19, QTableWidgetItem(values["model7"]))
+            self.alloy_table.setItem(row_position, 20, QTableWidgetItem(values["model8"]))
+
+            self.total_items = self.alloy_table.rowCount()
+            self.total_pages = (self.total_items // self.items_per_page) + (self.total_items % self.items_per_page > 0)
+            self.update_pagination()
+            self.adjust_table_height()
+
         except ValueError:
             self.show_warning("Error", "Not enough data.")
         return 0
 
     def clear_alloy_info(self):
         self.alloy_table.setRowCount(0)
+        self.table_label.setText("")
+        
+        self.current_page = 1
+        self.total_items = 0
+        self.total_pages = 1
+        self.temp_file_name = None
+
+        self.update_pagination()
+        self.adjust_table_height()
 
     def save_to_excel(self):
-        settings = self.settings.load_settings()
+        if not self.temp_file_name:
+            QMessageBox.warning(self, "Export Error", "No data available for export.")
+            return
+
         directory = QFileDialog.getExistingDirectory(self, "Select Directory")
         if not directory:
-            return
-        file_path = os.path.join(directory, "alloy_info.xlsx")
+            return  # User canceled the operation
 
-        data = []
-        for row in range(self.alloy_table.rowCount()):
-            row_data = [self.alloy_table.item(row, col).text() for col in range(self.alloy_table.columnCount())]
-            data.append(row_data)
+        file_name = f"HEA_Calculator_Results_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
+        file_path = os.path.join(directory, file_name)
 
-        df = pd.DataFrame(data, columns=["Alloy", "Density (g/cm³)", "δ", "γ", "ΔHₘᵢₓ (kJ/mol)", "VEC", "ΔSₘᵢₓ (kJ/mol)", "Tₘ (K)", 
-                                         "Ω", "Crystal Str.", "R1", "R2", "R3", "R4", "R5", "R6"])
-        df.to_excel(file_path, index=False)
-        QMessageBox.information(self, "Save to Excel", f"Alloy information saved to {file_path}")
+        headers = ["Alloy", "Density (g/cm³)", "Tₘ (K)", "ΔHₘᵢₓ (kJ/mol)", "ΔSₘᵢₓ (kJ/mol)", "Ω", "δ", "γ",
+                     "Λ", "ϕ", "Φ", "VEC", "Crystal Str.", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"]
+
+        self.excel_worker = ExcelWriterWorker(self.temp_file_name, file_path, headers)
+        self.excel_worker.progress.connect(self.update_progress)
+        self.excel_worker.finished.connect(self.on_excel_write_finished)
+        
+        self.show_progress_dialog()
+        self.excel_worker.start()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

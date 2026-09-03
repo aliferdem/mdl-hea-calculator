@@ -1,9 +1,9 @@
-# Copyright (c) Ali Fethi Erdem.
+# Copyright (c) Metals Development Laboratory.
 #
 # This source code is licensed under the terms described in the LICENSE file in
 # the root directory of this source tree.
 #
-# Workers/alloy_calculation.py
+# workers/composition_generation.py
 
 import itertools
 from PySide6.QtCore import QThread, Signal
@@ -13,20 +13,25 @@ class CompositionGenerationWorker(QThread):
 
     def __init__(self, selected_elements, step_size):
         super().__init__()
-        self.selected_elements = selected_elements
-        self.step_size = step_size
+        self.selected_elements = selected_elements  # Dictionary of element ranges
+        self.step_size = step_size  # Integer step size
 
     def run(self):
         compositions = []
         keys, ranges = zip(*self.selected_elements.items())
+
+        # Convert ranges to integers and generate valid ranges for each element
         ranges = [
-            list(range(int(start), int(end) + 1, int(self.step_size)))
+            [
+                value for value in range(int(start), int(end) + 1, int(self.step_size))
+            ]
             for start, end in ranges
         ]
-        
+
+        # Generate all possible combinations
         for values in itertools.product(*ranges):
-            composition = dict(zip(keys, values))
-            if sum(composition.values()) == 100:
-                compositions.append(composition)
-        
+            if sum(values) == 100:  # Only include combinations summing to 100
+                compositions.append(dict(zip(keys, values)))
+
+        # Emit the resulting compositions
         self.compositions_ready.emit(compositions)

@@ -1,9 +1,9 @@
-# Copyright (c) Ali Fethi Erdem.
+# Copyright (c) Metals Development Laboratory.
 #
 # This source code is licensed under the terms described in the LICENSE file in
 # the root directory of this source tree.
 #
-# Components/periodic_table.py
+# components/periodic_table.py
 
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QPushButton, QSpacerItem, QSizePolicy
@@ -82,12 +82,16 @@ class PeriodicTable(QObject):
     def eventFilter(self, obj, event):
         if isinstance(obj, QPushButton):
             if event.type() == event.Type.Enter:
+                # EĞER HATA MESAJI AKTİFSE HOVER GÜNCELLEMESİNİ İPTAL ET
+                if self.status_label.objectName() == "status_error":
+                    return super().eventFilter(obj, event)
+
                 element = obj.text()
                 group = self.engine.periodic_table[element]["position"][2]
                 color = self.element_colors.get(group, {"normal": "#333333", "hover": "#444444"})
                 properties = self.engine.periodic_table[element]["properties"]
                 position = self.engine.periodic_table[element]["position"]
-
+                
                 melting_point = properties.get("melting_point", "N/A")
                 density = properties.get("density", "N/A")
                 atomic_weight = properties.get("atomic_weight", "N/A")
@@ -105,12 +109,14 @@ class PeriodicTable(QObject):
                 self.status_label.show()
                 self.status_label.setText(properties_text)
                 self.status_label.setStyleSheet(
-                    f"""
-                    QLabel {{
-                        background-color: none; 
+                    """
+                    QLabel {
+                        background-color: transparent; 
+                        border: none;
                         border-radius: 0px;
                         font-size: 10pt;
                         padding: 2px;
-                    }}"""
+                        padding-left: 10px;
+                    }"""
                 )
         return super().eventFilter(obj, event)

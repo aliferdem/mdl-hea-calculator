@@ -1,9 +1,9 @@
-# Copyright (c) Ali Fethi Erdem.
+# Copyright (c) Metals Development Laboratory.
 #
 # This source code is licensed under the terms described in the LICENSE file in
 # the root directory of this source tree.
 #
-# Components/selected_elements_frame.py
+# components/selected_elements_frame.py
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QSpacerItem, QSizePolicy, QPushButton
 from Utils.ui_helpers import default_line_edit
