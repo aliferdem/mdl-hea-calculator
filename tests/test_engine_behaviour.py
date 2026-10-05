@@ -39,12 +39,20 @@ def test_equiatomic_basic_descriptors(engine):
 
 
 def test_binary_and_physical_zero_mixing(engine):
-    res = engine.calculate({"Fe": 1, "Mn": 1})  # Takeuchi Fe-Mn = 0: a value, not missing data
+    # Takeuchi & Inoue define H/C/N-containing pairs as exactly 0 kJ/mol.  That is a tabulated
+    # VALUE, not missing data, so dHmix is 0.0 and the pair is not reported as missing.  Omega is
+    # then mathematically divergent, so it is reported as unavailable with a reason instead of as
+    # +inf, which would read as an unusually good solid solution.  M1 needs Omega, so it is N/A.
+    res = engine.calculate({"Fe": 1, "Mn": 1})
     d = res.descriptors
     assert d["dhmix"] == 0.0
-    assert d["omega"] == math.inf
-    assert res.label("M1") in ("SS", "MP") and res.label("M1") != NA
+    assert d["omega"] is None
+    assert d["omega_undefined"] and "undefined" in d["omega_undefined"]
+    assert res.label("M1") == NA
+    assert res.models["M1"].reason == d["omega_undefined"]
     assert not d["missing_mixing_pairs"]
+    # A tabulated zero is still a real value for every model that does not divide by dHmix.
+    assert res.label("M4") != NA and res.label("M3") != NA
 
 
 def test_missing_mixing_pair_only_affects_dependent_models(engine):
@@ -130,10 +138,14 @@ def test_threshold_boundaries_inclusive_exclusive(engine):
     assert _judge(engine, hf_min=-99.9).label("M6") == "SS"
     assert _judge(engine, hf_max=37.0).label("M6") == "MP"
     assert _judge(engine, hf_max=36.9).label("M6") == "SS"
-    # King: Phi >= 1 and delta_CN12 <= 6.6
+    # King (2016) Section 3.1: Phi >= 1, and nothing else.  The d <= 6.6 % screen is Section 3.4's
+    # candidate-generation filter, so a Phi success must survive any delta - and M8 must not need
+    # a Kittel CN12 radius at all.
     assert _judge(engine, phi_king=1.0).label("M8") == "SS"
     assert _judge(engine, phi_king=0.999).label("M8") == "MP"
-    assert _judge(engine, phi_king=1.5, delta_cn12=6.61).label("M8") == "MP"
+    assert _judge(engine, phi_king=1.5, delta_cn12=12.0).label("M8") == "SS"
+    assert _judge(engine, phi_king=1.0, delta_cn12=None).label("M8") == "SS"
+    # CrMnNbTaW (Phi 1.467, dCN12 6.61) and CrMnTiVSc (Phi 1.110, dCN12 10.00) are exactly these cases.
 
 
 def test_senkov_miracle_equation_6_both_signs(engine):

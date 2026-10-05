@@ -23,10 +23,16 @@ atomic fractions cᵢ (Σcᵢ = 1); zero amounts are dropped; at least two eleme
 | F2 | **Binary formation-enthalpy dataset was not the published Troparevsky matrix.** The old `binary_formation_enthalpy_data.json` (from `update_miedema.py`, attributed to an unlocatable "Morris et al. 2020 Table 4") differed in 15 cells, incl. sign flips Ti–La (−170 vs +134/+170) and Mo–Zn (+42 vs −42), Ti–Cr −119 (published −372), Fe–Mo −61 (−484), Fe–W −33 (−554). | Published supplement & main-text Fig. 1 (both rendered and read). Troparevsky Table I (FeCoNi+Mo multiphase) is only reproduced with Fe–Mo = −484. Senkov & Miracle Table 1 ΔH_IM: published matrix reproduces **44/45** values exactly; the old data fails 9/45 (e.g. CrNbTiZr −6.27 vs −12.37). Practical check: CoFeMnMoNi (exp. FCC+IM) and CrNbTiZr (exp. BCC+IM) were predicted SS by old M6/M7. | Replaced with the published matrix (upper-triangle rule, §3.3). Old data preserved in `archive/update_miedema.py`. |
 | F3 | **Yang & Zhang δ used the wrong radius set.** Old preview used one radius (`atomic_radius`, Guo & Liu 2011) for everything. | Yang & Zhang cite Kittel (CN12 radii). Recomputing their Table 1: Kittel CN12 reproduces 88 % of δ within 0.02 (median error 0.003); Guo–Liu radii median error 0.43. Guo 2013 / Singh 2014 / Guo–Liu 2011 tables are reproduced by Guo–Liu radii (96 %/86 %/96 %). | Added `atomic_radius_cn12` (Kittel Table 9, hand-transcribed, matches legacy for all 70 elements). δ_CN12 used by M1 and M8; δ (Guo–Liu) by M2, M3, M4, M5. |
 | F4 | **King structural term applied to non-transition metals** (e.g. Al–Ni). | Bakker (1998) Part I §5.2 and Part II Eq. 51: the structural term "is only non-zero for a solid solution of two transition metals". King benchmark AlCoCrFeNi ΔG_ss: −34.96 (old) → −33.71 (new) vs −33.89 published. | Structural term restricted to transition-metal pairs with 3 ≤ z ≤ 10. |
-| F5 | **Senkov–Miracle returned N/A for ΔH_mix ≥ 0** (old) / used the k₁ ratio regardless of sign (legacy). | Eq. (6) SS condition ΔH_mix − TΔS < ΔH_IM − k₂TΔS is general; Eq. (7)/(8) divide by ΔH_mix assuming ΔH_mix < 0 (inequality flips for ΔH_mix > 0). Authors still report positive-ΔH_mix alloys (CoCrCuFeMn, Cu0.5CoCrFeNi) in Table 1. | Evaluate Eq. (6) directly — identical to k₁ < k₁cr for ΔH_mix < 0, physically correct for ΔH_mix ≥ 0. Reproduces every Table 1 classification of the positive-ΔH_mix alloys. |
+| F5 | **Senkov–Miracle returned N/A for ΔH_mix ≥ 0** (old) / used the k₁ ratio regardless of sign (legacy). | Eq. (6) SS condition ΔH_mix − TΔS < ΔH_IM − k₂TΔS is general; Eq. (7)/(8) divide by ΔH_mix assuming ΔH_mix < 0 (inequality flips for ΔH_mix > 0). Authors still report positive-ΔH_mix alloys (CoCrCuFeMn, Cu0.5CoCrFeNi) in Table 1. | Evaluate Eq. (6) directly — identical to k₁ < k₁cr for ΔH_mix < 0, physically correct for ΔH_mix ≥ 0. Reproduces every Table 1 classification of the positive-ΔH_mix alloys. **F9 adds:** the verdict is kept, but any ΔH_mix ≥ 0 result now carries `status="extrapolated"` and an explicit caution, because §1.1 states the derivation's domain. |
 | F6 | Default assessment temperature for M6/M7 (old 0.60·Tm, legacy 0.55·Tm). | Troparevsky: experimental T_ann of the known HEAs correspond to 0.53–0.56 Tm and the authors later refer to "T_crit = 0.55 T_M as suggested above"; Senkov & Miracle describe Troparevsky's model as annealing at T_cr ≈ 0.55 Tm. | Default **0.55·Tm**, overridable by an explicit annealing temperature (shared by M6 and M7); the source is reported with each result. |
 | F7 | Old preview raised an exception (whole alloy failed) when any ΔH_mix pair was missing. | Requirement: missing data ≠ zero; independent descriptors must still be produced. | Missing binary data → only dependent descriptors/models are N/A with an explicit reason. Tabulated zeros (e.g. Fe–Mn = 0) are values. |
 | F8 | Legacy King implementation uses a hand-transcribed interfacial table with errors (Cu-in-Ni 4 vs Bakker +14, Ir-in-Fe −59 vs −38, Ir-in-Cu 64 vs +1, W-in-Fe −6 vs 0, Au-in-Co 25 vs +33, Mo-in-Y −70 vs +114). | Bakker Table A2 pages rendered and read. | New engine computes ΔH_inter from the Miedema equation with Bakker Table A1 parameters; it reproduces Bakker Table A2 within ±2.1 kJ/mol for all 840 TM–TM pairs (test). |
+| F9 | **M8 applied a δ ≤ 6.6 % screen that is not part of King's criterion.** The code used `Φ ≥ 1 AND δ_CN12 ≤ 6.6`, and M8 returned `N/A` whenever a Kittel CN12 radius was missing. | King et al. 2016 **§3.1** states the solid-solution region as **Φ ≥ 1 and nothing else**; the δ screen is **§3.4**'s description of how candidate alloys are *generated*. King explicitly keeps NbTiV2Zr — "the only system that has both Φ > 1 and δ > 6.6" — in the success set. An exhaustive scan of 523 204 equimolar 5/6/7-element combinations found 20 systems the AND-term demoted. | M8 is now **Φ ≥ 1 alone**; no radius set is required. `CrMnNbTaW` (Φ 1.467, δ 6.61), `CrMnTiNbTa` (1.425, 6.96) and `CrMnTiVSc` (1.110, 10.00) are `SS`, as King requires. Criterion text in `MODELS["M8"]` updated. Tests: `tests/test_model_boundaries.py::test_m8_*`. |
+| F10 | **A threshold decided by IEEE-754 noise.** `CoCrFeNiCu` computes ΔH_mix = 3.200000000000001, one ULP above Guo's printed window edge of 3.2, so the most-cited Cantor-type HEA was reported `MP`. | Yang & Zhang 7.36/FCC, Guo Table 1 `SS`, Singh Λ 12.529 — all treat it as a solid solution. | `engine.THRESHOLD_REL_TOL = 1e-12` **relative**, applied **only to inclusive comparisons** (`_ge`/`_le`). A source printing `>`/`<` keeps an exact comparison, so strictness at the bound still means what it says (Guo −12.2, Wang 1.175, Troparevsky 37 meV/atom). A difference of 0.01 still flips every verdict — asserted in `tests/test_model_boundaries.py`. |
+| F11 | **Divergent descriptors were exposed as ±∞.** Ω = Tm·ΔS/|ΔH_mix| became `+inf` for a tabulated 0 kJ/mol pair (Takeuchi & Inoue define H/C/N pairs as exactly 0), which reads as an unusually good solid solution. Same for Λ when δ = 0, φ when S_E = 0 and Φ when ΔG_max = 0. | A vanishing denominator makes a ratio divergent, not large. `math.inf` is not a scientific result class. | All four now return `None` with a dedicated `*_undefined` reason string, and the affected model reports `N/A` carrying that reason. No descriptor is ever infinite — asserted over 3 000+ compositions in `tests/test_model_boundaries.py::test_no_descriptor_is_ever_infinite`. |
+| F12 | **43 of 435 formation-enthalpy cells lie outside the publication figure's own range and only 5 were flagged; none reached the user.** Fe–Ta −3468, Fe–Nb −2505, Al–Cd −1938 … W–Re −719 meV/atom. FeTa was therefore classified `IM` by M6 from a transcription artefact. | The source is a colour-scaled **figure** (Supplemental Fig. 1, legend ≈ −500…+300). Independently: \|ΔH_mix\| = 4·\|Σ cᵢcⱼΔH(ij)\| ≤ 2·max\|ΔH(ij)\|, and the largest ΔH_mix published anywhere in the eight-model corpus is 29.97 kJ/mol, so a cell above ~1000 meV/atom cannot contribute to any published ΔH_mix. | `_metadata.data_quality` now carries the guard, its justification, the three prose anchors and a `suspect_override` list. **No value was replaced, clamped or interpolated.** `Datasets.formation_suspect_pairs()` derives the flags from metadata; the engine exposes `descriptors["formation_suspect_pairs"]` and marks M6/M7 `status="data_suspect"` with a caution naming the offending cell. A corrected matrix is a pure data swap — asserted by `test_matrix_can_be_replaced_without_touching_model_code`. |
+| F13 | **M7 presented an extrapolation as a literature-defined prediction.** §1.1 assumes the relations hold "for HEAs with negative values of ΔH_mix"; the code returned a bare SS/IM for ΔH_mix ≥ 0. | Senkov & Miracle 2016 §1.1. | The verdict is kept (see F5) but ΔH_mix ≥ 0 now yields `status="extrapolated"` plus a caution quoting the paper's domain; ΔH_mix = 0 additionally states that the published k₁/k₁cr form is undefined and only the ΔG form of Eq. (6) can be evaluated. |
+| F14 | **M2's intermetallic region was silently unresolved.** Guo Fig. 1 defines three regions; the engine implements two, so M2 can never return `IM`. Six published Guo rows disagree. | Guo Fig. 1 gives the intermetallic region only graphically — no numeric boundary exists in the source. | **No boundary was invented.** M2 now reports `MP` *and* attaches a caution: outside both published criteria, with an intermetallic region bounded only graphically, so SS / IM / other is not separated here. `MODELS["M2"].criterion` states which signs are project convention. |
 
 Items flagged for user review are marked **⚑ REVIEW**.
 
@@ -190,3 +196,50 @@ All workflows produce plain `{element: amount}` dictionaries that the single eng
   calculations.
 * **Spreadsheet import** (`core/spreadsheet.py`) — a formula column or one column per element; malformed
   numbers, negative amounts, unknown element columns and rows with < 2 elements are reported per row.
+
+---
+
+## 8. Independent validator reconciliation (independent audit applied)
+
+Baseline commit `cced89b`. Findings F9–F14 above came from an independent re-derivation of the
+eight publications from `Model Sources/`, cross-checked against the literature *and* against a
+from-scratch recomputation using the same binary tables — never against the implementation's own
+output. The independent harness is kept outside the project test suite on purpose:
+the independent validator script (read-only, 799 checks).
+
+| | before | after |
+|---|---|---|
+| Project test suite | 140 passed | **203 passed** |
+| Validator PASS | 594 | **600** |
+| Validator FAIL | 56 | **8** |
+| Validator UNSUPPORTED | 5 | 5 |
+| Validator ERROR | 0 | 0 |
+
+The 8 remaining validator failures are all deliberate and documented, not outstanding work:
+
+1. **6 × M2 intermetallic region** (F14) — the source bounds it only graphically.
+2. **1 × Φ accuracy** — `Co43Cr1Fe7Ni49` computes 9.288 against a published 8.93 (+4.0 %), while
+   King's three equimolar worked examples match within 1–2 %. Documented accuracy envelope, not a
+   coding error; the constants are not retuned to chase one table.
+3. **1 × |ΔH_f| ≤ 700 meV/atom** — F12. The cells are still in the dataset because **no replacement
+   value may be invented**; they are flagged instead.
+4. **1 × Yang & Zhang melting-point column** — reproduces 6/133 against any modern table, because
+   their Ω column implies Cr ≈ 2133 K, Ti ≈ 1946 K, Co ≈ 1770 K. Ω is Tm-insensitive. **Do not
+   retrofit one publication's melting-point column.**
+
+### Two earlier claims in the independent audit that were corrected
+
+* **Senkov k₁ᶜʳ 45/45 → 24/45.** The 21 non-reproducing rows are not a data defect: Senkov's own
+  printed ΔH_mix column disagrees with the Takeuchi–Inoue binary table that every other model uses
+  (`Al0.5CoCrCuFeNi`: Senkov −3.40, table −1.521, while Yang & Zhang and Guo both print −1.52).
+  k₁ᶜʳ depends only on ΔS, |ΔH_mix| and T_A, never on the damaged formation matrix.
+* **Yang & Zhang Table 2 ΔH_mix 33/33 → 30/33.** Three bulk-metallic-glass rows differ; the app
+  matches the binary table in each case.
+
+### Threshold comparison — the rule, stated once
+
+`engine.THRESHOLD_REL_TOL = 1e-12`, relative, applied through `_ge`/`_le` to **inclusive**
+comparisons only. A source that prints `≥` or `≤` states an inclusive rule, so representation noise
+must not exclude a value equal to the bound. A source that prints `<` or `>` states a strict rule,
+and that strictness is meaningful at the bound, so those comparisons are exact. Both halves are
+pinned from both sides in `tests/test_model_boundaries.py`.

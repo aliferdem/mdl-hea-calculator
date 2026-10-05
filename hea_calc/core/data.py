@@ -123,6 +123,34 @@ class Datasets:
         return self._symmetric(self._formation, a, b)
 
     @cached_property
+    def _formation_suspect(self) -> frozenset[str]:
+        """Cells the dataset flags as unreliable, derived from ``_metadata.data_quality``.
+
+        A cell is suspect when its magnitude exceeds the publication figure's own colour-scale
+        range (``out_of_range_guard_mev``) or when the dataset names it in ``suspect_override``.
+        Values are never modified - only labelled.
+        """
+        dq = self.formation_metadata.get("data_quality", {})
+        guard = dq.get("out_of_range_guard_mev")
+        out: set[str] = set()
+        if guard is not None:
+            for a, row in self._formation.items():
+                for b, v in row.items():
+                    if a != b and abs(float(v)) > float(guard):
+                        out.add(f"{a}-{b}")
+                        out.add(f"{b}-{a}")
+        out.update(dq.get("suspect_override", []))
+        return frozenset(out)
+
+    def formation_is_suspect(self, pair: str) -> bool:
+        """True when ``pair`` (either orientation, e.g. ``"Fe-Ta"``) is flagged unreliable."""
+        return pair in self._formation_suspect
+
+    def formation_suspect_pairs(self) -> frozenset[str]:
+        """Every flagged pair, both orientations, as frozen strings."""
+        return self._formation_suspect
+
+    @cached_property
     def mixing_elements(self) -> set[str]:
         out = set(self._mixing)
         for row in self._mixing.values():

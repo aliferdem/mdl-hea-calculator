@@ -15,7 +15,7 @@ M4    Singh et al. (2014)           Lambda = dSmix / delta^2
 M5    Ye et al. (2015)              phi = (Sc - S_H)/|S_E| >= 20
 M6    Troparevsky et al. (2015)     -T dSmix < dHf(ij) < 37 meV/atom for every pair
 M7    Senkov & Miracle (2016)       dHmix - T dSmix < dH_IM - k2 T dSmix  (k2 = 0.6)
-M8    King et al. (2016)            Phi = dG_ss / -|dG_max| >= 1 and delta(CN12) <= 6.6 %
+M8    King et al. (2016)            Phi = dG_ss / -|dG_max| >= 1
 ====  ============================  =====================================================
 """
 
@@ -38,6 +38,41 @@ SS, MP, IM, SS_IM, MG, NA = "SS", "MP", "IM", "SS+IM", "MG", "N/A"
 DEFAULT_TCRIT_FRACTION = 0.55  # Troparevsky et al. (2015): T_crit = 0.55 T_m (see audit, M6)
 SENKOV_K2 = 0.6  # Senkov & Miracle (2016): partially ordered IM, k2 = 0.6
 TROPAREVSKY_UPPER_MEV = 37.0  # meV/atom
+
+# ------------------------------------------------------------------ threshold resolution
+# Every model boundary is a printed number, and the descriptor compared against it is a
+# floating-point sum over up to ten concentration-weighted binary terms.  A value that differs from
+# the printed threshold only in its last few bits is the *same number* for the purpose of this
+# model, and letting IEEE-754 representation decide a scientific result class is simply wrong.
+#
+# THRESHOLD_REL_TOL is therefore twelve orders of magnitude finer than the precision any of these
+# thresholds is quoted to.  It absorbs accumulated representation noise - the Cantor alloy computes
+# dHmix = 3.200000000000001 against a printed window edge of 3.2 - and nothing else: a difference
+# of 0.01, or of a single printed digit, still flips the verdict, so this cannot mask a genuine
+# disagreement.  tests/test_models_published.py and tests/test_engine_behaviour.py pin both sides.
+THRESHOLD_REL_TOL = 1e-12
+
+
+def _tol(limit: float) -> float:
+    """Absolute slack that still means 'the same number' as ``limit``."""
+    return abs(limit) * THRESHOLD_REL_TOL
+
+
+# The tolerance applies to INCLUSIVE comparisons only.  A source that prints ">=" or "<=" states an
+# inclusive rule, so representation noise must not exclude a value equal to the bound.  A source that
+# prints "<" or ">" states a strict rule and that strictness is meaningful at the bound: Guo Sec. 4.1
+# prints dHmix < -12.2 kJ/mol, so an alloy at exactly -12.2 kJ/mol is not in the amorphous region.
+# Strict comparisons below are therefore written exactly, without _ge/_le.
+
+
+def _ge(value: float, limit: float) -> bool:
+    """``value >= limit``, modulo representation noise only (see THRESHOLD_REL_TOL)."""
+    return value >= limit - _tol(limit)
+
+
+def _le(value: float, limit: float) -> bool:
+    """``value <= limit``, modulo representation noise only (see THRESHOLD_REL_TOL)."""
+    return value <= limit + _tol(limit)
 
 MODEL_KEYS = ("M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8")
 
@@ -79,8 +114,16 @@ MODELS: dict[str, ModelInfo] = {
                     "otherwise IM."),
     "M8": ModelInfo("M8", "King et al.", "Model 8 – King et al. (2016)",
                     "D.J.M. King, S.C. Middleburgh, A.G. McGregor, M.B. Cortie, Acta Mater. 104 (2016) 172–179.",
-                    "SS if Φ ≥ 1 and δ(CN12) ≤ 6.6 %, otherwise MP."),
+                     "SS if Φ ≥ 1, otherwise MP.  The δ ≤ 6.6 % screen is King §3.4’s candidate-generation filter, not part of the criterion; King §3.1 keeps NbTiV₂Zr — Φ > 1 with δ > 6.6 — in the success set."),
 }
+
+
+# Evidence status of a verdict.  The label is always present; the status says how much weight it
+# can carry, so the UI can separate a literature-defined prediction from an extrapolation or from
+# one that rests on data the dataset itself flags as unreliable.
+STATUS_IN_DOMAIN = "in_domain"          # the criterion applies as the publication defines it
+STATUS_EXTRAPOLATED = "extrapolated"    # evaluated outside the criterion's stated domain
+STATUS_DATA_SUSPECT = "data_suspect"    # a binary value flagged as unreliable drives it
 
 
 @dataclass
@@ -90,6 +133,7 @@ class ModelOutcome:
     reason: str | None = None
     values: dict = field(default_factory=dict)
     caution: str | None = None
+    status: str = STATUS_IN_DOMAIN
 
 
 @dataclass
@@ -278,10 +322,19 @@ class Engine:
             d["dhmix"] = sum(4.0 * c[a] * c[b] * data.mixing_enthalpy(a, b) for a, b in pairs)
 
         # Omega (Yang & Zhang 2012) = Tm dSmix / |dHmix|.
+        # A tabulated 0 kJ/mol pair (Takeuchi & Inoue define H/C/N-containing pairs as 0) makes the
+        # denominator vanish.  Omega is then mathematically divergent, not large, so it is reported
+        # as unavailable with an explicit reason rather than as an infinite number that would read
+        # as an unusually good solid solution.
+        d["omega_undefined"] = None
         if d["dhmix"] is None or d["tm"] is None:
             d["omega"] = None
         elif d["dhmix"] == 0:
-            d["omega"] = math.inf
+            d["omega"] = None
+            d["omega_undefined"] = ("ΔHmix = 0 (tabulated zero pair), so "
+                                    "Ω = Tm·ΔS/|"
+                                    "ΔHmix| is divergent and "
+                                    "Ω is undefined.")
         else:
             d["omega"] = d["tm"] * d["dsmix"] / (abs(d["dhmix"]) * 1000.0)
 
@@ -301,10 +354,14 @@ class Engine:
 
         d["gamma"] = self._gamma(c, radii_gl)
         # Singh et al. (2014): Lambda = dSmix / delta^2 (delta in %).
+        d["lambda_undefined"] = None
         if d["delta"] is None:
             d["lambda"] = None
         elif d["delta"] == 0:
-            d["lambda"] = math.inf
+            # delta = 0 needs identical radii for every element; ΔSmix/δ^2 then diverges.
+            d["lambda"] = None
+            d["lambda_undefined"] = ("δ = 0, so Λ = ΔS/δ² is divergent "
+                                    "and Λ is undefined.")
         else:
             d["lambda"] = d["dsmix"] / d["delta"] ** 2
 
@@ -319,8 +376,12 @@ class Engine:
             s_h = abs(d["dhmix"]) * 1000.0 / d["tm"]
             num = d["dsmix"] - s_h
             d["s_h"] = s_h
+            d["phi_ye_undefined"] = None
             if abs(d["s_e"]) < 1e-15:
-                d["phi_ye"] = math.copysign(math.inf, num) if num != 0 else 0.0
+                # |S_E| -> 0 makes phi = (dS - S_H)/|S_E| divergent, not large.
+                d["phi_ye"] = None
+                d["phi_ye_undefined"] = ("S_E = 0, so φ = (ΔS - S_H)/|S_E| is "
+                                        "divergent and φ is undefined.")
             else:
                 d["phi_ye"] = num / abs(d["s_e"])
 
@@ -330,6 +391,9 @@ class Engine:
         if missing_form:
             d["hf_min"] = d["hf_max"] = d["dhim"] = None
             d["hf_min_pair"] = d["hf_max_pair"] = None
+            d["formation_asymmetric_pairs"] = []
+            d["formation_suspect_pairs"] = []
+            d["formation_suspect_values"] = {}
         else:
             hf = {(a, b): data.formation_enthalpy(a, b) for a, b in pairs}
             (pmin, vmin) = min(hf.items(), key=lambda kv: kv[1])
@@ -341,6 +405,14 @@ class Engine:
             asym = {item["pair"] for item in data.formation_metadata.get("asymmetric_entries", [])}
             used = [f"{a}-{b}" for a, b in pairs if f"{a}-{b}" in asym or f"{b}-{a}" in asym]
             d["formation_asymmetric_pairs"] = used
+            # Cells the dataset itself flags as outside the source figure's range.  They are kept
+            # exactly as transcribed (never replaced, never clamped) but must not silently drive
+            # an authoritative verdict.
+            suspect = data.formation_suspect_pairs()
+            d["formation_suspect_pairs"] = [f"{a}-{b}" for a, b in pairs
+                                             if f"{a}-{b}" in suspect or f"{b}-{a}" in suspect]
+            d["formation_suspect_values"] = {p: data.formation_enthalpy(*p.split("-"))
+                                             for p in d["formation_suspect_pairs"]}
 
         d["k1"] = None
         if d["dhim"] is not None and d["dhmix"] not in (None, 0):
@@ -534,8 +606,14 @@ class Engine:
         d["dg_max"] = dg_max
         d["dh_int_max"] = h_max
         d["king_pair"] = "–".join(pair)
+        d["phi_king_undefined"] = None
         if dg_max == 0:
-            d["phi_king"] = math.inf if dg_ss < 0 else -math.inf
+            # dG_max = 0 leaves Phi = dG_ss / -|dG_max| divergent.  Its sign would be a statement
+            # about a zero denominator, not a physical prediction.
+            d["phi_king"] = None
+            d["phi_king_undefined"] = ("ΔG_max = 0, so Φ = "
+                                       "ΔG_ss / -|ΔG_max| is divergent and "
+                                       "Φ is undefined.")
         else:
             d["phi_king"] = dg_ss / (-abs(dg_max))
 
@@ -568,11 +646,12 @@ class Engine:
 
         # M1 Yang & Zhang
         if d["omega"] is None:
-            m["M1"] = ModelOutcome("M1", NA, "ΔHmix unavailable (missing binary data).")
+            m["M1"] = ModelOutcome("M1", NA,
+                                   d.get("omega_undefined") or "ΔHmix unavailable (missing binary data).")
         elif d["delta_cn12"] is None:
             m["M1"] = ModelOutcome("M1", NA, "Kittel CN12 radius unavailable.")
         else:
-            ok = d["omega"] >= 1.1 and d["delta_cn12"] <= 6.6
+            ok = _ge(d["omega"], 1.1) and _le(d["delta_cn12"], 6.6)
             m["M1"] = ModelOutcome("M1", SS if ok else MP,
                                    values={"omega": d["omega"], "delta_cn12": d["delta_cn12"]})
 
@@ -583,27 +662,36 @@ class Engine:
             m["M2"] = ModelOutcome("M2", NA, "Atomic radius unavailable.")
         else:
             dl, h = d["delta"], d["dhmix"]
-            if dl <= 6.6 and -11.6 <= h <= 3.2:
+            if _le(dl, 6.6) and _ge(h, -11.6) and _le(h, 3.2):
                 lab = SS
             elif dl > 6.4 and h < -12.2:
                 lab = MG
             else:
                 lab = MP
-            m["M2"] = ModelOutcome("M2", lab, values={"delta": dl, "dhmix": h}, caution=caution_gl)
+            caution = caution_gl
+            if lab == MP:
+                # Guo Fig. 1 defines a third, intermetallic region between the solid-solution and
+                # the metallic-glass regions, bounded only graphically.  It is not derivable from
+                # the printed criteria, so this alloy is reported as "multiple phases" - correct as
+                # a class - while stating that SS / IM / other cannot be separated here.
+                caution = ((caution + "  ") if caution else "") + (
+                    "Outside both published Guo criteria. Fig. 1 also defines an intermetallic "
+                    "region bounded only graphically, so SS / IM / other is not separated here.")
+            m["M2"] = ModelOutcome("M2", lab, values={"delta": dl, "dhmix": h}, caution=caution)
 
         # M3 Wang et al.
         if d["gamma"] is None:
             m["M3"] = ModelOutcome("M3", NA, "Atomic radius unavailable.")
         else:
-            m["M3"] = ModelOutcome("M3", SS if d["gamma"] < 1.175 else MP, values={"gamma": d["gamma"]},
-                                   caution=caution_gl)
+            m["M3"] = ModelOutcome("M3", SS if d["gamma"] < 1.175 else MP,
+                                   values={"gamma": d["gamma"]}, caution=caution_gl)
 
         # M4 Singh et al.
         lam = d["lambda"]
         if lam is None:
-            m["M4"] = ModelOutcome("M4", NA, "Atomic radius unavailable.")
+            m["M4"] = ModelOutcome("M4", NA, d.get("lambda_undefined") or "Atomic radius unavailable.")
         else:
-            lab = SS if lam > 0.96 else (SS_IM if lam >= 0.24 else IM)
+            lab = SS if lam > 0.96 else (SS_IM if lam >= 0.24 - _tol(0.24) else IM)
             m["M4"] = ModelOutcome("M4", lab, values={"lambda": lam}, caution=caution_gl)
 
         # M5 Ye et al.
@@ -611,8 +699,9 @@ class Engine:
             reason = "ΔHmix unavailable (missing binary data)." if d["dhmix"] is None else "S_E could not be evaluated."
             m["M5"] = ModelOutcome("M5", NA, reason)
         else:
-            m["M5"] = ModelOutcome("M5", SS if d["phi_ye"] >= 20.0 else MP,
-                                   values={"phi": d["phi_ye"], "s_e": d["s_e"]}, caution=caution_gl)
+            m["M5"] = ModelOutcome("M5", SS if d["phi_ye"] >= 20.0 - _tol(20.0) else MP,
+                                   values={"phi": d["phi_ye"], "s_e": d["s_e"]},
+                                   caution=caution_gl)
 
         t = res.temperature
         # M6 Troparevsky et al.
@@ -622,16 +711,28 @@ class Engine:
         elif t is None:
             m["M6"] = ModelOutcome("M6", NA, "No temperature available.")
         else:
-            low_bad = not (d["hf_lower"] < d["hf_min"])
-            high_bad = not (d["hf_max"] < TROPAREVSKY_UPPER_MEV)
+            # Troparevsky: a solid solution needs every dHf STRICTLY inside
+            # (-T*dSmix, +37), so a cell sitting exactly on a bound violates it. The
+            # tolerance only absorbs representation noise in the violating direction; it
+            # never widens the window.
+            low_bad = d["hf_min"] <= d["hf_lower"]
+            high_bad = d["hf_max"] >= TROPAREVSKY_UPPER_MEV
             lab = IM if low_bad else (MP if high_bad else SS)
-            caution = None
+            status = STATUS_IN_DOMAIN
+            notes = []
             if d.get("formation_asymmetric_pairs"):
-                caution = ("Uses pair(s) printed asymmetrically in the published matrix: "
-                           + ", ".join(d["formation_asymmetric_pairs"]) + ".")
+                notes.append("Uses pair(s) printed asymmetrically in the published matrix: "
+                             + ", ".join(d["formation_asymmetric_pairs"]) + ".")
+            if d.get("formation_suspect_pairs"):
+                notes.append("Verdict driven by binary value(s) the dataset flags as outside the "
+                             "published figure's range and therefore unreliable: "
+                             + ", ".join(f"{p} = {d['formation_suspect_values'][p]:g} meV/atom"
+                                         for p in d["formation_suspect_pairs"]) + ".")
+                status = STATUS_DATA_SUSPECT
             m["M6"] = ModelOutcome("M6", lab, values={"hf_min": d["hf_min"], "hf_max": d["hf_max"],
                                                       "lower": d["hf_lower"], "upper": TROPAREVSKY_UPPER_MEV,
-                                                      "T": t}, caution=caution)
+                                                      "T": t},
+                                   caution=("  ".join(notes) if notes else None), status=status)
 
         # M7 Senkov & Miracle
         if d["missing_formation_pairs"]:
@@ -645,20 +746,49 @@ class Engine:
             ts = t * d["dsmix"] / 1000.0
             g_ss = d["dhmix"] - ts
             g_im = d["dhim"] - SENKOV_K2 * ts
-            m["M7"] = ModelOutcome("M7", SS if g_ss < g_im else IM,
-                                   values={"k1": d["k1"], "k1cr": d["k1cr"], "g_ss": g_ss, "g_im": g_im, "T": t})
+            lab = SS if g_ss < g_im else IM
+            caution, status = None, STATUS_IN_DOMAIN
+            # Senkov & Miracle 2016 Section 1.1 assumes the linear relations hold "for HEAs with
+            # negative values of dHmix".  Outside that domain the verdict is an extrapolation, and
+            # is labelled as one rather than presented as literature-defined.
+            if d["dhmix"] >= 0:
+                caution = ("Extrapolation: Senkov & Miracle (2016) derive this criterion for "
+                           "ΔHmix < 0, but this alloy has "
+                           "ΔHmix = %+.2f kJ/mol." % d["dhmix"])
+                status = STATUS_EXTRAPOLATED
+                if d["dhmix"] == 0:
+                    caution += (" ΔHmix = 0 exactly (a tabulated zero pair), so the published "
+                                "k₁ / k₁cr form is undefined and only the "
+                                "ΔG form of Eq. (6) can be evaluated.")
+            if d.get("formation_suspect_pairs"):
+                extra = ("ΔH_IM is a weighted mean of the same matrix and is driven by binary "
+                         "value(s) flagged as unreliable: "
+                         + ", ".join(f"{p} = {d['formation_suspect_values'][p]:g} meV/atom"
+                                     for p in d["formation_suspect_pairs"]) + ".")
+                caution = (caution + "  " + extra) if caution else extra
+                status = STATUS_DATA_SUSPECT
+            m["M7"] = ModelOutcome("M7", lab,
+                                   values={"k1": d["k1"], "k1cr": d["k1cr"], "g_ss": g_ss,
+                                           "g_im": g_im, "T": t},
+                                   caution=caution, status=status)
 
         # M8 King et al.
         if d["phi_king"] is None:
-            missing = d.get("king_missing") or []
-            m["M8"] = ModelOutcome("M8", NA, "Miedema parameters unavailable for " + ", ".join(missing) + ".")
-        elif d["delta_cn12"] is None:
-            m["M8"] = ModelOutcome("M8", NA, "Kittel CN12 radius unavailable.")
+            reason = d.get("phi_king_undefined")
+            if reason:
+                m["M8"] = ModelOutcome("M8", NA, reason)
+            else:
+                missing = d.get("king_missing") or []
+                m["M8"] = ModelOutcome("M8", NA, "Miedema parameters unavailable for "
+                                       + ", ".join(missing) + ".")
         else:
-            ok = d["phi_king"] >= 1.0 and d["delta_cn12"] <= 6.6
+            # King Section 3.1: a solid solution iff Phi >= 1.  Nothing else.  The d <= 6.6 % screen
+            # belongs to Section 3.4, which describes how candidate alloys are generated, and King
+            # explicitly keeps NbTiV2Zr - Phi > 1 with d > 6.6 - in the success set.
+            ok = _ge(d["phi_king"], 1.0)
             m["M8"] = ModelOutcome("M8", SS if ok else MP,
-                                   values={"phi": d["phi_king"], "dg_ss": d["dg_ss"], "dg_max": d["dg_max"],
-                                           "delta_cn12": d["delta_cn12"]})
+                                   values={"phi": d["phi_king"], "dg_ss": d["dg_ss"],
+                                           "dg_max": d["dg_max"]})
 
     # ================================================================== element support
     def model_support(self, element: str) -> dict[str, tuple[str, str]]:
