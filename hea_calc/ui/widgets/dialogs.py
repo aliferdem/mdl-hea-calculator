@@ -12,7 +12,7 @@ from ... import __version__
 from ...core.composition import parse_number
 from ...core.engine import DEFAULT_TCRIT_FRACTION, MODEL_KEYS, MODELS
 from ...core.results import COLUMNS, COLUMN_BY_KEY, DEFAULT_COLUMNS, ModelFilter, RangeFilter
-from .common import IconButton, button, refresh_style
+from .common import IconButton, button, refresh_style, set_prop
 from .details_panel import DetailsPanel
 
 
@@ -40,8 +40,7 @@ class Modal(QDialog):
         col.addWidget(t)
         head.addLayout(col, 1)
         close = IconButton("close", "Close")
-        close.setFixedSize(48, 48)
-        close.setStyleSheet("min-width: 48px; max-width: 48px; min-height: 48px; max-height: 48px;")
+        set_prop(close, "square", "48")
         close.clicked.connect(self.reject)
         head.addWidget(close, 0, Qt.AlignmentFlag.AlignTop)
         root.addLayout(head)
@@ -70,9 +69,7 @@ class Modal(QDialog):
 
     def add_footer_button(self, text: str, kind: str, slot, stretch: int = 1):
         b = button(text, kind, "md")
-        b.setMinimumHeight(64)
-        b.setMaximumHeight(64)
-        b.setStyleSheet("min-height: 64px; max-height: 64px; padding-bottom: 24px; padding-top: 0px;")
+        set_prop(b, "tall", "64")
         b.clicked.connect(slot)
         self.footer.addWidget(b, stretch)
         return b

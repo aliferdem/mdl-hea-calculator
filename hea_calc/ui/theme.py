@@ -19,6 +19,11 @@ CONTENT_MARGIN_BOTTOM = 24
 HEADER_HEIGHT = 48
 CONTROL_HEIGHT = 32      # Carbon "sm" fields/rows
 BUTTON_HEIGHT = 40       # Carbon "md" buttons in panel footers
+# A QLineEdit's QSS min/max-height applies to its *content* box, so a 32 px field plus a 1 px
+# bottom stroke came out 33 px tall and the stroke sat outside the field.  The stroke is part of
+# the control, so the content box is one pixel shorter (measured against 06_single_populated:
+# field background 31 px + 1 px #8d8d8d stroke = 32 px, then a 1 px gap to the next field).
+FIELD_CONTENT_HEIGHT = CONTROL_HEIGHT - 1
 PANEL_TITLE_TOP = 20
 PANEL_PADDING_X = 20
 TILE_SIZE = 29
@@ -54,7 +59,10 @@ DARK = {
     "status-inner": "#000000",
     "overlay": "rgba(0, 0, 0, 0.65)", "shadow": "rgba(0, 0, 0, 0.8)",
     "switcher-selected": "#404040", "switcher-unselected": "#212121",
-    "row-hover": "#333333", "row-selected": "#393939", "header-row": "#393939",
+    # The selected row must not share the header's colour, and every row carries a 1 px top and
+    # bottom rule.  Measured in 19_data_table_populated: header #393939 for 32 px, then a 1 px
+    # #525252 rule, the selected row #333333, then #525252 again under it.
+    "row-hover": "#333333", "row-selected": "#333333", "header-row": "#393939", "row-border": "#525252",
 }
 
 LIGHT = {
@@ -84,7 +92,7 @@ LIGHT = {
     "status-inner": "#000000",
     "overlay": "rgba(22, 22, 22, 0.5)", "shadow": "rgba(0, 0, 0, 0.3)",
     "switcher-selected": "#ffffff", "switcher-unselected": "#e0e0e0",
-    "row-hover": "#e8e8e8", "row-selected": "#e0e0e0", "header-row": "#e0e0e0",
+    "row-hover": "#c6c6c6", "row-selected": "#e8e8e8", "header-row": "#e0e0e0", "row-border": "#e0e0e0",
 }
 
 # Scientific prediction classes → Carbon tag palettes. These encode result classes, not UI status.
@@ -237,15 +245,31 @@ QPushButton[kind="primary"]:focus, QPushButton[kind="secondary"]:focus {{
     border: 2px solid {k['focus']}; padding: 0px 14px; }}
 QPushButton[btnsize="md"] {{ min-height: {BUTTON_HEIGHT}px; max-height: {BUTTON_HEIGHT}px; }}
 QPushButton[btnsize="sm"] {{ min-height: {CONTROL_HEIGHT}px; max-height: {CONTROL_HEIGHT}px; }}
+/* Shapes are selected by property rather than by a widget-level stylesheet: a widget that carries
+   its own sheet stops inheriting the rules above, which silently cost the Export button its 16 px
+   label padding (the label then rendered 4 px from the edge instead of 17 px, against
+   19_data_table_populated).  set_prop() in widgets/common.py re-polishes after the change. */
+QPushButton[square="40"] {{ min-width: 40px; max-width: 40px; min-height: 40px; max-height: 40px; }}
+QPushButton[square="48"] {{ min-width: 48px; max-width: 48px; min-height: 48px; max-height: 48px; }}
+QPushButton[tall="64"] {{ min-height: 64px; max-height: 64px; padding-bottom: 24px; padding-top: 0px; }}
 
 /* ---------------- text inputs (Carbon text input, sm) */
 QLineEdit {{ background: {k['field-02']}; color: {k['text-primary']}; border: none;
              border-bottom: 1px solid {k['border-strong-02']}; padding: 0px 16px;
-             min-height: {CONTROL_HEIGHT}px; max-height: {CONTROL_HEIGHT}px;
+             min-height: {FIELD_CONTENT_HEIGHT}px; max-height: {FIELD_CONTENT_HEIGHT}px;
              selection-background-color: {k['border-interactive']}; selection-color: {k['text-on-color']}; }}
 QLineEdit:hover {{ background: {k['field-hover-02']}; }}
-QLineEdit:focus {{ border: 2px solid {k['focus']}; padding: 0px 14px; }}
-QLineEdit[invalid="true"] {{ border: 2px solid {k['support-error']}; padding: 0px 14px; }}
+/* All four sides are declared explicitly.  A bare `border: 2px solid ...` leaves the bottom at
+   1 px, because the base rule's `border-bottom` longhand outranks it - measured in the light theme,
+   where `focus` is blue: blue 2 px on three sides and blue 1 px along the bottom.  The padding
+   compensation (16 -> 14, i.e. 2 px) keeps the text exactly where it was, so nothing moves. */
+QLineEdit:focus {{ border-top: 2px solid {k['focus']}; border-right: 2px solid {k['focus']};
+                   border-bottom: 2px solid {k['focus']}; border-left: 2px solid {k['focus']};
+                   padding: 0px 14px; }}
+QLineEdit[invalid="true"] {{ border-top: 2px solid {k['support-error']};
+                            border-right: 2px solid {k['support-error']};
+                            border-bottom: 2px solid {k['support-error']};
+                            border-left: 2px solid {k['support-error']}; padding: 0px 14px; }}
 QLineEdit:read-only {{ background: transparent; border: none; border-bottom: 1px solid {k['border-strong-01']};
                       color: {k['text-primary']}; }}
 QLineEdit:read-only:focus {{ border: none; border-bottom: 1px solid {k['border-strong-01']}; padding: 0px 16px; }}
@@ -254,7 +278,10 @@ QLineEdit[cell="element"] {{ font-weight: 600; background: transparent; border-b
                             qproperty-alignment: AlignCenter; padding: 0px 4px; }}
 QLineEdit[cell="element"]:read-only:focus {{ padding: 0px 4px; }}
 QLineEdit[cell="element"]:!read-only {{ background: {k['field-02']}; border-bottom: 1px solid {k['border-strong-02']}; }}
-QLineEdit[cell="element"]:!read-only:focus {{ border: 2px solid {k['focus']}; padding: 0px 2px; }}
+QLineEdit[cell="element"]:!read-only:focus {{ border-top: 2px solid {k['focus']};
+                                             border-right: 2px solid {k['focus']};
+                                             border-bottom: 2px solid {k['focus']};
+                                             border-left: 2px solid {k['focus']}; padding: 0px 2px; }}
 QLineEdit[cell="total"] {{ font-weight: 400; }}
 QLineEdit[cell="element-filled"] {{ font-weight: 600; background: {k['layer-02']}; border: none;
                                    border-bottom: 1px solid {k['border-strong-01']}; qproperty-alignment: AlignCenter;

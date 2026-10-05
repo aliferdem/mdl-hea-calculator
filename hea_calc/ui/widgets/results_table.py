@@ -17,7 +17,7 @@ from ...core.results import (COLUMN_BY_KEY, DEFAULT_COLUMNS, ResultRow, apply_fi
                              table_tsv)
 from .. import icons
 from ..theme import BODY_COMPACT_01, HEADING_COMPACT_01, THEME, font, t
-from .common import Divider, IconButton, button, illustration, paint_tag
+from .common import (Divider, IconButton, MenuButton, button, illustration, paint_tag, set_prop)
 
 PAGE_SIZES = (10, 20, 50, 100)
 MODEL_COL_WIDTH = 79
@@ -190,7 +190,7 @@ class Delegate(QStyledItemDelegate):
             p.fillRect(r, QColor(t("row-selected")))
         elif row == self.view.hover_row:
             p.fillRect(r, QColor(t("row-hover")))
-        p.setPen(QPen(QColor(t("border-subtle-01")), 1))
+        p.setPen(QPen(QColor(t("row-border")), 1))
         p.drawLine(r.left(), r.bottom(), r.right(), r.bottom())
         key = index.data(Qt.ItemDataRole.UserRole)
         col = COLUMN_BY_KEY[key]
@@ -263,6 +263,10 @@ class Header(QHeaderView):
         key = self.m.keys[logical]
         col = COLUMN_BY_KEY[key]
         p.fillRect(rect, QColor(t("layer-hover-02" if logical == self._hover else "header-row")))
+        # 1 px rule under the header, in the same colour as the row rules (19_data_table_populated:
+        # header #393939, then a 1 px #525252 line, then the first row).
+        p.setPen(QPen(QColor(t("row-border")), 1))
+        p.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
         f = font(HEADING_COMPACT_01)
         p.setPen(QColor(t("text-primary")))
         doc_x = rect.left() + 16
@@ -471,8 +475,7 @@ class PaginationBar(QFrame):
         self.prev_btn = IconButton("caret_left", "Previous page")
         self.next_btn = IconButton("caret_right", "Next page")
         for b in (self.prev_btn, self.next_btn):
-            b.setFixedSize(40, 40)
-            b.setStyleSheet("min-width: 40px; max-width: 40px; min-height: 40px; max-height: 40px;")
+            set_prop(b, "square", "40")
         lay.addWidget(self.prev_btn)
         lay.addWidget(self._vdiv())
         lay.addWidget(self.next_btn)
@@ -579,7 +582,9 @@ class ResultsTable(QFrame):
         self.columns_btn = IconButton("settings", "Table columns")
         for b in (self.copy_btn, self.delete_btn, self.filter_btn, self.columns_btn):
             bl.addWidget(b)
-        self.export_btn = button("Export", "secondary", "sm")
+        self.export_btn = MenuButton("Export")
+        self.export_btn.setProperty("kind", "secondary")
+        self.export_btn.setProperty("btnsize", "sm")
         self.export_btn.setFixedWidth(123)
         menu = QMenu(self.export_btn)
         menu.addAction("Excel workbook (.xlsx)…", lambda: self.export_requested.emit("xlsx"))
@@ -587,7 +592,6 @@ class ResultsTable(QFrame):
         menu.addSeparator()
         menu.addAction("Copy table to clipboard", self.copy_requested.emit)
         self.export_btn.setMenu(menu)
-        self.export_btn.setStyleSheet("QPushButton::menu-indicator { width: 0px; image: none; }")
         bl.addWidget(self.export_btn)
         lay.addWidget(bar)
         self.view = ResultsView(self.model)

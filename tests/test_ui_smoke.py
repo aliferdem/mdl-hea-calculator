@@ -9,6 +9,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QSettings  # noqa: E402
+from PySide6.QtGui import QColor, QImage  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 
@@ -357,17 +358,117 @@ def test_empty_states_use_the_exported_illustrations(win, app):
     assert [i.name for i in win.details.pages[0].widget().findChildren(Illustration)] == ["document"]
 
 
-def test_illustrations_are_cached_and_sized_from_the_svg(win):
-    from hea_calc.ui.widgets.common import illustration
+def test_data_table_row_and_header_colours(win, app):
+    """Header, selected row and the 1 px row rules, per theme.
+
+    Regression: `row-selected` was the same value as `header-row` in both themes, so the selected
+    row was indistinguishable from the header, and the rules were drawn in `border-subtle-01`
+    (#393939 on #262626), i.e. invisible.  Values are the ones measured in
+    `19_data_table_populated.png` and specified for the light theme.
+    """
+    from hea_calc.ui.theme import DARK, LIGHT, THEME
+
+    for theme, header, selected, rule in (("dark", "#393939", "#333333", "#525252"),
+                                          ("light", "#e0e0e0", "#e8e8e8", "#e0e0e0")):
+        THEME.set_theme(theme)
+        app.processEvents()
+        k = DARK if theme == "dark" else LIGHT
+        assert k["header-row"] == header, (theme, k["header-row"])
+        assert k["row-selected"] == selected, (theme, k["row-selected"])
+        assert k["row-border"] == rule, (theme, k["row-border"])
+        assert k["row-selected"] != k["header-row"], theme
+    THEME.set_theme("dark")
+    app.processEvents()
+
+
+def test_text_input_box_includes_its_own_bottom_stroke(win, app):
+    """A field is 32 px tall *including* the 1 px bottom stroke, and focus does not move the text.
+
+    Regression: QSS min/max-height applies to the content box, so 32 px plus a 1 px
+    `border-bottom` produced a 33 px field with the stroke hanging outside it.  Measured against
+    `06_single_populated.png`: 31 px of field, then a 1 px #8d8d8d stroke = 32 px, then a 1 px gap.
+    """
+    from hea_calc.ui.theme import CONTROL_HEIGHT, FIELD_CONTENT_HEIGHT
+
+    assert FIELD_CONTENT_HEIGHT == CONTROL_HEIGHT - 1
+    click_elements(win, "Cr", "Mn", "Fe", "Co", "Ni")
+    app.processEvents()
+    row = win.composition.single.rows["Cr"]
+    for key in ("ratio", "at", "wt", "mass"):
+        edit = row.fields[key]
+        assert edit.height() == CONTROL_HEIGHT, (key, edit.height())
+        # the last row of the widget is the stroke, i.e. it is inside the box
+        img = edit.grab().toImage()
+        last = img.pixelColor(img.width() // 2, img.height() - 1)
+        assert last.lightness() > 40, (key, last.name(), "no bottom stroke")
+
+    edit = row.fields["ratio"]
+    edit.clearFocus()
+    app.processEvents()
+    before = edit.cursorRect()
+    edit.setFocus()
+    app.processEvents()
+    after = edit.cursorRect()
+    assert (after.x(), after.y()) == (before.x(), before.y()), "the text must not move on focus"
+    edit.clearFocus()
+
+
+def test_focus_border_is_two_px_on_all_four_sides(win, app):
+    """The focus ring is 2 px on every side - a bare `border: 2px` left the bottom at 1 px."""
+    from hea_calc.ui.theme import LIGHT, THEME, t
+
+    click_elements(win, "Cr", "Mn", "Fe", "Co", "Ni")
+    app.processEvents()
+    edit = win.composition.single.rows["Cr"].fields["ratio"]
+    THEME.set_theme("light")
+    app.processEvents()
+    edit.setFocus()
+    app.processEvents()
+    img = edit.grab().toImage().convertToFormat(QImage.Format.Format_RGB32)
+    mid_x, mid_y = img.width() // 2, img.height() // 2
+    blue = t("focus")
+    # the ring is two pixels on every side; the interior starts at 2
+    for y, side in ((0, "top"), (1, "top"), (img.height() - 2, "bottom"), (img.height() - 1, "bottom")):
+        assert img.pixelColor(mid_x, y).name() == blue, (side, y, img.pixelColor(mid_x, y).name())
+    for x, side in ((0, "left"), (1, "left"), (img.width() - 2, "right"), (img.width() - 1, "right")):
+        assert img.pixelColor(x, mid_y).name() == blue, (side, x, img.pixelColor(x, mid_y).name())
+    assert img.pixelColor(mid_x, 2).name() != blue, "the ring must be 2 px, not more"
+    assert LIGHT["focus"] == "#0f62fe"
+    THEME.set_theme("dark")
+    app.processEvents()
+
+
+def test_export_label_sits_on_the_padding_grid(win, app):
+    """A button with an attached menu must not lose the sheet's 16 px label padding.
+
+    Regression: Qt reserves the platform menu-indicator width inside the button's contents rect,
+    so the Export label rendered 4 px from the button edge instead of 17 px, against
+    `19_data_table_populated.png`.  `::menu-indicator { width: 0 }` does not release it.
+    """
+    b = win.table.export_btn
+    assert b.menu() is not None, "the export menu is a feature; this test guards its geometry"
+    img = b.grab().toImage()
+    xs = [x for y in range(img.height()) for x in range(img.width())
+          if QColor(img.pixel(x, y)).lightness() > 150]
+    assert min(xs) >= 15, f"label starts {min(xs)} px from the button edge, expected 16 + bearing"
+    # no other button in the toolbar or pagination carries its own stylesheet, which would stop it
+    # inheriting the sheet
+    for other in (win.table.copy_btn, win.table.delete_btn, win.table.filter_btn,
+                  win.table.columns_btn, win.table.pagination.prev_btn,
+                  win.table.pagination.next_btn):
+        assert other.styleSheet() == "", other
+    """The artwork renders once, at its exported size, and a theme switch must not recolour it."""
     from hea_calc.ui.theme import THEME
+    from hea_calc.ui.widgets.common import illustration
 
     for name, w, h in (("magnifier", 80, 80), ("document", 55, 81), ("box", 80, 97)):
         size, pm = illustration(name)
         assert (size.width(), size.height()) == (w, h), (name, size)
         assert (pm.width(), pm.height()) == (w, h), name
-    # the dark pixmap is cached per theme, so a repeated call is the same object
-    first = illustration("box")
+    # the artwork's colours are exported for both themes: switching must not change a single pixel
+    before = illustration("magnifier")[1].toImage()
+    THEME.set_theme("light")
+    after = illustration("magnifier")[1].toImage()
+    assert before == after, "the illustration must be identical in both themes"
+    assert illustration("box")[1] is illustration("box")[1], "cached, not re-rendered"
     THEME.set_theme("dark")
-    assert illustration("box")[1] is first[1]
-    light = illustration("box", "light")[1]
-    assert light is not first[1], "the light theme needs its own (inverted) pixmap"

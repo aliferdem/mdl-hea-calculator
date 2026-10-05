@@ -5,10 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import (QColor, QFontMetrics, QImage, QPainter, QPainterPath, QPen, QPixmap)
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton,
-                               QSizePolicy, QVBoxLayout, QWidget)
+                               QSizePolicy, QStyleOptionButton, QVBoxLayout, QWidget)
 
 from .. import icons
 from ..theme import (CONTROL_HEIGHT, LABEL_01, PANEL_PADDING_X, TAG_LONG_NAMES, THEME, font, t)
@@ -92,20 +92,29 @@ def button(text: str, kind: str = "ghost", size: str = "sm", parent=None) -> QPu
 
 
 ILLUSTRATIONS_DIR = Path(__file__).resolve().parent.parent / "illustrations"
-_ILLUSTRATIONS: dict[tuple[str, str], tuple[QSize, QPixmap]] = {}
+_ILLUSTRATIONS: dict[str, tuple[QSize, QPixmap]] = {}
 
 
-def illustration(name: str, theme: str | None = None) -> tuple[QSize, QPixmap]:
+def set_prop(w: QWidget, name: str, value) -> None:
+    """Set a Qt property and re-polish, so a stylesheet attribute selector sees it immediately.
+
+    Preferred over a widget-level ``setStyleSheet``: a widget that carries its own sheet stops
+    inheriting the application rules, which is how the Export button lost its 16 px label padding.
+    """
+    w.setProperty(name, value)
+    w.style().unpolish(w)
+    w.style().polish(w)
+    w.update()
+
+
+def illustration(name: str) -> tuple[QSize, QPixmap]:
     """Size and pixmap of an empty-state illustration, rendered at its exported Figma size.
 
-    The artwork in ``hea_calc/ui/illustrations`` carries the dark-theme gradients baked in, so in
-    the light theme the RGB channels are inverted: white highlights become near-black and the
-    shading structure survives on a light background.  Alpha is untouched, and the result is
-    cached per theme.
+    The artwork is theme-independent: the three files in ``hea_calc/ui/illustrations`` were
+    exported with colours chosen to work in both themes, so nothing here depends on ``THEME`` and a
+    theme switch must not recolour them.  The pixmap is rendered once and cached.
     """
-    theme = theme or THEME.name
-    key = (name, theme)
-    hit = _ILLUSTRATIONS.get(key)
+    hit = _ILLUSTRATIONS.get(name)
     if hit is not None:
         return hit
     renderer = QSvgRenderer(str(ILLUSTRATIONS_DIR / f"{name}.svg"))
@@ -116,12 +125,8 @@ def illustration(name: str, theme: str | None = None) -> tuple[QSize, QPixmap]:
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     renderer.render(p)
     p.end()
-    if theme != "dark":
-        img = pm.toImage().convertToFormat(QImage.Format.Format_ARGB32)
-        img.invertPixels(QImage.InvertMode.InvertRgb)
-        pm = QPixmap.fromImage(img)
-    _ILLUSTRATIONS[key] = (size, pm)
-    return _ILLUSTRATIONS[key]
+    _ILLUSTRATIONS[name] = (size, pm)
+    return _ILLUSTRATIONS[name]
 
 
 class Illustration(QWidget):
@@ -132,10 +137,6 @@ class Illustration(QWidget):
         self.name = name
         self.setFixedSize(illustration(name)[0])
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        THEME.changed.connect(self._theme_changed)
-
-    def _theme_changed(self, *_):
-        self.update()
 
     def paintEvent(self, _e):
         p = QPainter(self)
@@ -168,6 +169,21 @@ class EmptyState(QWidget):
         lay.addWidget(tt)
         lay.addWidget(bd)
         lay.addStretch(1)
+
+
+class MenuButton(QPushButton):
+    """A button with an attached menu whose label stays on the sheet's padding grid.
+
+    Qt reserves the platform's menu-indicator width inside the button's contents rect, so an
+    attached menu silently moves the label off the grid: on the table toolbar's Export button the
+    label rendered 4 px from the edge instead of 17 px, against `19_data_table_populated`.
+    ``::menu-indicator { width: 0 }`` does not release the reservation - only clearing ``HasMenu``
+    does.  ``setMenu`` still drives the popup, so the behaviour is unchanged.
+    """
+
+    def initStyleOption(self, option):
+        super().initStyleOption(option)
+        option.features &= ~QStyleOptionButton.ButtonFeature.HasMenu
 
 
 class IconButton(QPushButton):
