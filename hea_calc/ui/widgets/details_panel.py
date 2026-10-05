@@ -1,0 +1,431 @@
+"""Calculation details (Figma 170:11158): tabs Overview / Descriptors / Models / Model details / All results.
+
+Everything shown here is read from an :class:`~hea_calc.core.results.ResultRow`; no calculations.
+"""
+
+from __future__ import annotations
+
+import html
+import math
+from pathlib import Path
+
+from PySide6.QtCore import QByteArray, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QPainter, QTextDocument
+from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QStackedWidget,
+                               QVBoxLayout, QWidget)
+
+from ...core import composition as C
+from ...core.engine import MODEL_KEYS, MODELS
+from ...core.results import COLUMN_BY_KEY, ResultRow, format_number, full_precision
+from ..theme import TAG_LONG_NAMES, THEME, t
+from .common import LineTabs, Panel, TagLabel, button, sup_html
+
+EQ_DIR = Path(__file__).resolve().parents[1] / "equations"
+
+DESCRIPTOR_ROWS = [
+    ("Thermodynamic", [
+        ("tm", "T<sub>m</sub>", "K", 2, "Rule-of-mixtures melting temperature"),
+        ("dhmix", "ΔH<sub>mix</sub>", "kJ mol⁻¹", 3, "Σ 4ΔH<sub>ij</sub>c<sub>i</sub>c<sub>j</sub>, Takeuchi & Inoue (2005)"),
+        ("dsmix", "ΔS<sub>mix</sub>", "J mol⁻¹ K⁻¹", 3, "−R Σ c<sub>i</sub> ln c<sub>i</sub>"),
+        ("omega", "Ω", "", 3, "T<sub>m</sub>ΔS<sub>mix</sub>/|ΔH<sub>mix</sub>| (Yang & Zhang 2012)"),
+        ("phi_ye", "φ", "", 3, "(S<sub>C</sub> − S<sub>H</sub>)/|S<sub>E</sub>| (Ye et al. 2015)"),
+        ("s_e", "S<sub>E</sub>", "J mol⁻¹ K⁻¹", 4, "Excess entropy, mean of bcc/fcc packing"),
+        ("dhim", "ΔH<sub>IM</sub>", "kJ mol⁻¹", 3, "Σ 4ΔH<sub>f,ij</sub>c<sub>i</sub>c<sub>j</sub> (Senkov & Miracle 2016)"),
+        ("k1", "k<sub>1</sub>", "", 3, "ΔH<sub>IM</sub>/ΔH<sub>mix</sub>"),
+        ("k1cr", "k<sub>1</sub><sup>cr</sup>", "", 3, "1 + 0.4·TΔS<sub>mix</sub>/|ΔH<sub>mix</sub>|"),
+        ("phi_king", "Φ", "", 3, "ΔG<sub>ss</sub>/−|ΔG<sub>max</sub>| (King et al. 2016)"),
+        ("dg_ss", "ΔG<sub>ss</sub>", "kJ mol⁻¹", 3, "Miedema solid-solution Gibbs energy at T<sub>m</sub>"),
+        ("dg_max", "ΔG<sub>max</sub>", "kJ mol⁻¹", 3, "Strongest binary intermetallic × floor(N/2)"),
+    ]),
+    ("Structural", [
+        ("delta", "δ", "%", 3, "Atomic-size mismatch, Guo & Liu (2011) radii"),
+        ("delta_cn12", "δ<sub>CN12</sub>", "%", 3, "Atomic-size mismatch, Kittel CN12 radii"),
+        ("gamma", "γ", "", 4, "Solid-angle ratio ω<sub>S</sub>/ω<sub>L</sub> (Wang et al. 2015)"),
+        ("lambda", "Λ", "J mol⁻¹ K⁻¹", 4, "ΔS<sub>mix</sub>/δ² (Singh et al. 2014)"),
+        ("vec", "VEC", "", 3, "Valence electron concentration"),
+        ("cstr", "Cryst. str.", "", 0, "VEC rule: FCC ≥ 8.0, BCC < 6.87"),
+    ]),
+    ("Physical", [
+        ("density", "ρ", "g cm⁻³", 3, "Σc<sub>i</sub>M<sub>i</sub>/Σc<sub>i</sub>V<sub>i</sub>"),
+        ("mean_mass", "M̄", "g mol⁻¹", 3, "Mean atomic mass"),
+    ]),
+]
+
+MODEL_KEY_VALUES = {
+    "M1": [("omega", "Ω"), ("delta_cn12", "δ<sub>CN12</sub>")],
+    "M2": [("delta", "δ"), ("dhmix", "ΔH<sub>mix</sub>")],
+    "M3": [("gamma", "γ")],
+    "M4": [("lambda", "Λ")],
+    "M5": [("phi_ye", "φ"), ("s_e", "S<sub>E</sub>")],
+    "M6": [("hf_min", "ΔH<sub>f,min</sub>"), ("hf_max", "ΔH<sub>f,max</sub>"), ("hf_lower", "−TΔS<sub>mix</sub>"),
+           ("t_assess", "T")],
+    "M7": [("k1", "k<sub>1</sub>"), ("k1cr", "k<sub>1</sub><sup>cr</sup>"), ("dhim", "ΔH<sub>IM</sub>"),
+           ("t_assess", "T")],
+    "M8": [("phi_king", "Φ"), ("dg_ss", "ΔG<sub>ss</sub>"), ("dg_max", "ΔG<sub>max</sub>"),
+           ("delta_cn12", "δ<sub>CN12</sub>")],
+}
+
+INTERPRETATION = {
+    "M1": "Empirical solid-solution region in the Ω–δ map; outside it the calculator reports MP (intermetallics "
+          "and/or segregation) rather than a specific competing phase.",
+    "M2": "δ–ΔH<sub>mix</sub> phase-selection map for as-cast alloys: solid solution, amorphous phase (MG), "
+          "otherwise intermetallic-bearing multiphase (MP).",
+    "M3": "Packing-misfit parameter of the largest and smallest atoms; γ < 1.175 corresponds to the 15 % "
+          "Hume-Rothery limit.",
+    "M4": "Geometrical parameter: disordered solid solution (SS), solid solution + compounds (SS+IM) or "
+          "compounds only (IM).",
+    "M5": "Entropic dominance including the excess (packing/size) entropy; φ<sub>c</sub> ≈ 20.",
+    "M6": "Every binary compound must be neither too stable (IM precipitation) nor too unstable "
+          "(immiscibility, MP). Uses the published Troparevsky DFT matrix (30 elements).",
+    "M7": "Competition between the solid solution and a partially ordered intermetallic (k<sub>2</sub> = 0.6) at "
+          "temperature T.",
+    "M8": "Miedema-based Gibbs energy of the disordered solid solution against the strongest binary compound, at "
+          "the rule-of-mixtures melting temperature.",
+}
+
+
+class Equation(QWidget):
+    """Vector equation (SVG generated by tools/render_equations.py), recoloured to text-primary."""
+
+    def __init__(self, key: str, scale: float = 1.0, parent=None):
+        super().__init__(parent)
+        self.key = key
+        self._src = (EQ_DIR / f"{key}.svg").read_text(encoding="utf-8") if (EQ_DIR / f"{key}.svg").exists() else ""
+        self._renderer = None
+        self.scale = scale
+        self._load()
+        THEME.changed.connect(self._theme_changed)
+
+    def _theme_changed(self, *_):
+        self._load()
+        self.update()
+
+    def _load(self):
+        if not self._src:
+            return
+        data = self._src.replace("currentColor", t("text-primary"))
+        self._renderer = QSvgRenderer(QByteArray(data.encode("utf-8")))
+        s = self._renderer.defaultSize()
+        self.setFixedSize(QSize(int(s.width() * self.scale * 1.1), int(s.height() * self.scale * 1.1)))
+
+    def paintEvent(self, _e):
+        if self._renderer:
+            p = QPainter(self)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            self._renderer.render(p, QRectF(self.rect()))
+            p.end()
+
+
+def _label(text: str, obj: str = "TileBody", wrap: bool = True) -> QLabel:
+    lab = QLabel(text)
+    lab.setObjectName(obj)
+    lab.setTextFormat(Qt.TextFormat.RichText)
+    lab.setWordWrap(wrap)
+    lab.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    return lab
+
+
+def value_text(row: ResultRow, key: str, digits: int | None = None) -> str:
+    v = row.raw(key)
+    col = COLUMN_BY_KEY.get(key)
+    d = digits if digits is not None else (col.decimals if col else 3)
+    if isinstance(v, str):
+        return html.escape(v)
+    text = format_number(v, d)
+    unit = sup_html(col.unit) if col and col.unit and text not in ("N/A", "∞", "−∞") else ""
+    return f"{text} {unit}".strip()
+
+
+class Tile(QFrame):
+    def __init__(self, title: str, tag: str | None = None, parent=None):
+        super().__init__(parent)
+        self.setObjectName("Tile")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(16, 16, 16, 16)
+        self.lay.setSpacing(10)
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        tt = _label(title, "TileTitle")
+        head.addWidget(tt, 1)
+        if tag is not None:
+            head.addWidget(TagLabel(tag), 0, Qt.AlignmentFlag.AlignTop)
+        self.lay.addLayout(head)
+
+
+class DetailsPanel(Panel):
+    """Calculation details for the selected result row."""
+
+    open_full_details = Signal()
+
+    TABS = ("Overview", "Descriptors", "Models", "Model details", "All results")
+
+    def __init__(self, parent=None):
+        super().__init__("Calculation details", parent)
+        self.title_holder.setFixedHeight(47)
+        self.title_suffix.setTextFormat(Qt.TextFormat.RichText)
+        self.print_btn = button("Print results", "ghost", "md")
+        self.print_btn.setFixedWidth(111)
+        self.title_row.addWidget(self.print_btn)
+        self.title_row.setContentsMargins(20, 4, 20, 0)
+        self.print_btn.clicked.connect(self.print_results)
+        tabs_wrap = QWidget()
+        tl = QHBoxLayout(tabs_wrap)
+        tl.setContentsMargins(20, 0, 20, 0)
+        self.tabs = LineTabs(list(self.TABS))
+        tl.addWidget(self.tabs)
+        self.root.addWidget(tabs_wrap)
+        self.root.addSpacing(8)
+        self.stack = QStackedWidget()
+        self.pages: list[QScrollArea] = []
+        for _ in self.TABS:
+            sa = QScrollArea()
+            sa.setWidgetResizable(True)
+            sa.setFrameShape(QFrame.Shape.NoFrame)
+            sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self.pages.append(sa)
+            self.stack.addWidget(sa)
+        stack_wrap = QHBoxLayout()
+        stack_wrap.setContentsMargins(0, 0, 8, 0)
+        stack_wrap.addWidget(self.stack)
+        self.root.addLayout(stack_wrap, 1)
+        self.tabs.changed.connect(self.stack.setCurrentIndex)
+        self.tabs.set_index(2)
+        self.stack.setCurrentIndex(2)
+        self.row: ResultRow | None = None
+        self.setMinimumWidth(480)
+        self.show_row(None)
+        THEME.changed.connect(self._theme_changed)
+
+    def _theme_changed(self, *_):
+        self.show_row(self.row)
+
+    # ------------------------------------------------------------------ building
+    def _page(self, i: int) -> QVBoxLayout:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        # Figma: tiles 715 px wide at x = 20 in a 787 px panel; 4 px scrollbar at x = 775
+        lay.setContentsMargins(20, 12, 36, 20)
+        lay.setSpacing(12)
+        old = self.pages[i].takeWidget()
+        if old is not None:
+            old.deleteLater()
+        self.pages[i].setWidget(w)
+        return lay
+
+    def show_row(self, row: ResultRow | None):
+        self.row = row
+        self.print_btn.setEnabled(row is not None and row.result.ok)
+        if row is None:
+            self.title_suffix.setText("")
+            for i in range(len(self.TABS)):
+                lay = self._page(i)
+                lay.addWidget(_label("Calculate an alloy or select a row in the results table to see its "
+                                     "details.", "Helper"))
+                lay.addStretch(1)
+            return
+        self.title_suffix.setText(C.name_html(row.name))
+        if not row.result.ok:
+            for i in range(len(self.TABS)):
+                lay = self._page(i)
+                lay.addWidget(_label(f"<b>Calculation not possible.</b> {html.escape(row.result.error)}"))
+                lay.addStretch(1)
+            return
+        self._overview(self._page(0), row)
+        self._descriptors(self._page(1), row)
+        self._models(self._page(2), row)
+        self._model_details(self._page(3), row)
+        self._all_results(self._page(4), row)
+
+    def _overview(self, lay: QVBoxLayout, row: ResultRow):
+        res = row.result
+        reps = {rep: C.from_fractions(dict(res.composition), rep) for rep in ("ratio", "at", "wt")}
+        comp = Tile("Composition")
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(24)
+        grid.setVerticalSpacing(2)
+        for j, head in enumerate(("Element", "At. ratio", "at.%", "wt.%")):
+            h = _label(f"<b>{head}</b>", "TileBody", wrap=False)
+            grid.addWidget(h, 0, j)
+        for i, el in enumerate(res.composition, start=1):
+            vals = [el, f"{reps['ratio'][el]:.4f}", f"{reps['at'][el]:.4f}", f"{reps['wt'][el]:.4f}"]
+            for j, v in enumerate(vals):
+                grid.addWidget(_label(v, "TileBody", wrap=False), i, j)
+        comp.lay.addLayout(grid)
+        if row.variables:
+            comp.lay.addWidget(_label("Expression variables: " + ", ".join(
+                f"<i>{k}</i> = {v:g}" for k, v in row.variables.items())))
+        lay.addWidget(comp)
+        key = Tile("Key descriptors")
+        g = QGridLayout()
+        g.setHorizontalSpacing(24)
+        g.setVerticalSpacing(4)
+        items = [("dhmix", "ΔH<sub>mix</sub>"), ("dsmix", "ΔS<sub>mix</sub>"), ("delta", "δ"), ("vec", "VEC"),
+                 ("tm", "T<sub>m</sub>"), ("density", "ρ"), ("omega", "Ω"), ("cstr", "Cryst. str.")]
+        for i, (k, lab) in enumerate(items):
+            g.addWidget(_label(f"<b>{lab}</b>", wrap=False), i // 2, (i % 2) * 2)
+            g.addWidget(_label(value_text(row, k), wrap=False), i // 2, (i % 2) * 2 + 1)
+        key.lay.addLayout(g)
+        lay.addWidget(key)
+        models = Tile("Model predictions")
+        mg = QGridLayout()
+        mg.setHorizontalSpacing(16)
+        mg.setVerticalSpacing(6)
+        for i, k in enumerate(MODEL_KEYS):
+            o = res.models[k]
+            mg.addWidget(_label(f"<b>{k}</b> {MODELS[k].short}", wrap=False), i // 2, (i % 2) * 2)
+            tag = TagLabel(o.label, long_text=False)
+            tag.setToolTip(o.reason or o.caution or TAG_LONG_NAMES.get(o.label, ""))
+            mg.addWidget(tag, i // 2, (i % 2) * 2 + 1)
+        models.lay.addLayout(mg)
+        lay.addWidget(models)
+        if res.warnings:
+            w = Tile("Data notes")
+            for msg in res.warnings:
+                w.lay.addWidget(_label("• " + html.escape(msg)))
+            lay.addWidget(w)
+        lay.addStretch(1)
+
+    def _descriptors(self, lay: QVBoxLayout, row: ResultRow):
+        for group, items in DESCRIPTOR_ROWS:
+            tile = Tile(group)
+            g = QGridLayout()
+            g.setHorizontalSpacing(16)
+            g.setVerticalSpacing(4)
+            for i, (k, lab, unit, digits, desc) in enumerate(items):
+                v = row.raw(k)
+                txt = html.escape(v) if isinstance(v, str) else format_number(v, digits)
+                if unit and txt not in ("N/A", "∞", "−∞") and not isinstance(v, str):
+                    txt += f" {sup_html(unit)}"
+                g.addWidget(_label(f"<b>{lab}</b>", wrap=False), i, 0)
+                vl = _label(txt, wrap=False)
+                vl.setToolTip(full_precision(row, k))
+                g.addWidget(vl, i, 1)
+                g.addWidget(_label(desc, "Helper"), i, 2)
+            g.setColumnStretch(2, 1)
+            tile.lay.addLayout(g)
+            lay.addWidget(tile)
+        eqs = Tile("Definitions")
+        for key in ("dsmix", "dhmix", "delta", "tm", "vec"):
+            eqs.lay.addWidget(Equation(key, 1.3))
+        lay.addWidget(eqs)
+        lay.addStretch(1)
+
+    def _models(self, lay: QVBoxLayout, row: ResultRow):
+        for k in MODEL_KEYS:
+            o = row.result.models[k]
+            tile = Tile(MODELS[k].title, o.label)
+            tile.lay.addWidget(Equation(k, 1.3))
+            vals = ", ".join(f"{lab} = {value_text(row, key, 3)}" for key, lab in MODEL_KEY_VALUES[k])
+            tile.lay.addWidget(_label(f"Key values: {vals}"))
+            if o.reason:
+                tile.lay.addWidget(_label(f"<b>N/A:</b> {html.escape(o.reason)}"))
+            if o.caution:
+                tile.lay.addWidget(_label(f"<span style='color:{t('support-warning')}'>⚠</span> "
+                                          f"{html.escape(o.caution)}"))
+            tile.lay.addWidget(_label(INTERPRETATION[k]))
+            lay.addWidget(tile)
+        lay.addStretch(1)
+
+    def _model_details(self, lay: QVBoxLayout, row: ResultRow):
+        res = row.result
+        d = res.descriptors
+        t_txt = f"{res.temperature:.1f} K ({res.temperature_source})" if res.temperature else "—"
+        info = Tile("Assessment temperature (M6, M7)")
+        info.lay.addWidget(_label(t_txt))
+        lay.addWidget(info)
+        for k in MODEL_KEYS:
+            o = res.models[k]
+            tile = Tile(f"{MODELS[k].title}", o.label)
+            tile.lay.addWidget(_label(f"<b>Criterion:</b> {html.escape(MODELS[k].criterion)}"))
+            tile.lay.addWidget(_label(f"<b>Reference:</b> {html.escape(MODELS[k].reference)}"))
+            lines = []
+            for key, val in o.values.items():
+                if isinstance(val, float):
+                    lines.append(f"{key} = {format_number(val, 4)}")
+            if k == "M6" and d.get("hf_min_pair"):
+                lines.append(f"most negative pair {d['hf_min_pair']}, most positive pair {d['hf_max_pair']}")
+            if k == "M8" and d.get("king_pair"):
+                lines.append(f"strongest binary {d['king_pair']}: ΔH<sub>int</sub> = {format_number(d.get('dh_int_max'), 3)}"
+                             f" kJ mol<sup>−1</sup>; ΔH<sub>ss</sub> = {format_number(d.get('dh_ss_king'), 3)} kJ mol<sup>−1</sup>")
+            if lines:
+                tile.lay.addWidget(_label("<b>Inputs:</b> " + "; ".join(lines)))
+            if o.reason:
+                tile.lay.addWidget(_label(f"<b>Not available:</b> {html.escape(o.reason)}"))
+            if o.caution:
+                tile.lay.addWidget(_label(f"<b>Caution:</b> {html.escape(o.caution)}"))
+            lay.addWidget(tile)
+        lay.addStretch(1)
+
+    def _all_results(self, lay: QVBoxLayout, row: ResultRow):
+        tile = Tile("All values (full precision)")
+        g = QGridLayout()
+        g.setHorizontalSpacing(16)
+        g.setVerticalSpacing(2)
+        i = 0
+        for k, v in row.result.descriptors.items():
+            if isinstance(v, (list, dict)):
+                v = ", ".join("–".join(x) if isinstance(x, tuple) else str(x) for x in v) if v else "—"
+            g.addWidget(_label(f"<b>{html.escape(k)}</b>", wrap=False), i, 0)
+            g.addWidget(_label(html.escape(full_precision_value(v)), wrap=False), i, 1)
+            i += 1
+        for k in MODEL_KEYS:
+            o = row.result.models[k]
+            g.addWidget(_label(f"<b>{k}</b>", wrap=False), i, 0)
+            g.addWidget(_label(html.escape(o.label + (f" — {o.reason}" if o.reason else ""))), i, 1)
+            i += 1
+        g.setColumnStretch(1, 1)
+        tile.lay.addLayout(g)
+        lay.addWidget(tile)
+        lay.addStretch(1)
+
+    # ------------------------------------------------------------------ print
+    def report_html(self) -> str:
+        row = self.row
+        if row is None:
+            return ""
+        res = row.result
+        parts = [f"<h2>{C.name_html(row.name)}</h2>",
+                 "<p>Composition (at.%): " + ", ".join(f"{el} {100 * v:.3f}" for el, v in res.composition.items())
+                 + "</p>", "<table border='1' cellspacing='0' cellpadding='4'>"]
+        for group, items in DESCRIPTOR_ROWS:
+            parts.append(f"<tr><th colspan='2' align='left'>{group}</th></tr>")
+            for k, lab, unit, digits, _d in items:
+                v = row.raw(k)
+                txt = html.escape(v) if isinstance(v, str) else format_number(v, digits) + (f" {unit}" if unit else "")
+                parts.append(f"<tr><td>{lab}</td><td>{txt}</td></tr>")
+        parts.append("<tr><th colspan='2' align='left'>Models</th></tr>")
+        for k in MODEL_KEYS:
+            o = res.models[k]
+            note = f" ({html.escape(o.reason)})" if o.reason else ""
+            parts.append(f"<tr><td>{html.escape(MODELS[k].title)}</td><td>{o.label}{note}</td></tr>")
+        parts.append("</table>")
+        if res.temperature:
+            parts.append(f"<p>M6/M7 temperature: {res.temperature:.1f} K ({html.escape(res.temperature_source)})</p>")
+        for w in res.warnings:
+            parts.append(f"<p>Note: {html.escape(w)}</p>")
+        return "".join(parts)
+
+    def print_results(self):
+        from PySide6.QtPrintSupport import QPrintDialog, QPrinter
+        if self.row is None:
+            return
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        dlg = QPrintDialog(printer, self)
+        dlg.setWindowTitle("Print calculation details")
+        if dlg.exec():
+            doc = QTextDocument()
+            doc.setHtml(self.report_html())
+            doc.print_(printer)
+
+
+def full_precision_value(v) -> str:
+    if isinstance(v, float):
+        if math.isinf(v) or math.isnan(v):
+            return format_number(v)
+        return repr(v)
+    return "—" if v is None else str(v)
+
+
+_ = (QColor, QSizePolicy)

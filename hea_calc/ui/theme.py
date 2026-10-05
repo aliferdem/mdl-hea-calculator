@@ -1,0 +1,348 @@
+"""Design tokens (Carbon v11 Gray 100 / Gray 10) and the application stylesheet.
+
+Geometry, spacing and sizes are identical in both themes; only semantic colour tokens change.
+Dark values come from the Figma variables of frame 170:11154; light values follow Carbon g10.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtGui import QColor, QFont, QFontDatabase
+
+# ------------------------------------------------------------------ geometry (shared)
+PANEL_GAP = 20
+CONTENT_MARGIN_X = 20
+CONTENT_MARGIN_TOP = 24
+CONTENT_MARGIN_BOTTOM = 24
+HEADER_HEIGHT = 48
+CONTROL_HEIGHT = 32      # Carbon "sm" fields/rows
+BUTTON_HEIGHT = 40       # Carbon "md" buttons in panel footers
+PANEL_TITLE_TOP = 20
+PANEL_PADDING_X = 20
+TILE_SIZE = 29
+TILE_GAP = 2
+ELEMENT_PANEL_WIDTH = 596
+COMPOSITION_PANEL_WIDTH = 457
+TOP_ROW_HEIGHT = 465
+
+DARK = {
+    "background": "#161616", "background-hover": "#292929",
+    "layer-01": "#262626", "layer-02": "#393939", "layer-03": "#525252",
+    "layer-hover-01": "#333333", "layer-hover-02": "#474747",
+    "layer-active-01": "#525252", "layer-active-02": "#6f6f6f",
+    "layer-selected-01": "#393939", "layer-selected-hover-01": "#474747",
+    "field-01": "#262626", "field-02": "#393939", "field-hover-02": "#474747",
+    "border-subtle-00": "#393939", "border-subtle-01": "#393939", "border-subtle-02": "#525252",
+    "border-strong-01": "#6f6f6f", "border-strong-02": "#8d8d8d", "border-tile": "#6f6f6f",
+    "border-interactive": "#4589ff", "border-inverse": "#f4f4f4", "border-disabled": "#393939",
+    "text-primary": "#f4f4f4", "text-secondary": "#c6c6c6", "text-helper": "#a8a8a8",
+    "text-placeholder": "#6f6f6f", "text-disabled": "#6f6f6f", "text-on-color": "#ffffff",
+    "text-error": "#ff8389", "text-inverse": "#161616",
+    "link-primary": "#78a9ff", "link-primary-hover": "#a6c8ff",
+    "icon-primary": "#f4f4f4", "icon-secondary": "#c6c6c6", "icon-disabled": "#6f6f6f",
+    "button-primary": "#0f62fe", "button-primary-hover": "#0050e6", "button-primary-active": "#002d9c",
+    "button-secondary": "#6f6f6f", "button-secondary-hover": "#606060", "button-secondary-active": "#393939",
+    "button-ghost-hover": "#333333", "button-ghost-active": "#525252",
+    "button-danger-secondary": "#ff8389", "button-danger-hover": "#b81922",
+    "button-disabled": "#6f6f6f", "button-disabled-bg": "#6f6f6f", "text-on-color-disabled": "#a8a8a8",
+    "focus": "#ffffff", "focus-inset": "#161616",
+    "support-error": "#fa4d56", "support-success": "#42be65", "support-warning": "#f1c21b",
+    "support-info": "#4589ff",
+    "status-green": "#24a148", "status-yellow": "#f1c21b", "status-red": "#fa4d56", "status-gray": "#8d8d8d",
+    "status-inner": "#000000",
+    "overlay": "rgba(0, 0, 0, 0.65)", "shadow": "rgba(0, 0, 0, 0.8)",
+    "switcher-selected": "#404040", "switcher-unselected": "#212121",
+    "row-hover": "#333333", "row-selected": "#393939", "header-row": "#393939",
+}
+
+LIGHT = {
+    "background": "#f4f4f4", "background-hover": "#e8e8e8",
+    "layer-01": "#ffffff", "layer-02": "#f4f4f4", "layer-03": "#ffffff",
+    "layer-hover-01": "#e8e8e8", "layer-hover-02": "#e8e8e8",
+    "layer-active-01": "#c6c6c6", "layer-active-02": "#c6c6c6",
+    "layer-selected-01": "#e0e0e0", "layer-selected-hover-01": "#d1d1d1",
+    "field-01": "#ffffff", "field-02": "#f4f4f4", "field-hover-02": "#e8e8e8",
+    "border-subtle-00": "#e0e0e0", "border-subtle-01": "#e0e0e0", "border-subtle-02": "#c6c6c6",
+    "border-strong-01": "#8d8d8d", "border-strong-02": "#8d8d8d", "border-tile": "#a8a8a8",
+    "border-interactive": "#0f62fe", "border-inverse": "#161616", "border-disabled": "#c6c6c6",
+    "text-primary": "#161616", "text-secondary": "#525252", "text-helper": "#6f6f6f",
+    "text-placeholder": "#a8a8a8", "text-disabled": "#a8a8a8", "text-on-color": "#ffffff",
+    "text-error": "#da1e28", "text-inverse": "#ffffff",
+    "link-primary": "#0f62fe", "link-primary-hover": "#0043ce",
+    "icon-primary": "#161616", "icon-secondary": "#525252", "icon-disabled": "#a8a8a8",
+    "button-primary": "#0f62fe", "button-primary-hover": "#0050e6", "button-primary-active": "#002d9c",
+    "button-secondary": "#393939", "button-secondary-hover": "#474747", "button-secondary-active": "#6f6f6f",
+    "button-ghost-hover": "#e8e8e8", "button-ghost-active": "#c6c6c6",
+    "button-danger-secondary": "#da1e28", "button-danger-hover": "#b81922",
+    "button-disabled": "#a8a8a8", "button-disabled-bg": "#c6c6c6", "text-on-color-disabled": "#8d8d8d",
+    "focus": "#0f62fe", "focus-inset": "#ffffff",
+    "support-error": "#da1e28", "support-success": "#24a148", "support-warning": "#f1c21b",
+    "support-info": "#0043ce",
+    "status-green": "#24a148", "status-yellow": "#f1c21b", "status-red": "#da1e28", "status-gray": "#8d8d8d",
+    "status-inner": "#000000",
+    "overlay": "rgba(22, 22, 22, 0.5)", "shadow": "rgba(0, 0, 0, 0.3)",
+    "switcher-selected": "#ffffff", "switcher-unselected": "#e0e0e0",
+    "row-hover": "#e8e8e8", "row-selected": "#e0e0e0", "header-row": "#e0e0e0",
+}
+
+# Scientific prediction classes → Carbon tag palettes. These encode result classes, not UI status.
+TAG_COLORS = {
+    "dark": {
+        "SS": ("#0e6027", "#a7f0ba"), "MP": ("#9f1853", "#ffd6e8"), "IM": ("#a2191f", "#ffd7d9"),
+        "SS+IM": ("#0043ce", "#d0e2ff"), "MG": ("#6929c4", "#e8daff"), "N/A": ("#525252", "#e0e0e0"),
+        "BCC": ("#4d5358", "#dde1e6"), "FCC": ("#4d5358", "#dde1e6"), "BCC + FCC": ("#4d5358", "#dde1e6"),
+    },
+    "light": {
+        "SS": ("#a7f0ba", "#0e6027"), "MP": ("#ffd6e8", "#9f1853"), "IM": ("#ffd7d9", "#a2191f"),
+        "SS+IM": ("#d0e2ff", "#0043ce"), "MG": ("#e8daff", "#6929c4"), "N/A": ("#e0e0e0", "#161616"),
+        "BCC": ("#dde1e6", "#343a3f"), "FCC": ("#dde1e6", "#343a3f"), "BCC + FCC": ("#dde1e6", "#343a3f"),
+    },
+}
+
+TAG_LONG_NAMES = {
+    "SS": "Solid solution", "MP": "Multiple phases", "IM": "Intermetallic", "SS+IM": "Solid solution + intermetallic",
+    "MG": "Metallic glass (amorphous)", "N/A": "Not available",
+}
+
+FONT_FAMILY = "IBM Plex Sans"
+
+
+@dataclass(frozen=True)
+class Typo:
+    size: int
+    weight: int
+    line: int
+    spacing: float
+
+
+BODY_COMPACT_01 = Typo(14, 400, 18, 0.16)
+HEADING_COMPACT_01 = Typo(14, 600, 18, 0.16)
+LABEL_01 = Typo(12, 400, 16, 0.32)
+HEADING_03 = Typo(20, 400, 28, 0.0)
+
+
+def font(t: Typo = BODY_COMPACT_01, *, italic: bool = False) -> QFont:
+    f = QFont(FONT_FAMILY)
+    f.setPixelSize(t.size)
+    f.setWeight(QFont.Weight(t.weight))
+    f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, t.spacing)
+    f.setItalic(italic)
+    f.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
+    return f
+
+
+def load_fonts() -> None:
+    from pathlib import Path
+    fonts_dir = Path(__file__).with_name("fonts")
+    if fonts_dir.is_dir():
+        for path in fonts_dir.glob("*.ttf"):
+            QFontDatabase.addApplicationFont(str(path))
+
+
+class ThemeManager(QObject):
+    changed = Signal(str)
+
+    def __init__(self, name: str = "dark"):
+        super().__init__()
+        self.name = name if name in ("dark", "light") else "dark"
+
+    @property
+    def tokens(self) -> dict:
+        return DARK if self.name == "dark" else LIGHT
+
+    def color(self, token: str) -> QColor:
+        return QColor(self.tokens[token])
+
+    def tag_colors(self, label: str) -> tuple[str, str]:
+        palette = TAG_COLORS[self.name]
+        return palette.get(label, palette["N/A"])
+
+    def set_theme(self, name: str) -> None:
+        if name not in ("dark", "light") or name == self.name:
+            return
+        self.name = name
+        self.changed.emit(name)
+
+
+THEME = ThemeManager()
+
+
+def t(token: str) -> str:
+    return THEME.tokens[token]
+
+
+def stylesheet(icon_url) -> str:
+    """Application QSS. ``icon_url(name, token)`` returns a file URL for indicator images."""
+    k = THEME.tokens
+    return f"""
+* {{ font-family: "{FONT_FAMILY}"; font-size: 14px; outline: none; }}
+QWidget {{ color: {k['text-primary']}; }}
+QMainWindow, #AppBody, #ContentScroll {{ background: {k['background']}; }}
+QToolTip {{ background: {k['border-inverse']}; color: {k['text-inverse']}; border: none; padding: 4px 8px;
+           font-size: 12px; }}
+
+/* ---------------- panels */
+#Panel {{ background: {k['layer-01']}; }}
+#PanelTitle {{ font-size: 16px; font-weight: 600; color: {k['text-primary']}; letter-spacing: 0px; }}
+#PanelTitleSuffix {{ font-size: 16px; font-weight: 400; color: {k['text-primary']}; }}
+#Divider {{ background: {k['border-subtle-01']}; border: none; }}
+#Label01 {{ font-size: 12px; color: {k['text-secondary']}; letter-spacing: 0.32px; }}
+#Secondary {{ color: {k['text-secondary']}; }}
+#Helper {{ font-size: 12px; color: {k['text-helper']}; letter-spacing: 0.32px; }}
+#ErrorText {{ font-size: 12px; color: {k['text-error']}; letter-spacing: 0.32px; }}
+
+/* ---------------- header (UI shell) */
+#AppHeader {{ background: {k['background']}; border-bottom: 1px solid {k['border-subtle-00']}; }}
+#HeaderName {{ font-size: 14px; color: {k['text-primary']}; }}
+#HeaderDivider {{ background: {k['border-subtle-01']}; }}
+#HeaderMenuItem {{ background: transparent; border: none; color: {k['text-secondary']};
+                   padding: 0px 16px; font-size: 14px; text-align: left; }}
+#HeaderMenuItem:hover, #HeaderMenuItem[open="true"] {{ background: {k['layer-hover-01']};
+                   color: {k['text-primary']}; }}
+#HeaderMenuItem:focus {{ border: 2px solid {k['focus']}; }}
+QMenu {{ background: {k['layer-01']}; border: none; padding: 0px; }}
+QMenu::item {{ padding: 0px 16px; min-height: 32px; height: 32px; color: {k['text-secondary']}; }}
+QMenu::item:selected {{ background: {k['layer-hover-01']}; color: {k['text-primary']}; }}
+QMenu::item:disabled {{ color: {k['text-disabled']}; }}
+QMenu::item:checked {{ color: {k['text-primary']}; }}
+QMenu::separator {{ height: 1px; background: {k['border-subtle-01']}; margin: 0px; }}
+QMenu::indicator {{ width: 16px; height: 16px; padding-left: 8px; }}
+
+/* ---------------- buttons */
+QPushButton {{ border: none; min-height: {CONTROL_HEIGHT}px; padding: 0px 16px; text-align: left; }}
+QPushButton[kind="primary"] {{ background: {k['button-primary']}; color: {k['text-on-color']}; }}
+QPushButton[kind="primary"]:hover {{ background: {k['button-primary-hover']}; }}
+QPushButton[kind="primary"]:pressed {{ background: {k['button-primary-active']}; }}
+QPushButton[kind="primary"]:disabled {{ background: {k['button-disabled-bg']}; color: {k['text-on-color-disabled']}; }}
+QPushButton[kind="secondary"] {{ background: {k['button-secondary']}; color: {k['text-on-color']}; }}
+QPushButton[kind="secondary"]:hover {{ background: {k['button-secondary-hover']}; }}
+QPushButton[kind="secondary"]:pressed {{ background: {k['button-secondary-active']}; }}
+QPushButton[kind="secondary"]:disabled {{ background: {k['button-disabled-bg']}; color: {k['text-on-color-disabled']}; }}
+QPushButton[kind="ghost"] {{ background: transparent; color: {k['link-primary']}; }}
+QPushButton[kind="ghost"]:hover {{ background: {k['button-ghost-hover']}; color: {k['link-primary-hover']}; }}
+QPushButton[kind="ghost"]:pressed {{ background: {k['button-ghost-active']}; }}
+QPushButton[kind="ghost"]:disabled {{ background: transparent; color: {k['button-disabled']}; }}
+QPushButton[kind="danger-ghost"] {{ background: transparent; color: {k['button-danger-secondary']}; }}
+QPushButton[kind="danger-ghost"]:hover {{ background: {k['button-danger-hover']}; color: {k['text-on-color']}; }}
+QPushButton[kind="danger-ghost"]:disabled {{ color: {k['button-disabled']}; background: transparent; }}
+QPushButton[kind="icon"] {{ background: transparent; padding: 0px; min-width: 32px; max-width: 32px;
+                            min-height: 32px; max-height: 32px; }}
+QPushButton[kind="icon"]:hover {{ background: {k['button-ghost-hover']}; }}
+QPushButton[kind="icon"]:pressed {{ background: {k['button-ghost-active']}; }}
+QPushButton[kind="icon"][active="true"] {{ background: {k['layer-selected-01']}; }}
+QPushButton:focus {{ border: 2px solid {k['focus']}; }}
+QPushButton[kind="primary"]:focus, QPushButton[kind="secondary"]:focus {{
+    border: 2px solid {k['focus']}; padding: 0px 14px; }}
+QPushButton[size="md"] {{ min-height: {BUTTON_HEIGHT}px; max-height: {BUTTON_HEIGHT}px; }}
+QPushButton[size="sm"] {{ min-height: {CONTROL_HEIGHT}px; max-height: {CONTROL_HEIGHT}px; }}
+
+/* ---------------- text inputs (Carbon text input, sm) */
+QLineEdit {{ background: {k['field-02']}; color: {k['text-primary']}; border: none;
+             border-bottom: 1px solid {k['border-strong-02']}; padding: 0px 16px;
+             min-height: {CONTROL_HEIGHT}px; max-height: {CONTROL_HEIGHT}px;
+             selection-background-color: {k['border-interactive']}; selection-color: {k['text-on-color']}; }}
+QLineEdit:hover {{ background: {k['field-hover-02']}; }}
+QLineEdit:focus {{ border: 2px solid {k['focus']}; padding: 0px 14px; }}
+QLineEdit[invalid="true"] {{ border: 2px solid {k['support-error']}; padding: 0px 14px; }}
+QLineEdit:read-only {{ background: transparent; border: none; border-bottom: 1px solid {k['border-strong-01']};
+                      color: {k['text-primary']}; }}
+QLineEdit:read-only:focus {{ border: none; border-bottom: 1px solid {k['border-strong-01']}; padding: 0px 16px; }}
+QLineEdit:disabled {{ color: {k['text-disabled']}; border-bottom: 1px solid transparent; background: transparent; }}
+QLineEdit[cell="element"] {{ font-weight: 600; background: transparent; border-bottom: 1px solid {k['border-strong-01']};
+                            qproperty-alignment: AlignCenter; padding: 0px 4px; }}
+QLineEdit[cell="element"]:read-only:focus {{ padding: 0px 4px; }}
+QLineEdit[cell="element"]:!read-only {{ background: {k['field-02']}; border-bottom: 1px solid {k['border-strong-02']}; }}
+QLineEdit[cell="element"]:!read-only:focus {{ border: 2px solid {k['focus']}; padding: 0px 2px; }}
+QLineEdit[cell="total"] {{ font-weight: 400; }}
+QLineEdit[cell="element-filled"] {{ font-weight: 600; background: {k['layer-02']}; border: none;
+                                   border-bottom: 1px solid {k['border-strong-01']}; qproperty-alignment: AlignCenter;
+                                   padding: 0px 4px; }}
+#LockCell {{ border-bottom: 1px solid {k['border-strong-01']}; }}
+QPlainTextEdit[invalid="true"] {{ border: 2px solid {k['support-error']}; }}
+QPlainTextEdit, QTextEdit {{ background: {k['field-02']}; color: {k['text-primary']}; border: none;
+             border-bottom: 1px solid {k['border-strong-02']}; padding: 8px 12px; }}
+QPlainTextEdit:focus, QTextEdit:focus {{ border: 2px solid {k['focus']}; }}
+
+/* ---------------- radio buttons / checkboxes */
+QRadioButton, QCheckBox {{ spacing: 8px; color: {k['text-primary']}; background: transparent; }}
+QRadioButton::indicator, QCheckBox::indicator {{ width: 20px; height: 20px; }}
+QRadioButton::indicator:unchecked {{ image: url({icon_url('radio', 'icon-primary')}); }}
+QRadioButton::indicator:checked {{ image: url({icon_url('radio_checked', 'icon-primary')}); }}
+QRadioButton::indicator:disabled {{ image: url({icon_url('radio', 'icon-disabled')}); }}
+QRadioButton:disabled, QCheckBox:disabled {{ color: {k['text-disabled']}; }}
+QCheckBox::indicator:unchecked {{ image: url({icon_url('checkbox', 'icon-primary')}); }}
+QCheckBox::indicator:checked {{ image: url({icon_url('checkbox_checked', 'icon-primary')}); }}
+QCheckBox::indicator:disabled {{ image: url({icon_url('checkbox', 'icon-disabled')}); }}
+QRadioButton:focus, QCheckBox:focus {{ border: 1px solid {k['focus']}; }}
+
+/* ---------------- combo (Carbon select, inline) */
+QComboBox {{ background: transparent; border: none; padding: 0px 8px; min-height: {CONTROL_HEIGHT}px;
+             color: {k['text-primary']}; }}
+QComboBox:hover {{ background: {k['layer-hover-01']}; }}
+QComboBox:focus {{ border: 2px solid {k['focus']}; }}
+QComboBox::drop-down {{ border: none; width: 24px; }}
+QComboBox::down-arrow {{ image: url({icon_url('chevron_down', 'icon-primary')}); width: 16px; height: 16px; }}
+QComboBox QAbstractItemView {{ background: {k['layer-01']}; color: {k['text-primary']}; border: none;
+             selection-background-color: {k['layer-hover-01']}; outline: none; }}
+QComboBox[field="true"] {{ background: {k['field-02']}; border-bottom: 1px solid {k['border-strong-02']};
+             padding: 0px 16px; }}
+
+/* ---------------- tabs (Carbon line tabs, sm) */
+#TabButton {{ background: transparent; border: none; border-bottom: 2px solid {k['border-strong-01']};
+              color: {k['text-secondary']}; padding: 0px 16px; min-height: 32px; max-height: 32px; }}
+#TabButton:hover {{ color: {k['text-primary']}; border-bottom: 2px solid {k['border-strong-02']}; }}
+#TabButton:checked {{ color: {k['text-primary']}; font-weight: 600; border-bottom: 2px solid {k['border-interactive']}; }}
+#TabButton:focus {{ border: 2px solid {k['focus']}; }}
+#TabButton:disabled {{ color: {k['text-disabled']}; border-bottom: 2px solid {k['border-disabled']}; }}
+
+/* ---------------- tiles / details */
+#Tile {{ background: {k['layer-02']}; border: 1px solid {k['border-tile']}; }}
+#TileTitle {{ font-weight: 600; color: {k['text-primary']}; }}
+#TileBody {{ color: {k['text-primary']}; }}
+#KeyValueKey {{ color: {k['text-secondary']}; font-size: 12px; font-weight: 600; letter-spacing: 0.16px; }}
+#KeyValueValue {{ color: {k['text-secondary']}; font-size: 12px; letter-spacing: 0.16px; }}
+
+/* ---------------- scroll bars (thin, Carbon-like) */
+QScrollArea {{ background: transparent; border: none; }}
+QScrollArea > QWidget > QWidget {{ background: transparent; }}
+QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0px; }}
+QScrollBar::handle:vertical {{ background: {k['border-strong-01']}; min-height: 24px; border-radius: 0px;
+                               margin: 0px 2px; }}
+QScrollBar::handle:vertical:hover {{ background: {k['border-strong-02']}; }}
+QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 0px; }}
+QScrollBar::handle:horizontal {{ background: {k['border-strong-01']}; min-width: 24px; margin: 2px 0px; }}
+QScrollBar::handle:horizontal:hover {{ background: {k['border-strong-02']}; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ width: 0px; height: 0px; }}
+QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+
+/* ---------------- data table */
+#DataTable {{ background: {k['layer-01']}; }}
+#TableToolbar {{ background: {k['layer-01']}; }}
+#PaginationBar {{ background: {k['layer-01']}; border-top: 1px solid {k['border-subtle-02']}; }}
+QTableView {{ background: {k['layer-01']}; alternate-background-color: {k['layer-01']}; border: none;
+              gridline-color: {k['border-subtle-01']}; color: {k['text-secondary']};
+              selection-background-color: {k['row-selected']}; selection-color: {k['text-primary']}; }}
+QTableView:focus {{ border: none; }}
+QHeaderView {{ background: {k['header-row']}; border: none; }}
+QHeaderView::section {{ background: {k['header-row']}; color: {k['text-primary']}; border: none;
+                        padding: 0px 8px 0px 16px; font-weight: 600; height: 32px; }}
+QHeaderView::section:hover {{ background: {k['layer-hover-02']}; }}
+QTableCornerButton::section {{ background: {k['header-row']}; border: none; }}
+
+/* ---------------- dialogs / notifications */
+QDialog {{ background: {k['layer-01']}; }}
+#ModalTitle {{ font-size: 20px; color: {k['text-primary']}; }}
+#ModalLabel {{ font-size: 12px; color: {k['text-secondary']}; letter-spacing: 0.32px; }}
+#ModalFooter {{ background: {k['layer-01']}; }}
+#InlineNotification {{ background: {k['layer-02']}; border-left: 3px solid {k['support-info']}; }}
+#InlineNotification[kind="error"] {{ border-left: 3px solid {k['support-error']}; }}
+#InlineNotification[kind="warning"] {{ border-left: 3px solid {k['support-warning']}; }}
+#InlineNotification[kind="success"] {{ border-left: 3px solid {k['support-success']}; }}
+QProgressBar {{ background: {k['layer-02']}; border: none; height: 8px; max-height: 8px; text-align: center; }}
+QProgressBar::chunk {{ background: {k['border-interactive']}; }}
+QListWidget {{ background: transparent; border: none; }}
+QListWidget::item {{ height: 32px; }}
+QListWidget::item:hover {{ background: {k['layer-hover-01']}; }}
+"""

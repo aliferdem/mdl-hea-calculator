@@ -1,1416 +1,2307 @@
 {
+  "_metadata": {
+    "description": "Elemental properties used by the HEA Calculator engine.",
+    "properties": {
+      "atomic_radius": "pm. Guo & Liu, Prog. Nat. Sci. Mater. Int. 21 (2011) 433, Table 1. Validated by reproducing published delta values of Guo et al. 2013 Table 1 (96% within 0.02), Singh et al. 2014 Table 1 (86%) and Guo & Liu 2011 Tables 2-3 (96%). Elements listed in 'atomic_radius_supplementary' are absent from Guo & Liu Table 1; their values come from other (unverified) sources and are flagged by the engine.",
+      "atomic_radius_cn12": "pm. Kittel, Introduction to Solid State Physics, 8th ed., Ch. 3, Table 9, 'Radii of ions in 12-coordinated metals' (transcribed and checked against the PDF). Range/valence entries: Ce 1.71-1.82 -> 182, Eu 2+ 204, Yb 2+ 194, Pu 1.58-1.64 -> 161. Used for Yang & Zhang (2012) delta (reproduces their Table 1: 88% within 0.02) and King et al. (2016) delta (Goldschmidt CN12 radius).",
+      "melting_point": "K, rule-of-mixtures input for Tm.",
+      "nvalence": "Valence electron count (s+d) for VEC and Miedema/Niessen z.",
+      "molar_volume": "cm3/mol, Miedema V (Bakker 1998 Table A1); also used for the rule-of-mixtures density.",
+      "work_function_phi": "V, Miedema phi* (Bakker 1998 Table A1) - verified against the book.",
+      "n_ws": "density units, Miedema n_ws (Bakker 1998 Table A1) - verified against the book.",
+      "bulk_modulus": "1e10 Pa (Bakker 1998 Table A5) - verified against the book.",
+      "shear_modulus": "1e10 Pa (Bakker 1998 Table A5) - verified against the book.",
+      "atomic_weight": "g/mol"
+    },
+    "atomic_radius_supplementary": [
+      "Ac",
+      "Am",
+      "Ar",
+      "As",
+      "At",
+      "Bh",
+      "Bi",
+      "Bk",
+      "Br",
+      "Cf",
+      "Cl",
+      "Cm",
+      "Cn",
+      "Db",
+      "Ds",
+      "Es",
+      "F",
+      "Fl",
+      "Fm",
+      "Fr",
+      "H",
+      "He",
+      "Hg",
+      "Hs",
+      "I",
+      "Kr",
+      "Lr",
+      "Lv",
+      "Mc",
+      "Md",
+      "Mt",
+      "Ne",
+      "Nh",
+      "No",
+      "Np",
+      "Og",
+      "Pu",
+      "Ra",
+      "Rf",
+      "Rg",
+      "Rn",
+      "Sb",
+      "Sg",
+      "Ts",
+      "Xe"
+    ]
+  },
   "H": {
-    "position": [0, 0, "Nonmetal"],
+    "position": [
+      0,
+      0,
+      "Nonmetal"
+    ],
     "properties": {
       "atomic_number": 1,
       "melting_point": 14.01,
-      "atomic_volume": 14.1,
       "atomic_weight": 1.0079,
       "density": 0.0899,
-      "atomic_radius": 25.0,
-      "nvalence": 1
+      "atomic_radius": 25,
+      "nvalence": 1,
+      "molar_volume": 14.1
     }
   },
   "He": {
-    "position": [0, 17, "Noble gas"],
+    "position": [
+      0,
+      17,
+      "Noble gas"
+    ],
     "properties": {
       "atomic_number": 2,
       "melting_point": 0.95,
-      "atomic_volume": 31.8,
       "atomic_weight": 4.0026,
       "density": 0.1787,
       "atomic_radius": 120.0,
-      "nvalence": 0
+      "nvalence": 0,
+      "molar_volume": 31.8
     }
   },
   "Li": {
-    "position": [1, 0, "Alkali metal"],
+    "position": [
+      1,
+      0,
+      "Alkali metal"
+    ],
     "properties": {
       "atomic_number": 3,
       "melting_point": 453.65,
-      "atomic_volume": 13.1,
       "atomic_weight": 6.941,
       "density": 0.53,
-      "atomic_radius": 145.0,
-      "nvalence": 1
+      "atomic_radius": 151.94,
+      "nvalence": 1,
+      "bulk_modulus": 1.158,
+      "shear_modulus": 0.4228,
+      "molar_volume": 13.0,
+      "work_function_phi": 2.85,
+      "n_ws": 0.94,
+      "atomic_radius_cn12": 156.0
     }
   },
   "Be": {
-    "position": [1, 1, "Alkaline earth metal"],
+    "position": [
+      1,
+      1,
+      "Alkaline earth metal"
+    ],
     "properties": {
       "atomic_number": 4,
       "melting_point": 1560,
-      "atomic_volume": 5.0,
       "atomic_weight": 9.01218,
       "density": 1.85,
-      "atomic_radius": 105.0,
-      "nvalence": 2
+      "atomic_radius": 112.8,
+      "nvalence": 2,
+      "bulk_modulus": 10.04,
+      "shear_modulus": 14.32,
+      "molar_volume": 4.9,
+      "work_function_phi": 5.05,
+      "n_ws": 4.66,
+      "atomic_radius_cn12": 113.0
     }
   },
   "B": {
-    "position": [1, 12, "Metalloid"],
+    "position": [
+      1,
+      12,
+      "Metalloid"
+    ],
     "properties": {
       "atomic_number": 5,
       "melting_point": 2349,
-      "atomic_volume": 4.6,
       "atomic_weight": 10.81,
       "density": 2.34,
-      "atomic_radius": 85.0,
-      "nvalence": 3
+      "atomic_radius": 82,
+      "nvalence": 3,
+      "bulk_modulus": 17.85,
+      "shear_modulus": 20.31,
+      "molar_volume": 4.7,
+      "work_function_phi": 5.3,
+      "n_ws": 5.36,
+      "atomic_radius_cn12": 98.0
     }
   },
   "C": {
-    "position": [1, 13, "Nonmetal"],
+    "position": [
+      1,
+      13,
+      "Nonmetal"
+    ],
     "properties": {
       "atomic_number": 6,
       "melting_point": 3823,
-      "atomic_volume": 5.3,
       "atomic_weight": 12.011,
       "density": 2.62,
-      "atomic_radius": 70.0,
-      "nvalence": 4
+      "atomic_radius": 77.3,
+      "nvalence": 4,
+      "bulk_modulus": 54.54,
+      "shear_modulus": 45.13,
+      "molar_volume": 3.25,
+      "work_function_phi": 6.24,
+      "n_ws": 5.55,
+      "atomic_radius_cn12": 92.0
     }
   },
   "N": {
-    "position": [1, 14, "Nonmetal"],
+    "position": [
+      1,
+      14,
+      "Nonmetal"
+    ],
     "properties": {
       "atomic_number": 7,
       "melting_point": 63.15,
-      "atomic_volume": 17.3,
       "atomic_weight": 14.0067,
       "density": 1.251,
-      "atomic_radius": 65.0,
-      "nvalence": 5
+      "atomic_radius": 75,
+      "nvalence": 5,
+      "molar_volume": 17.3
     }
   },
   "O": {
-    "position": [1, 15, "Nonmetal"],
+    "position": [
+      1,
+      15,
+      "Nonmetal"
+    ],
     "properties": {
       "atomic_number": 8,
       "melting_point": 54.36,
-      "atomic_volume": 14.0,
       "atomic_weight": 15.9994,
       "density": 1.429,
-      "atomic_radius": 60.0,
-      "nvalence": 6
+      "atomic_radius": 73,
+      "nvalence": 6,
+      "molar_volume": 14.0
     }
   },
   "F": {
-    "position": [1, 16, "Halogen"],
+    "position": [
+      1,
+      16,
+      "Halogen"
+    ],
     "properties": {
       "atomic_number": 9,
       "melting_point": 53.53,
-      "atomic_volume": 17.1,
       "atomic_weight": 18.998403,
       "density": 1.696,
-      "atomic_radius": 50.0,
-      "nvalence": 7
+      "atomic_radius": 64.0,
+      "nvalence": 7,
+      "molar_volume": 17.1
     }
   },
   "Ne": {
-    "position": [1, 17, "Noble gas"],
+    "position": [
+      1,
+      17,
+      "Noble gas"
+    ],
     "properties": {
       "atomic_number": 10,
       "melting_point": 24.56,
-      "atomic_volume": 16.7,
       "atomic_weight": 20.179,
       "density": 0.901,
-      "atomic_radius": 160.0,
-      "nvalence": 0
+      "atomic_radius": 158.0,
+      "nvalence": 0,
+      "molar_volume": 16.7
     }
   },
   "Na": {
-    "position": [2, 0, "Alkali metal"],
+    "position": [
+      2,
+      0,
+      "Alkali metal"
+    ],
     "properties": {
       "atomic_number": 11,
       "melting_point": 370.87,
-      "atomic_volume": 23.7,
       "atomic_weight": 22.98977,
       "density": 0.97,
-      "atomic_radius": 180.0,
-      "nvalence": 1
+      "atomic_radius": 185.7,
+      "nvalence": 1,
+      "bulk_modulus": 0.6817,
+      "shear_modulus": 0.3434,
+      "molar_volume": 23.78,
+      "work_function_phi": 2.7,
+      "n_ws": 0.55,
+      "atomic_radius_cn12": 191.0
     }
   },
   "Mg": {
-    "position": [2, 1, "Alkaline earth metal"],
+    "position": [
+      2,
+      1,
+      "Alkaline earth metal"
+    ],
     "properties": {
       "atomic_number": 12,
       "melting_point": 923,
-      "atomic_volume": 14.0,
       "atomic_weight": 24.305,
       "density": 1.74,
-      "atomic_radius": 150.0,
+      "atomic_radius": 160.13,
       "nvalence": 2,
-      "lattice_parameter": 3.2094
+      "bulk_modulus": 3.544,
+      "shear_modulus": 1.736,
+      "lattice_parameter": 3.2094,
+      "molar_volume": 14.0,
+      "work_function_phi": 3.45,
+      "n_ws": 1.6,
+      "atomic_radius_cn12": 160.0
     }
   },
   "Al": {
-    "position": [2, 12, "Post-transition metal"],
+    "position": [
+      2,
+      12,
+      "Post-transition metal"
+    ],
     "properties": {
       "atomic_number": 13,
       "melting_point": 933.47,
-      "atomic_volume": 10.0,
       "atomic_weight": 26.98154,
       "density": 2.7,
-      "atomic_radius": 143.0,
+      "atomic_radius": 143.17,
       "nvalence": 3,
-      "lattice_parameter": 4.0495
+      "bulk_modulus": 7.218,
+      "shear_modulus": 2.659,
+      "lattice_parameter": 4.0495,
+      "molar_volume": 10.0,
+      "work_function_phi": 4.2,
+      "n_ws": 2.7,
+      "atomic_radius_cn12": 143.0
     }
   },
   "Si": {
-    "position": [2, 13, "Metalloid"],
+    "position": [
+      2,
+      13,
+      "Metalloid"
+    ],
     "properties": {
       "atomic_number": 14,
       "melting_point": 1687,
-      "atomic_volume": 12.1,
       "atomic_weight": 28.0855,
       "density": 2.33,
-      "atomic_radius": 110.0,
+      "atomic_radius": 115.3,
       "nvalence": 4,
-      "lattice_parameter": 5.431
+      "bulk_modulus": 9.888,
+      "shear_modulus": 3.973,
+      "lattice_parameter": 5.431,
+      "molar_volume": 8.6,
+      "work_function_phi": 4.7,
+      "n_ws": 3.38,
+      "atomic_radius_cn12": 132.0
     }
   },
   "P": {
-    "position": [2, 14, "Nonmetal"],
+    "position": [
+      2,
+      14,
+      "Nonmetal"
+    ],
     "properties": {
       "atomic_number": 15,
       "melting_point": 317.3,
-      "atomic_volume": 17.0,
       "atomic_weight": 30.97376,
       "density": 1.82,
-      "atomic_radius": 100.0,
-      "nvalence": 5
+      "atomic_radius": 106,
+      "nvalence": 5,
+      "bulk_modulus": 1.919,
+      "shear_modulus": 0.7161,
+      "molar_volume": 8.6,
+      "work_function_phi": 5.55,
+      "n_ws": 4.49
     }
   },
   "S": {
-    "position": [2, 15, "Nonmetal"],
+    "position": [
+      2,
+      15,
+      "Nonmetal"
+    ],
     "properties": {
       "atomic_number": 16,
       "melting_point": 388.36,
-      "atomic_volume": 15.5,
       "atomic_weight": 32.06,
       "density": 2.07,
-      "atomic_radius": 100.0,
-      "nvalence": 6
+      "atomic_radius": 102,
+      "nvalence": 6,
+      "molar_volume": 15.5
     }
   },
   "Cl": {
-    "position": [2, 16, "Halogen"],
+    "position": [
+      2,
+      16,
+      "Halogen"
+    ],
     "properties": {
       "atomic_number": 17,
       "melting_point": 171.6,
-      "atomic_volume": 18.7,
       "atomic_weight": 35.453,
       "density": 3.17,
-      "atomic_radius": 100.0,
-      "nvalence": 7
+      "atomic_radius": 99.0,
+      "nvalence": 7,
+      "molar_volume": 18.7
     }
   },
   "Ar": {
-    "position": [2, 17, "Noble gas"],
+    "position": [
+      2,
+      17,
+      "Noble gas"
+    ],
     "properties": {
       "atomic_number": 18,
       "melting_point": 83.81,
-      "atomic_volume": 24.2,
       "atomic_weight": 39.948,
       "density": 1.784,
-      "atomic_radius": 71.0,
-      "nvalence": 0
+      "atomic_radius": 188.0,
+      "nvalence": 0,
+      "molar_volume": 24.2
     }
   },
   "K": {
-    "position": [3, 0, "Alkali metal"],
+    "position": [
+      3,
+      0,
+      "Alkali metal"
+    ],
     "properties": {
       "atomic_number": 19,
       "melting_point": 336.53,
-      "atomic_volume": 45.3,
       "atomic_weight": 39.0983,
       "density": 1.784,
-      "atomic_radius": 220.0,
-      "nvalence": 1
+      "atomic_radius": 231,
+      "nvalence": 1,
+      "bulk_modulus": 0.3178,
+      "shear_modulus": 0.1275,
+      "molar_volume": 45.63,
+      "work_function_phi": 2.25,
+      "n_ws": 0.27,
+      "atomic_radius_cn12": 238.0
     }
   },
   "Ca": {
-    "position": [3, 1, "Alkaline earth metal"],
+    "position": [
+      3,
+      1,
+      "Alkaline earth metal"
+    ],
     "properties": {
       "atomic_number": 20,
       "melting_point": 1115,
-      "atomic_volume": 29.9,
       "atomic_weight": 40.08,
       "density": 1.55,
-      "atomic_radius": 180.0,
-      "nvalence": 2
+      "atomic_radius": 197.6,
+      "nvalence": 2,
+      "bulk_modulus": 1.521,
+      "shear_modulus": 0.7358,
+      "molar_volume": 26.2,
+      "work_function_phi": 2.55,
+      "n_ws": 0.75,
+      "atomic_radius_cn12": 198.0
     }
   },
   "Sc": {
-    "position": [3, 2, "Transition metal"],
+    "position": [
+      3,
+      2,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 21,
       "melting_point": 1814,
-      "atomic_volume": 15.0,
       "atomic_weight": 44.9559,
       "density": 3,
-      "atomic_radius": 164.0,
-      "nvalence": 3
+      "atomic_radius": 164.1,
+      "nvalence": 3,
+      "bulk_modulus": 5.729,
+      "shear_modulus": 3.129,
+      "molar_volume": 15.03,
+      "work_function_phi": 3.25,
+      "n_ws": 2.05,
+      "atomic_radius_cn12": 164.0
     }
   },
   "Ti": {
-    "position": [3, 3, "Transition metal"],
+    "position": [
+      3,
+      3,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 22,
       "melting_point": 1941,
-      "atomic_volume": 10.6,
       "atomic_weight": 47.9,
       "density": 4.5,
-      "atomic_radius": 146.0,
-      "nvalence": 4
+      "atomic_radius": 146.15,
+      "nvalence": 4,
+      "bulk_modulus": 10.52,
+      "shear_modulus": 3.934,
+      "molar_volume": 10.58,
+      "work_function_phi": 3.8,
+      "n_ws": 3.51,
+      "atomic_radius_cn12": 146.0
     }
   },
   "V": {
-    "position": [3, 4, "Transition metal"],
+    "position": [
+      3,
+      4,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 23,
       "melting_point": 2183,
-      "atomic_volume": 8.35,
       "atomic_weight": 50.9415,
       "density": 5.8,
-      "atomic_radius": 135.0,
-      "nvalence": 5
+      "atomic_radius": 131.6,
+      "nvalence": 5,
+      "bulk_modulus": 16.2,
+      "shear_modulus": 4.65,
+      "molar_volume": 8.36,
+      "work_function_phi": 4.25,
+      "n_ws": 4.41,
+      "atomic_radius_cn12": 135.0
     }
   },
   "Cr": {
-    "position": [3, 5, "Transition metal"],
+    "position": [
+      3,
+      5,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 24,
       "melting_point": 2180,
-      "atomic_volume": 7.23,
       "atomic_weight": 51.996,
       "density": 7.19,
-      "atomic_radius": 128.0,
-      "nvalence": 6
+      "atomic_radius": 124.91,
+      "nvalence": 6,
+      "bulk_modulus": 19.03,
+      "shear_modulus": 11.67,
+      "molar_volume": 7.23,
+      "work_function_phi": 4.65,
+      "n_ws": 5.18,
+      "atomic_radius_cn12": 128.0
     }
   },
   "Mn": {
-    "position": [3, 6, "Transition metal"],
+    "position": [
+      3,
+      6,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 25,
       "melting_point": 1519,
-      "atomic_volume": 7.39,
       "atomic_weight": 54.938,
       "density": 7.43,
-      "atomic_radius": 126.0,
-      "nvalence": 7
+      "atomic_radius": 135,
+      "nvalence": 7,
+      "bulk_modulus": 5.967,
+      "shear_modulus": 7.652,
+      "molar_volume": 7.35,
+      "work_function_phi": 4.45,
+      "n_ws": 4.17,
+      "atomic_radius_cn12": 126.0
     }
   },
   "Fe": {
-    "position": [3, 7, "Transition metal"],
+    "position": [
+      3,
+      7,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 26,
       "melting_point": 1811,
-      "atomic_volume": 7.09,
       "atomic_weight": 55.845,
       "density": 7.86,
-      "atomic_radius": 127.0,
-      "nvalence": 8
+      "atomic_radius": 124.12,
+      "nvalence": 8,
+      "bulk_modulus": 16.83,
+      "shear_modulus": 8.152,
+      "molar_volume": 7.09,
+      "work_function_phi": 4.93,
+      "n_ws": 5.55,
+      "atomic_radius_cn12": 127.0
     }
   },
   "Co": {
-    "position": [3, 8, "Transition metal"],
+    "position": [
+      3,
+      8,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 27,
       "melting_point": 1768,
-      "atomic_volume": 6.7,
       "atomic_weight": 58.9332,
       "density": 8.9,
-      "atomic_radius": 125.0,
-      "nvalence": 9
+      "atomic_radius": 125.1,
+      "nvalence": 9,
+      "bulk_modulus": 19.15,
+      "shear_modulus": 7.642,
+      "molar_volume": 6.7,
+      "work_function_phi": 5.1,
+      "n_ws": 5.36,
+      "atomic_radius_cn12": 125.0
     }
   },
   "Ni": {
-    "position": [3, 9, "Transition metal"],
+    "position": [
+      3,
+      9,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 28,
       "melting_point": 1728,
-      "atomic_volume": 6.59,
       "atomic_weight": 58.7,
       "density": 8.9,
-      "atomic_radius": 125.0,
-      "nvalence": 10
+      "atomic_radius": 124.59,
+      "nvalence": 10,
+      "bulk_modulus": 18.64,
+      "shear_modulus": 7.505,
+      "molar_volume": 6.6,
+      "work_function_phi": 5.2,
+      "n_ws": 5.36,
+      "atomic_radius_cn12": 125.0
     }
   },
   "Cu": {
-    "position": [3, 10, "Transition metal"],
+    "position": [
+      3,
+      10,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 29,
       "melting_point": 1357.77,
-      "atomic_volume": 7.1,
       "atomic_weight": 63.546,
       "density": 8.96,
-      "atomic_radius": 128.0,
-      "nvalence": 11
+      "atomic_radius": 127.8,
+      "nvalence": 11,
+      "bulk_modulus": 13.1,
+      "shear_modulus": 4.513,
+      "molar_volume": 7.12,
+      "work_function_phi": 4.45,
+      "n_ws": 3.18,
+      "atomic_radius_cn12": 128.0
     }
   },
   "Zn": {
-    "position": [3, 11, "Transition metal"],
+    "position": [
+      3,
+      11,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 30,
       "melting_point": 692.68,
-      "atomic_volume": 9.2,
       "atomic_weight": 65.38,
       "density": 7.14,
-      "atomic_radius": 139.0,
+      "atomic_radius": 139.45,
       "nvalence": 12,
-      "lattice_parameter": 2.6649
+      "bulk_modulus": 5.985,
+      "shear_modulus": 3.718,
+      "lattice_parameter": 2.6649,
+      "molar_volume": 9.17,
+      "work_function_phi": 4.1,
+      "n_ws": 2.3,
+      "atomic_radius_cn12": 139.0
     }
   },
   "Ga": {
-    "position": [3, 12, "Post-transition metal"],
+    "position": [
+      3,
+      12,
+      "Post-transition metal"
+    ],
     "properties": {
       "atomic_number": 31,
       "melting_point": 302.91,
-      "atomic_volume": 11.8,
       "atomic_weight": 69.72,
       "density": 5.91,
-      "atomic_radius": 130.0,
+      "atomic_radius": 139.2,
       "nvalence": 3,
-      "lattice_parameter": 4.5197
+      "bulk_modulus": 5.69,
+      "shear_modulus": 3.747,
+      "lattice_parameter": 4.5197,
+      "molar_volume": 11.82,
+      "work_function_phi": 4.1,
+      "n_ws": 2.25,
+      "atomic_radius_cn12": 141.0
     }
   },
   "Ge": {
-    "position": [3, 13, "Metalloid"],
+    "position": [
+      3,
+      13,
+      "Metalloid"
+    ],
     "properties": {
       "atomic_number": 32,
       "melting_point": 1211.4,
-      "atomic_volume": 13.6,
       "atomic_weight": 72.59,
       "density": 5.32,
-      "atomic_radius": 125.0,
+      "atomic_radius": 124,
       "nvalence": 4,
-      "lattice_parameter": 5.658
+      "bulk_modulus": 7.724,
+      "shear_modulus": 3.924,
+      "lattice_parameter": 5.658,
+      "molar_volume": 9.87,
+      "work_function_phi": 4.55,
+      "n_ws": 2.57,
+      "atomic_radius_cn12": 137.0
     }
   },
   "As": {
-    "position": [3, 14, "Metalloid"],
+    "position": [
+      3,
+      14,
+      "Metalloid"
+    ],
     "properties": {
       "atomic_number": 33,
       "melting_point": 1090,
-      "atomic_volume": 13.1,
       "atomic_weight": 74.9216,
       "density": 5.72,
-      "atomic_radius": 115.0,
+      "atomic_radius": 115,
       "nvalence": 5,
-      "lattice_parameter": 3.7598
+      "bulk_modulus": 3.942,
+      "shear_modulus": 1.462,
+      "lattice_parameter": 3.7598,
+      "molar_volume": 11.85,
+      "work_function_phi": 4.8,
+      "n_ws": 3.0,
+      "atomic_radius_cn12": 139.0
     }
   },
   "Se": {
-    "position": [3, 15, "Nonmetal"],
+    "position": [
+      3,
+      15,
+      "Nonmetal"
+    ],
     "properties": {
       "atomic_number": 34,
       "melting_point": 494,
-      "atomic_volume": 16.5,
       "atomic_weight": 78.96,
       "density": 4.8,
-      "atomic_radius": 115.0,
+      "atomic_radius": 140,
       "nvalence": 6,
-      "lattice_parameter": 9.054
+      "lattice_parameter": 9.054,
+      "molar_volume": 16.5
     }
   },
   "Br": {
-    "position": [3, 16, "Halogen"],
+    "position": [
+      3,
+      16,
+      "Halogen"
+    ],
     "properties": {
       "atomic_number": 35,
       "melting_point": 265.9,
-      "atomic_volume": 23.5,
       "atomic_weight": 79.904,
       "density": 3.12,
-      "atomic_radius": 115.0,
-      "nvalence": 7
+      "atomic_radius": 111.0,
+      "nvalence": 7,
+      "molar_volume": 23.5
     }
   },
   "Kr": {
-    "position": [3, 17, "Noble gas"],
+    "position": [
+      3,
+      17,
+      "Noble gas"
+    ],
     "properties": {
       "atomic_number": 36,
       "melting_point": 115.79,
-      "atomic_volume": 32.2,
       "atomic_weight": 83.8,
       "density": 3.74,
-      "atomic_radius": 88,
-      "nvalence": 8
+      "atomic_radius": 200.0,
+      "nvalence": 8,
+      "molar_volume": 32.2
     }
   },
   "Rb": {
-    "position": [4, 0, "Alkali metal"],
+    "position": [
+      4,
+      0,
+      "Alkali metal"
+    ],
     "properties": {
       "atomic_number": 37,
       "melting_point": 312.46,
-      "atomic_volume": 55.9,
       "atomic_weight": 85.4678,
       "density": 1.53,
-      "atomic_radius": 235.0,
-      "nvalence": 1
+      "atomic_radius": 244,
+      "nvalence": 1,
+      "bulk_modulus": 0.3145,
+      "shear_modulus": 0.1001,
+      "molar_volume": 56.07,
+      "work_function_phi": 2.1,
+      "n_ws": 0.22,
+      "atomic_radius_cn12": 255.0
     }
   },
   "Sr": {
-    "position": [4, 1, "Alkaline earth metal"],
+    "position": [
+      4,
+      1,
+      "Alkaline earth metal"
+    ],
     "properties": {
       "atomic_number": 38,
       "melting_point": 1050,
-      "atomic_volume": 33.7,
       "atomic_weight": 87.62,
       "density": 2.6,
-      "atomic_radius": 200.0,
-      "nvalence": 2
+      "atomic_radius": 215.2,
+      "nvalence": 2,
+      "bulk_modulus": 1.162,
+      "shear_modulus": 0.5229,
+      "molar_volume": 33.93,
+      "work_function_phi": 2.4,
+      "n_ws": 0.59,
+      "atomic_radius_cn12": 215.0
     }
   },
   "Y": {
-    "position": [4, 2, "Transition metal"],
+    "position": [
+      4,
+      2,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 39,
       "melting_point": 1799,
-      "atomic_volume": 19.8,
       "atomic_weight": 88.9059,
       "density": 4.5,
-      "atomic_radius": 180.0,
-      "nvalence": 3
+      "atomic_radius": 180.15,
+      "nvalence": 3,
+      "bulk_modulus": 3.662,
+      "shear_modulus": 2.58,
+      "molar_volume": 19.9,
+      "work_function_phi": 3.2,
+      "n_ws": 1.77,
+      "atomic_radius_cn12": 180.0
     }
   },
   "Zr": {
-    "position": [4, 3, "Transition metal"],
+    "position": [
+      4,
+      3,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 40,
       "melting_point": 2128,
-      "atomic_volume": 14.1,
       "atomic_weight": 91.22,
       "density": 6.49,
-      "atomic_radius": 160.0,
-      "nvalence": 4
+      "atomic_radius": 160.25,
+      "nvalence": 4,
+      "bulk_modulus": 8.335,
+      "shear_modulus": 3.414,
+      "molar_volume": 14.0,
+      "work_function_phi": 3.45,
+      "n_ws": 2.8,
+      "atomic_radius_cn12": 160.0
     }
   },
   "Nb": {
-    "position": [4, 4, "Transition metal"],
+    "position": [
+      4,
+      4,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 41,
       "melting_point": 2750,
-      "atomic_volume": 10.9,
       "atomic_weight": 92.9064,
       "density": 8.55,
-      "atomic_radius": 147.0,
-      "nvalence": 5
+      "atomic_radius": 142.9,
+      "nvalence": 5,
+      "bulk_modulus": 17.03,
+      "shear_modulus": 3.747,
+      "molar_volume": 10.8,
+      "work_function_phi": 4.05,
+      "n_ws": 4.41,
+      "atomic_radius_cn12": 147.0
     }
   },
   "Mo": {
-    "position": [4, 5, "Transition metal"],
+    "position": [
+      4,
+      5,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 42,
       "melting_point": 2896,
-      "atomic_volume": 9.4,
       "atomic_weight": 95.94,
       "density": 10.2,
-      "atomic_radius": 140.0,
-      "nvalence": 6
+      "atomic_radius": 136.26,
+      "nvalence": 6,
+      "bulk_modulus": 27.26,
+      "shear_modulus": 11.58,
+      "molar_volume": 9.4,
+      "work_function_phi": 4.65,
+      "n_ws": 5.55,
+      "atomic_radius_cn12": 140.0
     }
   },
   "Tc": {
-    "position": [4, 6, "Transition metal"],
+    "position": [
+      4,
+      6,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 43,
       "melting_point": 2430,
-      "atomic_volume": 8.5,
       "atomic_weight": 98,
       "density": 11.5,
-      "atomic_radius": 135.0,
-      "nvalence": 7
+      "atomic_radius": 136.0,
+      "nvalence": 7,
+      "bulk_modulus": 29.72,
+      "shear_modulus": 14.22,
+      "molar_volume": 8.64,
+      "work_function_phi": 5.3,
+      "n_ws": 5.93,
+      "atomic_radius_cn12": 136.0
     }
   },
   "Ru": {
-    "position": [4, 7, "Transition metal"],
+    "position": [
+      4,
+      7,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 44,
       "melting_point": 2607,
-      "atomic_volume": 8.3,
       "atomic_weight": 101.07,
       "density": 12.2,
-      "atomic_radius": 130.0,
-      "nvalence": 8
+      "atomic_radius": 133.84,
+      "nvalence": 8,
+      "bulk_modulus": 32.09,
+      "shear_modulus": 15.99,
+      "molar_volume": 8.2,
+      "work_function_phi": 5.4,
+      "n_ws": 6.13,
+      "atomic_radius_cn12": 134.0
     }
   },
   "Rh": {
-    "position": [4, 8, "Transition metal"],
+    "position": [
+      4,
+      8,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 45,
       "melting_point": 2237,
-      "atomic_volume": 8.3,
       "atomic_weight": 102.9055,
       "density": 12.4,
-      "atomic_radius": 135.0,
-      "nvalence": 9
+      "atomic_radius": 134.5,
+      "nvalence": 9,
+      "bulk_modulus": 27.06,
+      "shear_modulus": 14.72,
+      "molar_volume": 8.3,
+      "work_function_phi": 5.4,
+      "n_ws": 5.45,
+      "atomic_radius_cn12": 135.0
     }
   },
   "Pd": {
-    "position": [4, 9, "Transition metal"],
+    "position": [
+      4,
+      9,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 46,
       "melting_point": 1828.05,
-      "atomic_volume": 8.9,
       "atomic_weight": 106.4,
       "density": 12,
-      "atomic_radius": 140.0,
-      "nvalence": 10
+      "atomic_radius": 137.54,
+      "nvalence": 10,
+      "bulk_modulus": 18.09,
+      "shear_modulus": 5.111,
+      "molar_volume": 8.9,
+      "work_function_phi": 5.45,
+      "n_ws": 4.66,
+      "atomic_radius_cn12": 138.0
     }
   },
   "Ag": {
-    "position": [4, 10, "Transition metal"],
+    "position": [
+      4,
+      10,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 47,
       "melting_point": 1234.93,
-      "atomic_volume": 10.3,
       "atomic_weight": 107.868,
       "density": 10.5,
-      "atomic_radius": 160.0,
-      "nvalence": 11
+      "atomic_radius": 144.47,
+      "nvalence": 11,
+      "bulk_modulus": 10.07,
+      "shear_modulus": 2.865,
+      "molar_volume": 10.25,
+      "work_function_phi": 4.35,
+      "n_ws": 2.52,
+      "atomic_radius_cn12": 145.0
     }
   },
   "Cd": {
-    "position": [4, 11, "Transition metal"],
+    "position": [
+      4,
+      11,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 48,
       "melting_point": 594.22,
-      "atomic_volume": 13.0,
       "atomic_weight": 112.41,
       "density": 8.65,
-      "atomic_radius": 155.0,
+      "atomic_radius": 156.83,
       "nvalence": 12,
-      "lattice_parameter": 2.9794
+      "bulk_modulus": 4.675,
+      "shear_modulus": 2.413,
+      "lattice_parameter": 2.9794,
+      "molar_volume": 13.0,
+      "work_function_phi": 4.05,
+      "n_ws": 1.91,
+      "atomic_radius_cn12": 157.0
     }
   },
   "In": {
-    "position": [4, 12, "Post-transition metal"],
+    "position": [
+      4,
+      12,
+      "Post-transition metal"
+    ],
     "properties": {
       "atomic_number": 49,
       "melting_point": 429.75,
-      "atomic_volume": 15.7,
       "atomic_weight": 114.82,
       "density": 7.31,
-      "atomic_radius": 155.0,
+      "atomic_radius": 165.9,
       "nvalence": 3,
-      "lattice_parameter": 3.254
+      "bulk_modulus": 4.109,
+      "shear_modulus": 0.3728,
+      "lattice_parameter": 3.254,
+      "molar_volume": 15.75,
+      "work_function_phi": 3.9,
+      "n_ws": 1.6,
+      "atomic_radius_cn12": 166.0
     }
   },
   "Sn": {
-    "position": [4, 13, "Post-transition metal"],
+    "position": [
+      4,
+      13,
+      "Post-transition metal"
+    ],
     "properties": {
       "atomic_number": 50,
       "melting_point": 505.08,
-      "atomic_volume": 16.3,
       "atomic_weight": 118.69,
       "density": 7.3,
-      "atomic_radius": 145.0,
-      "nvalence": 4
+      "atomic_radius": 162,
+      "nvalence": 4,
+      "bulk_modulus": 11.09,
+      "shear_modulus": 1.844,
+      "molar_volume": 16.3,
+      "work_function_phi": 4.15,
+      "n_ws": 1.9,
+      "atomic_radius_cn12": 155.0
     }
   },
   "Sb": {
-    "position": [4, 14, "Metalloid"],
+    "position": [
+      4,
+      14,
+      "Metalloid"
+    ],
     "properties": {
       "atomic_number": 51,
       "melting_point": 903.78,
-      "atomic_volume": 18.2,
       "atomic_weight": 121.75,
       "density": 6.68,
-      "atomic_radius": 145.0,
-      "nvalence": 5
+      "atomic_radius": 145,
+      "nvalence": 5,
+      "bulk_modulus": 3.829,
+      "shear_modulus": 2.001,
+      "molar_volume": 16.95,
+      "work_function_phi": 4.4,
+      "n_ws": 2.0,
+      "atomic_radius_cn12": 159.0
     }
   },
   "Te": {
-    "position": [4, 15, "Metalloid"],
+    "position": [
+      4,
+      15,
+      "Metalloid"
+    ],
     "properties": {
       "atomic_number": 52,
       "melting_point": 722.66,
-      "atomic_volume": 20.5,
       "atomic_weight": 127.6,
       "density": 6.24,
-      "atomic_radius": 140.0,
+      "atomic_radius": 145.2,
       "nvalence": 6,
-      "lattice_parameter": 4.4572
+      "lattice_parameter": 4.4572,
+      "molar_volume": 20.5
     }
   },
   "I": {
-    "position": [4, 16, "Halogen"],
+    "position": [
+      4,
+      16,
+      "Halogen"
+    ],
     "properties": {
       "atomic_number": 53,
       "melting_point": 386.85,
-      "atomic_volume": 25.7,
       "atomic_weight": 126.9045,
       "density": 4.92,
-      "atomic_radius": 140.0,
-      "nvalence": 7
+      "atomic_radius": 128.0,
+      "nvalence": 7,
+      "molar_volume": 25.7
     }
   },
   "Xe": {
-    "position": [4, 17, "Noble gas"],
+    "position": [
+      4,
+      17,
+      "Noble gas"
+    ],
     "properties": {
       "atomic_number": 54,
       "melting_point": 161.36,
-      "atomic_volume": 37.3,
       "atomic_weight": 131.3,
       "density": 5.89,
-      "atomic_radius": 108,
-      "nvalence": 8
+      "atomic_radius": 217.0,
+      "nvalence": 8,
+      "molar_volume": 37.3
     }
   },
   "Cs": {
-    "position": [5, 0, "Alkali metal"],
+    "position": [
+      5,
+      0,
+      "Alkali metal"
+    ],
     "properties": {
       "atomic_number": 55,
       "melting_point": 301.59,
-      "atomic_volume": 70.0,
       "atomic_weight": 132.9054,
       "density": 1.87,
-      "atomic_radius": 260.0,
-      "nvalence": 1
+      "atomic_radius": 265,
+      "nvalence": 1,
+      "bulk_modulus": 0.203,
+      "shear_modulus": 0.0647,
+      "molar_volume": 69.23,
+      "work_function_phi": 1.95,
+      "n_ws": 0.17,
+      "atomic_radius_cn12": 273.0
     }
   },
   "Ba": {
-    "position": [5, 1, "Alkaline earth metal"],
+    "position": [
+      5,
+      1,
+      "Alkaline earth metal"
+    ],
     "properties": {
       "atomic_number": 56,
       "melting_point": 1000,
-      "atomic_volume": 39.2,
       "atomic_weight": 137.33,
       "density": 3.5,
-      "atomic_radius": 215.0,
-      "nvalence": 2
+      "atomic_radius": 217.6,
+      "nvalence": 2,
+      "bulk_modulus": 1.03,
+      "shear_modulus": 0.4905,
+      "molar_volume": 38.1,
+      "work_function_phi": 2.32,
+      "n_ws": 0.53,
+      "atomic_radius_cn12": 224.0
     }
   },
   "La": {
-    "position": [5, 2, "Lanthanide"],
+    "position": [
+      5,
+      2,
+      "Lanthanide"
+    ],
     "properties": {
       "atomic_number": 57,
       "melting_point": 1193,
-      "atomic_volume": 22.5,
       "atomic_weight": 138.9055,
       "density": 6.7,
-      "atomic_radius": 195.0,
-      "nvalence": 3
+      "atomic_radius": 187.9,
+      "nvalence": 3,
+      "bulk_modulus": 2.43,
+      "shear_modulus": 1.491,
+      "molar_volume": 22.55,
+      "work_function_phi": 3.17,
+      "n_ws": 1.64,
+      "atomic_radius_cn12": 188.0
     }
   },
   "Ce": {
-    "position": [8, 3, "Lanthanide"],
+    "position": [
+      8,
+      3,
+      "Lanthanide"
+    ],
     "properties": {
       "atomic_number": 58,
       "melting_point": 1068,
-      "atomic_volume": 20.7,
       "atomic_weight": 140.12,
       "density": 6.78,
-      "atomic_radius": 185.0,
-      "nvalence": 3
+      "atomic_radius": 182.47,
+      "nvalence": 3,
+      "bulk_modulus": 2.395,
+      "shear_modulus": 1.197,
+      "molar_volume": 21.62,
+      "work_function_phi": 3.18,
+      "n_ws": 1.69,
+      "atomic_radius_cn12": 182.0
     }
   },
   "Pr": {
-    "position": [8, 4, "Lanthanide"],
+    "position": [
+      8,
+      4,
+      "Lanthanide"
+    ],
     "properties": {
       "atomic_number": 59,
       "melting_point": 1208,
-      "atomic_volume": 20.8,
       "atomic_weight": 140.9077,
       "density": 6.77,
-      "atomic_radius": 185.0,
-      "nvalence": 3
+      "atomic_radius": 165,
+      "nvalence": 3,
+      "bulk_modulus": 3.058,
+      "shear_modulus": 1.354,
+      "molar_volume": 20.79,
+      "work_function_phi": 3.19,
+      "n_ws": 1.73,
+      "atomic_radius_cn12": 183.0
     }
   },
   "Nd": {
-    "position": [8, 5, "Lanthanide"],
+    "position": [
+      8,
+      5,
+      "Lanthanide"
+    ],
     "properties": {
       "atomic_number": 60,
       "melting_point": 1297,
-      "atomic_volume": 20.6,
       "atomic_weight": 144.24,
       "density": 7,
-      "atomic_radius": 185.0,
-      "nvalence": 3
+      "atomic_radius": 164,
+      "nvalence": 3,
+      "bulk_modulus": 3.268,
+      "shear_modulus": 1.452,
+      "molar_volume": 20.58,
+      "work_function_phi": 3.19,
+      "n_ws": 1.73,
+      "atomic_radius_cn12": 182.0
     }
   },
   "Pm": {
-    "position": [8, 6, "Lanthanide"],
+    "position": [
+      8,
+      6,
+      "Lanthanide"
+    ],
     "properties": {
       "atomic_number": 61,
       "melting_point": 1315,
-      "atomic_volume": 20.5,
       "atomic_weight": 145,
       "density": 6.475,
-      "atomic_radius": 185.0,
-      "nvalence": 3
+      "atomic_radius": 181.0,
+      "nvalence": 3,
+      "bulk_modulus": 3.532,
+      "shear_modulus": 1.668,
+      "molar_volume": 20.25,
+      "work_function_phi": 3.19,
+      "n_ws": 1.77,
+      "atomic_radius_cn12": 181.0
     }
   },
   "Sm": {
-    "position": [8, 7, "Lanthanide"],
+    "position": [
+      8,
+      7,
+      "Lanthanide"
+    ],
     "properties": {
       "atomic_number": 62,
       "melting_point": 1345,
-      "atomic_volume": 19.9,
       "atomic_weight": 150.4,
       "density": 7.54,
-      "atomic_radius": 185.0,
-      "nvalence": 3
+      "atomic_radius": 181,
+      "nvalence": 3,
+      "bulk_modulus": 2.941,
+      "shear_modulus": 1.265,
+      "molar_volume": 20.01,
+      "work_function_phi": 3.2,
+      "n_ws": 1.77,
+      "atomic_radius_cn12": 180.0
     }
   },
   "Eu": {
-    "position": [8, 8, "Lanthanide"],
+    "position": [
+      8,
+      8,
+      "Lanthanide"
+    ],
     "properties": {
       "atomic_number": 63,
       "melting_point": 1095,
-      "atomic_volume": 20.8,
       "atomic_weight": 151.96,
       "density": 5.26,
-      "atomic_radius": 185.0,
-      "nvalence": 3
+      "atomic_radius": 198.44,
+      "nvalence": 3,
+      "bulk_modulus": 1.472,
+      "shear_modulus": 0.5886,
+      "molar_volume": 28.95,
+      "work_function_phi": 2.5,
+      "n_ws": 0.68,
+      "atomic_radius_cn12": 204.0
     }
   },
   "Gd": {
-    "position": [8, 9, "Lanthanide"],
+    "position": [
+      8,
+      9,
+      "Lanthanide"
+    ],
     "properties": {
       "atomic_number": 64,
       "melting_point": 1585,
-      "atomic_volume": 19.9,
       "atomic_weight": 157.25,
       "density": 7.89,
-      "atomic_radius": 180.0,
-      "nvalence": 3
+      "atomic_radius": 180.13,
+      "nvalence": 3,
+      "bulk_modulus": 3.834,
+      "shear_modulus": 2.227,
+      "molar_volume": 19.9,
+      "work_function_phi": 3.2,
+      "n_ws": 1.77,
+      "atomic_radius_cn12": 180.0
     }
   },
   "Tb": {
-    "position": [8, 10, "Lanthanide"],
+    "position": [
+      8,
+      10,
+      "Lanthanide"
+    ],
     "properties": {
       "atomic_number": 65,
       "melting_point": 1629,
-      "atomic_volume": 19.2,
       "atomic_weight": 158.9254,
       "density": 8.27,
-      "atomic_radius": 175.0,
-      "nvalence": 3
+      "atomic_radius": 178.14,
+      "nvalence": 3,
+      "bulk_modulus": 3.993,
+      "shear_modulus": 2.286,
+      "molar_volume": 19.32,
+      "work_function_phi": 3.21,
+      "n_ws": 1.82,
+      "atomic_radius_cn12": 178.0
     }
   },
   "Dy": {
-    "position": [8, 11, "Lanthanide"],
+    "position": [
+      8,
+      11,
+      "Lanthanide"
+    ],
     "properties": {
       "atomic_number": 66,
       "melting_point": 1680,
-      "atomic_volume": 19.0,
       "atomic_weight": 162.5,
       "density": 8.54,
-      "atomic_radius": 175.0,
-      "nvalence": 3
+      "atomic_radius": 177.4,
+      "nvalence": 3,
+      "bulk_modulus": 3.844,
+      "shear_modulus": 2.541,
+      "molar_volume": 19.0,
+      "work_function_phi": 3.21,
+      "n_ws": 1.82,
+      "atomic_radius_cn12": 177.0
     }
   },
   "Ho": {
-    "position": [8, 12, "Lanthanide"],
+    "position": [
+      8,
+      12,
+      "Lanthanide"
+    ],
     "properties": {
       "atomic_number": 67,
       "melting_point": 1734,
-      "atomic_volume": 18.7,
       "atomic_weight": 164.9304,
       "density": 8.8,
-      "atomic_radius": 175.0,
-      "nvalence": 3
+      "atomic_radius": 176.61,
+      "nvalence": 3,
+      "bulk_modulus": 3.968,
+      "shear_modulus": 2.668,
+      "molar_volume": 18.76,
+      "work_function_phi": 3.22,
+      "n_ws": 1.82,
+      "atomic_radius_cn12": 177.0
     }
   },
   "Er": {
-    "position": [8, 13, "Lanthanide"],
+    "position": [
+      8,
+      13,
+      "Lanthanide"
+    ],
     "properties": {
       "atomic_number": 68,
       "melting_point": 1802,
-      "atomic_volume": 18.4,
       "atomic_weight": 167.26,
       "density": 9.05,
-      "atomic_radius": 175.0,
-      "nvalence": 3
+      "atomic_radius": 175.58,
+      "nvalence": 3,
+      "bulk_modulus": 4.108,
+      "shear_modulus": 2.963,
+      "molar_volume": 18.45,
+      "work_function_phi": 3.22,
+      "n_ws": 1.86,
+      "atomic_radius_cn12": 176.0
     }
   },
   "Tm": {
-    "position": [8, 14, "Lanthanide"],
+    "position": [
+      8,
+      14,
+      "Lanthanide"
+    ],
     "properties": {
       "atomic_number": 69,
       "melting_point": 1818,
-      "atomic_volume": 18.1,
       "atomic_weight": 168.9342,
       "density": 9.33,
-      "atomic_radius": 175.0,
-      "nvalence": 3
+      "atomic_radius": 156,
+      "nvalence": 3,
+      "bulk_modulus": 3.97,
+      "shear_modulus": 3.041,
+      "molar_volume": 18.12,
+      "work_function_phi": 3.22,
+      "n_ws": 1.86,
+      "atomic_radius_cn12": 175.0
     }
   },
   "Yb": {
-    "position": [8, 15, "Lanthanide"],
+    "position": [
+      8,
+      15,
+      "Lanthanide"
+    ],
     "properties": {
       "atomic_number": 70,
       "melting_point": 1097,
-      "atomic_volume": 24.8,
       "atomic_weight": 173.04,
       "density": 6.98,
-      "atomic_radius": 175.0,
-      "nvalence": 3
+      "atomic_radius": 170,
+      "nvalence": 3,
+      "bulk_modulus": 1.327,
+      "shear_modulus": 0.6965,
+      "molar_volume": 24.87,
+      "work_function_phi": 2.58,
+      "n_ws": 0.78,
+      "atomic_radius_cn12": 194.0
     }
   },
   "Lu": {
-    "position": [8, 16, "Lanthanide"],
+    "position": [
+      8,
+      16,
+      "Lanthanide"
+    ],
     "properties": {
       "atomic_number": 71,
       "melting_point": 1925,
-      "atomic_volume": 17.8,
       "atomic_weight": 174.967,
       "density": 9.84,
-      "atomic_radius": 175.0,
-      "nvalence": 3
+      "atomic_radius": 173.49,
+      "nvalence": 3,
+      "bulk_modulus": 4.113,
+      "shear_modulus": 3.384,
+      "molar_volume": 17.77,
+      "work_function_phi": 3.22,
+      "n_ws": 1.91
     }
   },
   "Hf": {
-    "position": [5, 3, "Transition metal"],
+    "position": [
+      5,
+      3,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 72,
       "melting_point": 2506,
-      "atomic_volume": 13.4,
       "atomic_weight": 178.49,
       "density": 13.1,
-      "atomic_radius": 155.0,
-      "nvalence": 4
+      "atomic_radius": 157.75,
+      "nvalence": 4,
+      "bulk_modulus": 10.89,
+      "shear_modulus": 5.297,
+      "molar_volume": 13.45,
+      "work_function_phi": 3.6,
+      "n_ws": 3.05,
+      "atomic_radius_cn12": 158.0
     }
   },
   "Ta": {
-    "position": [5, 4, "Transition metal"],
+    "position": [
+      5,
+      4,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 73,
       "melting_point": 3290,
-      "atomic_volume": 10.8,
       "atomic_weight": 180.9479,
       "density": 16.6,
-      "atomic_radius": 145.0,
-      "nvalence": 5
+      "atomic_radius": 143,
+      "nvalence": 5,
+      "bulk_modulus": 20.01,
+      "shear_modulus": 6.867,
+      "molar_volume": 10.81,
+      "work_function_phi": 4.05,
+      "n_ws": 4.33,
+      "atomic_radius_cn12": 147.0
     }
   },
   "W": {
-    "position": [5, 5, "Transition metal"],
+    "position": [
+      5,
+      5,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 74,
       "melting_point": 3695,
-      "atomic_volume": 9.53,
       "atomic_weight": 183.85,
       "density": 19.3,
-      "atomic_radius": 135.0,
-      "nvalence": 6
+      "atomic_radius": 136.7,
+      "nvalence": 6,
+      "bulk_modulus": 32.33,
+      "shear_modulus": 15.3,
+      "molar_volume": 9.55,
+      "work_function_phi": 4.8,
+      "n_ws": 5.93,
+      "atomic_radius_cn12": 141.0
     }
   },
   "Re": {
-    "position": [5, 6, "Transition metal"],
+    "position": [
+      5,
+      6,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 75,
       "melting_point": 3459,
-      "atomic_volume": 8.85,
       "atomic_weight": 186.207,
       "density": 21,
-      "atomic_radius": 135.0,
-      "nvalence": 7
+      "atomic_radius": 137.5,
+      "nvalence": 7,
+      "bulk_modulus": 37.18,
+      "shear_modulus": 17.85,
+      "molar_volume": 8.85,
+      "work_function_phi": 5.2,
+      "n_ws": 6.33,
+      "atomic_radius_cn12": 138.0
     }
   },
   "Os": {
-    "position": [5, 7, "Transition metal"],
+    "position": [
+      5,
+      7,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 76,
       "melting_point": 3306,
-      "atomic_volume": 8.49,
       "atomic_weight": 190.2,
       "density": 22.4,
-      "atomic_radius": 130.0,
-      "nvalence": 8
+      "atomic_radius": 135.23,
+      "nvalence": 8,
+      "bulk_modulus": 41.79,
+      "shear_modulus": 20.99,
+      "molar_volume": 8.45,
+      "work_function_phi": 5.4,
+      "n_ws": 6.33,
+      "atomic_radius_cn12": 135.0
     }
   },
   "Ir": {
-    "position": [5, 8, "Transition metal"],
+    "position": [
+      5,
+      8,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 77,
       "melting_point": 2719,
-      "atomic_volume": 8.54,
       "atomic_weight": 192.22,
       "density": 22.5,
-      "atomic_radius": 135.0,
-      "nvalence": 9
+      "atomic_radius": 135.73,
+      "nvalence": 9,
+      "bulk_modulus": 35.51,
+      "shear_modulus": 20.99,
+      "molar_volume": 8.52,
+      "work_function_phi": 5.55,
+      "n_ws": 6.13,
+      "atomic_radius_cn12": 136.0
     }
   },
   "Pt": {
-    "position": [5, 9, "Transition metal"],
+    "position": [
+      5,
+      9,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 78,
       "melting_point": 2041.55,
-      "atomic_volume": 9.1,
       "atomic_weight": 195.09,
       "density": 21.4,
-      "atomic_radius": 135.0,
-      "nvalence": 10
+      "atomic_radius": 138.7,
+      "nvalence": 10,
+      "bulk_modulus": 27.84,
+      "shear_modulus": 6.102,
+      "molar_volume": 9.1,
+      "work_function_phi": 5.65,
+      "n_ws": 5.64,
+      "atomic_radius_cn12": 139.0
     }
   },
   "Au": {
-    "position": [5, 10, "Transition metal"],
+    "position": [
+      5,
+      10,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 79,
       "melting_point": 1337.33,
-      "atomic_volume": 10.2,
       "atomic_weight": 196.9665,
       "density": 19.3,
-      "atomic_radius": 135.0,
-      "nvalence": 11
+      "atomic_radius": 144.2,
+      "nvalence": 11,
+      "bulk_modulus": 17.32,
+      "shear_modulus": 2.757,
+      "molar_volume": 10.2,
+      "work_function_phi": 5.15,
+      "n_ws": 3.87,
+      "atomic_radius_cn12": 144.0
     }
   },
   "Hg": {
-    "position": [5, 11, "Transition metal"],
+    "position": [
+      5,
+      11,
+      "Transition metal"
+    ],
     "properties": {
       "atomic_number": 80,
       "melting_point": 234.32,
-      "atomic_volume": 14.82,
       "atomic_weight": 200.59,
       "density": 13.53,
-      "atomic_radius": 150.0,
+      "atomic_radius": 150,
       "nvalence": 12,
-      "lattice_parameter": 3.005
+      "bulk_modulus": 2.825,
+      "shear_modulus": 1.001,
+      "lattice_parameter": 3.005,
+      "molar_volume": 14.08,
+      "work_function_phi": 4.2,
+      "n_ws": 1.91,
+      "atomic_radius_cn12": 157.0
     }
   },
   "Tl": {
-    "position": [5, 12, "Post-transition metal"],
+    "position": [
+      5,
+      12,
+      "Post-transition metal"
+    ],
     "properties": {
       "atomic_number": 81,
       "melting_point": 577,
-      "atomic_volume": 17.2,
       "atomic_weight": 204.37,
       "density": 11.85,
-      "atomic_radius": 190.0,
-      "nvalence": 3
+      "atomic_radius": 171.6,
+      "nvalence": 3,
+      "bulk_modulus": 3.593,
+      "shear_modulus": 0.2747,
+      "molar_volume": 17.23,
+      "work_function_phi": 3.9,
+      "n_ws": 1.4,
+      "atomic_radius_cn12": 172.0
     }
   },
   "Pb": {
-    "position": [5, 13, "Post-transition metal"],
+    "position": [
+      5,
+      13,
+      "Post-transition metal"
+    ],
     "properties": {
       "atomic_number": 82,
       "melting_point": 600.61,
-      "atomic_volume": 18.3,
       "atomic_weight": 207.2,
       "density": 11.4,
-      "atomic_radius": 180.0,
-      "nvalence": 4
+      "atomic_radius": 174.97,
+      "nvalence": 4,
+      "bulk_modulus": 4.299,
+      "shear_modulus": 0.5396,
+      "molar_volume": 18.28,
+      "work_function_phi": 4.1,
+      "n_ws": 1.52,
+      "atomic_radius_cn12": 175.0
     }
   },
   "Bi": {
-    "position": [5, 14, "Post-transition metal"],
+    "position": [
+      5,
+      14,
+      "Post-transition metal"
+    ],
     "properties": {
       "atomic_number": 83,
       "melting_point": 544.4,
-      "atomic_volume": 21.3,
       "atomic_weight": 208.9804,
       "density": 9.8,
-      "atomic_radius": 160.0,
+      "atomic_radius": 160,
       "nvalence": 5,
-      "lattice_parameter": 4.546
+      "bulk_modulus": 3.148,
+      "shear_modulus": 1.285,
+      "lattice_parameter": 4.546,
+      "molar_volume": 19.32,
+      "work_function_phi": 4.15,
+      "n_ws": 1.56,
+      "atomic_radius_cn12": 170.0
     }
   },
   "Po": {
-    "position": [5, 15, "Metalloid"],
+    "position": [
+      5,
+      15,
+      "Metalloid"
+    ],
     "properties": {
       "atomic_number": 84,
       "melting_point": 527,
-      "atomic_volume": 22.7,
       "atomic_weight": 209,
       "density": 9.4,
-      "atomic_radius": 190.0,
-      "nvalence": 6
+      "atomic_radius": 176.0,
+      "nvalence": 6,
+      "molar_volume": 22.7,
+      "atomic_radius_cn12": 176.0
     }
   },
   "At": {
-    "position": [5, 16, "Halogen"],
+    "position": [
+      5,
+      16,
+      "Halogen"
+    ],
     "properties": {
       "atomic_number": 85,
       "melting_point": 575,
-      "atomic_volume": 25.0,
       "atomic_weight": 210,
       "density": 0,
-      "atomic_radius": 127,
-      "nvalence": 7
+      "atomic_radius": "N/A",
+      "nvalence": 7,
+      "molar_volume": 25.0
     }
   },
   "Rn": {
-    "position": [5, 17, "Noble gas"],
+    "position": [
+      5,
+      17,
+      "Noble gas"
+    ],
     "properties": {
       "atomic_number": 86,
       "melting_point": 202,
-      "atomic_volume": 50.5,
       "atomic_weight": 222,
       "density": 9.91,
-      "atomic_radius": 120,
-      "nvalence": 8
+      "atomic_radius": "N/A",
+      "nvalence": 8,
+      "molar_volume": 50.5
     }
   },
   "Fr": {
-    "position": [6, 0, "Alkali metal"],
+    "position": [
+      6,
+      0,
+      "Alkali metal"
+    ],
     "properties": {
       "atomic_number": 87,
       "melting_point": 300,
-      "atomic_volume": 71.0,
       "atomic_weight": 223,
       "density": 0,
-      "atomic_radius": 348,
-      "nvalence": 1
+      "atomic_radius": 175.0,
+      "nvalence": 1,
+      "molar_volume": 71.0
     }
   },
   "Ra": {
-    "position": [6, 1, "Alkaline earth metal"],
+    "position": [
+      6,
+      1,
+      "Alkaline earth metal"
+    ],
     "properties": {
       "atomic_number": 88,
       "melting_point": 973,
-      "atomic_volume": 45.5,
       "atomic_weight": 226.0254,
       "density": 5,
-      "atomic_radius": 215.0,
-      "nvalence": 2
+      "atomic_radius": 137.0,
+      "nvalence": 2,
+      "molar_volume": 45.5
     }
   },
   "Ac": {
-    "position": [6, 2, "Actinide"],
+    "position": [
+      6,
+      2,
+      "Actinide"
+    ],
     "properties": {
       "atomic_number": 89,
       "melting_point": 1323,
-      "atomic_volume": 22.8,
       "atomic_weight": 227.0278,
       "density": 10.07,
-      "atomic_radius": 195,
-      "nvalence": 3
+      "atomic_radius": 111.0,
+      "nvalence": 3,
+      "molar_volume": 22.8
     }
   },
   "Th": {
-    "position": [9, 3, "Actinide"],
+    "position": [
+      9,
+      3,
+      "Actinide"
+    ],
     "properties": {
       "atomic_number": 90,
       "melting_point": 2023,
-      "atomic_volume": 20.6,
       "atomic_weight": 232.0381,
       "density": 11.7,
       "atomic_radius": 180.0,
-      "nvalence": 4
+      "nvalence": 4,
+      "bulk_modulus": 5.429,
+      "shear_modulus": 2.786,
+      "molar_volume": 19.8,
+      "work_function_phi": 3.3,
+      "n_ws": 2.1,
+      "atomic_radius_cn12": 180.0
     }
   },
   "Pa": {
-    "position": [9, 4, "Actinide"],
+    "position": [
+      9,
+      4,
+      "Actinide"
+    ],
     "properties": {
       "atomic_number": 91,
       "melting_point": 1845,
-      "atomic_volume": 15.0,
       "atomic_weight": 231.0359,
       "density": 15.4,
-      "atomic_radius": 180.0,
-      "nvalence": 5
+      "atomic_radius": 163.0,
+      "nvalence": 5,
+      "molar_volume": 15.0,
+      "atomic_radius_cn12": 163.0
     }
   },
   "U": {
-    "position": [9, 5, "Actinide"],
+    "position": [
+      9,
+      5,
+      "Actinide"
+    ],
     "properties": {
       "atomic_number": 92,
       "melting_point": 1405.3,
-      "atomic_volume": 12.6,
       "atomic_weight": 238.029,
       "density": 18.9,
-      "atomic_radius": 175.0,
-      "nvalence": 6
+      "atomic_radius": 156.0,
+      "nvalence": 6,
+      "bulk_modulus": 9.879,
+      "shear_modulus": 7.358,
+      "molar_volume": 13.15,
+      "work_function_phi": 3.9,
+      "n_ws": 3.44,
+      "atomic_radius_cn12": 156.0
     }
   },
   "Np": {
-    "position": [9, 6, "Actinide"],
+    "position": [
+      9,
+      6,
+      "Actinide"
+    ],
     "properties": {
       "atomic_number": 93,
       "melting_point": 917,
-      "atomic_volume": 11.7,
       "atomic_weight": 237.0482,
       "density": 20.4,
-      "atomic_radius": 175.0,
-      "nvalence": 7
+      "atomic_radius": 156.0,
+      "nvalence": 7,
+      "molar_volume": 11.7,
+      "atomic_radius_cn12": 156.0
     }
   },
   "Pu": {
-    "position": [9, 7, "Actinide"],
+    "position": [
+      9,
+      7,
+      "Actinide"
+    ],
     "properties": {
       "atomic_number": 94,
       "melting_point": 912.5,
-      "atomic_volume": 12.3,
       "atomic_weight": 244,
       "density": 19.8,
-      "atomic_radius": 175.0,
-      "nvalence": 8
+      "atomic_radius": 164.0,
+      "nvalence": 8,
+      "bulk_modulus": 5.356,
+      "shear_modulus": 4.375,
+      "molar_volume": 12.06,
+      "work_function_phi": 3.8,
+      "n_ws": 2.99,
+      "atomic_radius_cn12": 161.0
     }
   },
   "Am": {
-    "position": [9, 8, "Actinide"],
+    "position": [
+      9,
+      8,
+      "Actinide"
+    ],
     "properties": {
       "atomic_number": 95,
       "melting_point": 1449,
-      "atomic_volume": 17.8,
       "atomic_weight": 243,
       "density": 13.6,
-      "atomic_radius": 175.0,
-      "nvalence": 3
+      "atomic_radius": 181.0,
+      "nvalence": 3,
+      "molar_volume": 17.8,
+      "atomic_radius_cn12": 181.0
     }
   },
   "Cm": {
-    "position": [9, 9, "Actinide"],
+    "position": [
+      9,
+      9,
+      "Actinide"
+    ],
     "properties": {
       "atomic_number": 96,
       "melting_point": 1613,
-      "atomic_volume": 18.0,
       "atomic_weight": 247,
       "density": 13.511,
-      "atomic_radius": 174,
-      "nvalence": 3
+      "atomic_radius": "N/A",
+      "nvalence": 3,
+      "molar_volume": 18.0
     }
   },
   "Bk": {
-    "position": [9, 10, "Actinide"],
+    "position": [
+      9,
+      10,
+      "Actinide"
+    ],
     "properties": {
       "atomic_number": 97,
       "melting_point": 1259,
-      "atomic_volume": 16.8,
       "atomic_weight": 247,
       "density": 0,
-      "atomic_radius": 170,
-      "nvalence": 3
+      "atomic_radius": "N/A",
+      "nvalence": 3,
+      "molar_volume": 16.8
     }
   },
   "Cf": {
-    "position": [9, 11, "Actinide"],
+    "position": [
+      9,
+      11,
+      "Actinide"
+    ],
     "properties": {
       "atomic_number": 98,
       "melting_point": 1173,
-      "atomic_volume": 15.1,
       "atomic_weight": 251,
       "density": 0,
-      "atomic_radius": 169,
-      "nvalence": 3
+      "atomic_radius": "N/A",
+      "nvalence": 3,
+      "molar_volume": 15.1
     }
   },
   "Es": {
-    "position": [9, 12, "Actinide"],
+    "position": [
+      9,
+      12,
+      "Actinide"
+    ],
     "properties": {
       "atomic_number": 99,
       "melting_point": 1133,
-      "atomic_volume": 15.1,
       "atomic_weight": 252,
       "density": 0,
-      "atomic_radius": 169,
-      "nvalence": 3
+      "atomic_radius": "N/A",
+      "nvalence": 3,
+      "molar_volume": 15.1
     }
   },
   "Fm": {
-    "position": [9, 13, "Actinide"],
+    "position": [
+      9,
+      13,
+      "Actinide"
+    ],
     "properties": {
       "atomic_number": 100,
       "melting_point": 1125,
-      "atomic_volume": 15.3,
       "atomic_weight": 257,
       "density": 0,
-      "atomic_radius": 168,
-      "nvalence": 3
+      "atomic_radius": "N/A",
+      "nvalence": 3,
+      "molar_volume": 15.3
     }
   },
   "Md": {
-    "position": [9, 14, "Actinide"],
+    "position": [
+      9,
+      14,
+      "Actinide"
+    ],
     "properties": {
       "atomic_number": 101,
       "melting_point": 1100,
-      "atomic_volume": 13.9,
       "atomic_weight": 258,
       "density": 0,
-      "atomic_radius": 167,
-      "nvalence": 3
+      "atomic_radius": "N/A",
+      "nvalence": 3,
+      "molar_volume": 13.9
     }
   },
   "No": {
-    "position": [9, 15, "Actinide"],
+    "position": [
+      9,
+      15,
+      "Actinide"
+    ],
     "properties": {
       "atomic_number": 102,
       "melting_point": 1100,
-      "atomic_volume": 13.6,
       "atomic_weight": 259,
       "density": 0,
-      "atomic_radius": 166,
-      "nvalence": 3
+      "atomic_radius": "N/A",
+      "nvalence": 3,
+      "molar_volume": 13.6
     }
   },
   "Lr": {
-    "position": [9, 16, "Actinide"],
+    "position": [
+      9,
+      16,
+      "Actinide"
+    ],
     "properties": {
       "atomic_number": 103,
       "melting_point": 1900,
-      "atomic_volume": 15.3,
       "atomic_weight": 260,
       "density": 0,
-      "atomic_radius": 165,
-      "nvalence": 3
+      "atomic_radius": "N/A",
+      "nvalence": 3,
+      "molar_volume": 15.3
     }
   },
   "Rf": {
-    "position": [6, 3, "Transition metal"], 
+    "position": [
+      6,
+      3,
+      "Transition metal"
+    ],
     "properties": {
-      "atomic_number": 104, 
-      "melting_point": 2400, 
-      "atomic_volume": 13.7, 
-      "atomic_weight": 261, 
-      "atomic_radius": 150, 
-      "nvalence": 4
+      "atomic_number": 104,
+      "melting_point": 2400,
+      "atomic_weight": 261,
+      "atomic_radius": 150,
+      "nvalence": 4,
+      "molar_volume": 13.7
     }
   },
   "Db": {
-    "position": [6, 4, "Transition metal"], 
+    "position": [
+      6,
+      4,
+      "Transition metal"
+    ],
     "properties": {
-      "atomic_number": 105, 
-      "melting_point": 2700, 
-      "atomic_volume": 12.0, 
-      "atomic_weight": 262, 
-      "atomic_radius": 139, 
-      "nvalence": 5
+      "atomic_number": 105,
+      "melting_point": 2700,
+      "atomic_weight": 262,
+      "atomic_radius": 139,
+      "nvalence": 5,
+      "molar_volume": 12.0
     }
   },
   "Sg": {
-    "position": [6, 5, "Transition metal"], 
+    "position": [
+      6,
+      5,
+      "Transition metal"
+    ],
     "properties": {
-      "atomic_number": 106, 
-      "melting_point": 2900, 
-      "atomic_volume": 12.7, 
-      "atomic_weight": 266, 
-      "atomic_radius": 125, 
-      "nvalence": 6
+      "atomic_number": 106,
+      "melting_point": 2900,
+      "atomic_weight": 266,
+      "atomic_radius": 125,
+      "nvalence": 6,
+      "molar_volume": 12.7
     }
   },
   "Bh": {
-    "position": [6, 6, "Transition metal"], 
+    "position": [
+      6,
+      6,
+      "Transition metal"
+    ],
     "properties": {
-      "atomic_number": 107, 
-      "melting_point": 3000, 
-      "atomic_volume": 13.3, 
-      "atomic_weight": 264, 
-      "atomic_radius": 121, 
-      "nvalence": 7
+      "atomic_number": 107,
+      "melting_point": 3000,
+      "atomic_weight": 264,
+      "atomic_radius": 121,
+      "nvalence": 7,
+      "molar_volume": 13.3
     }
   },
   "Hs": {
-    "position": [6, 7, "Transition metal"], 
+    "position": [
+      6,
+      7,
+      "Transition metal"
+    ],
     "properties": {
-      "atomic_number": 108, 
-      "melting_point": 3200, 
-      "atomic_volume": 12.2, 
-      "atomic_weight": 277, 
-      "atomic_radius": 120, 
-      "nvalence": 8
+      "atomic_number": 108,
+      "melting_point": 3200,
+      "atomic_weight": 277,
+      "atomic_radius": 120,
+      "nvalence": 8,
+      "molar_volume": 12.2
     }
   },
   "Mt": {
-    "position": [6, 8, "Transition metal"], 
+    "position": [
+      6,
+      8,
+      "Transition metal"
+    ],
     "properties": {
-      "atomic_number": 109, 
-      "melting_point": 1400, 
-      "atomic_volume": 11.7, 
-      "atomic_weight": 268, 
-      "atomic_radius": 115, 
-      "nvalence": 9
+      "atomic_number": 109,
+      "melting_point": 1400,
+      "atomic_weight": 268,
+      "atomic_radius": 115,
+      "nvalence": 9,
+      "molar_volume": 11.7
     }
   },
   "Ds": {
-    "position": [6, 9, "Transition metal"], 
+    "position": [
+      6,
+      9,
+      "Transition metal"
+    ],
     "properties": {
-      "atomic_number": 110, 
-      "melting_point": 3100, 
-      "atomic_volume": 12.1, 
-      "atomic_weight": 281, 
-      "atomic_radius": 105, 
-      "nvalence": 10
+      "atomic_number": 110,
+      "melting_point": 3100,
+      "atomic_weight": 281,
+      "atomic_radius": 105,
+      "nvalence": 10,
+      "molar_volume": 12.1
     }
   },
   "Rg": {
-    "position": [6, 10, "Transition metal"], 
+    "position": [
+      6,
+      10,
+      "Transition metal"
+    ],
     "properties": {
-      "atomic_number": 111, 
-      "melting_point": 2400, 
-      "atomic_volume": 12.8, 
-      "atomic_weight": 272, 
-      "atomic_radius": 120, 
-      "nvalence": 11
+      "atomic_number": 111,
+      "melting_point": 2400,
+      "atomic_weight": 272,
+      "atomic_radius": 120,
+      "nvalence": 11,
+      "molar_volume": 12.8
     }
   },
   "Cn": {
-    "position": [6, 11, "Transition metal"], 
+    "position": [
+      6,
+      11,
+      "Transition metal"
+    ],
     "properties": {
-      "atomic_number": 112, 
-      "melting_point": 2100, 
-      "atomic_volume": 13.3, 
-      "atomic_weight": 285, 
-      "atomic_radius": 130, 
-      "nvalence": 12
+      "atomic_number": 112,
+      "melting_point": 2100,
+      "atomic_weight": 285,
+      "atomic_radius": 130,
+      "nvalence": 12,
+      "molar_volume": 13.3
     }
   },
   "Nh": {
-    "position": [6, 12, "Post-transition metal"], 
+    "position": [
+      6,
+      12,
+      "Post-transition metal"
+    ],
     "properties": {
-      "atomic_number": 113, 
-      "melting_point": 1400, 
-      "atomic_volume": 13.8, 
-      "atomic_weight": 284, 
-      "atomic_radius": 135, 
-      "nvalence": 13
+      "atomic_number": 113,
+      "melting_point": 1400,
+      "atomic_weight": 284,
+      "atomic_radius": 135,
+      "nvalence": 13,
+      "molar_volume": 13.8
     }
   },
   "Fl": {
-    "position": [6, 13, "Post-transition metal"], 
+    "position": [
+      6,
+      13,
+      "Post-transition metal"
+    ],
     "properties": {
-      "atomic_number": 114, 
-      "melting_point": 2100, 
-      "atomic_volume": 14.2, 
-      "atomic_weight": 289, 
-      "atomic_radius": 140, 
-      "nvalence": 14
+      "atomic_number": 114,
+      "melting_point": 2100,
+      "atomic_weight": 289,
+      "atomic_radius": 140,
+      "nvalence": 14,
+      "molar_volume": 14.2
     }
   },
   "Mc": {
-    "position": [6, 14, "Post-transition metal"], 
+    "position": [
+      6,
+      14,
+      "Post-transition metal"
+    ],
     "properties": {
-      "atomic_number": 115, 
-      "melting_point": 2400, 
-      "atomic_volume": 14.8, 
-      "atomic_weight": 288, 
-      "atomic_radius": 145, 
-      "nvalence": 15
+      "atomic_number": 115,
+      "melting_point": 2400,
+      "atomic_weight": 288,
+      "atomic_radius": 145,
+      "nvalence": 15,
+      "molar_volume": 14.8
     }
   },
   "Lv": {
-    "position": [6, 15, "Post-transition metal"], 
+    "position": [
+      6,
+      15,
+      "Post-transition metal"
+    ],
     "properties": {
-      "atomic_number": 116, 
-      "melting_point": 2300, 
-      "atomic_volume": 15.3, 
-      "atomic_weight": 293, 
-      "atomic_radius": 150, 
-      "nvalence": 16
+      "atomic_number": 116,
+      "melting_point": 2300,
+      "atomic_weight": 293,
+      "atomic_radius": 150,
+      "nvalence": 16,
+      "molar_volume": 15.3
     }
   },
   "Ts": {
-    "position": [6, 16, "Halogen"], 
+    "position": [
+      6,
+      16,
+      "Halogen"
+    ],
     "properties": {
-      "atomic_number": 117, 
-      "melting_point": 2200, 
-      "atomic_volume": 15.8, 
-      "atomic_weight": 294, 
-      "atomic_radius": 155, 
-      "nvalence": 17
+      "atomic_number": 117,
+      "melting_point": 2200,
+      "atomic_weight": 294,
+      "atomic_radius": 155,
+      "nvalence": 17,
+      "molar_volume": 15.8
     }
   },
   "Og": {
-    "position": [6, 17, "Noble gas"], 
+    "position": [
+      6,
+      17,
+      "Noble gas"
+    ],
     "properties": {
-      "atomic_number": 118, 
-      "melting_point": 2100, 
-      "atomic_volume": 16.3, 
-      "atomic_weight": 294, 
-      "atomic_radius": 160, 
-      "nvalence": 18
+      "atomic_number": 118,
+      "melting_point": 2100,
+      "atomic_weight": 294,
+      "atomic_radius": 160,
+      "nvalence": 18,
+      "molar_volume": 16.3
     }
   }
 }

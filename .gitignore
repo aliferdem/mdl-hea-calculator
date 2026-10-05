@@ -177,3 +177,5 @@ pyrightconfig.json
 .vscode/
 archive/
 .idea/
+# HEA Calculator: generated visual-validation screenshots
+design/screens/

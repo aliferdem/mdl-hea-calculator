@@ -1,4 +1,14 @@
 {
+    "_metadata": {
+        "copyright": "Copyright (c) 2026 Metals Development Laboratory (MDL)",
+        "institution": "Department of Metallurgical and Materials Engineering, Middle East Technical University (METU), Ankara, Türkiye",
+        "license": "GNU General Public License Version 3 (GPLv3)",
+        "description": "Binary liquid mixing enthalpies (in kJ/mol) calculated by Miedema's macroscopic atom model for HEA Calculator.",
+        "references": {
+            "mixing_enthalpy": "Adopted from: Takeuchi, A., & Inoue, A. (2005). Classification of Bulk Metallic Glasses by Atomic Size Difference, Heat of Mixing and Period of Constituent Elements and Its Application to Characterization of the Main Alloying Element. Materials Transactions, 46(12), 2817-2829."
+        }
+    },
+
   "H": {
     "Li": -25.0,
     "N": -18.0,
