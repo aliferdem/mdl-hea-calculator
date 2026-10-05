@@ -62,26 +62,8 @@ MODEL_KEY_VALUES = {
            ("t_assess", "T")],
     "M7": [("k1", "k<sub>1</sub>"), ("k1cr", "k<sub>1</sub><sup>cr</sup>"), ("dhim", "ΔH<sub>IM</sub>"),
            ("t_assess", "T")],
-    "M8": [("phi_king", "Φ"), ("dg_ss", "ΔG<sub>ss</sub>"), ("dg_max", "ΔG<sub>max</sub>"),
-           ("delta_cn12", "δ<sub>CN12</sub>")],
-}
-
-INTERPRETATION = {
-    "M1": "Empirical solid-solution region in the Ω–δ map; outside it the calculator reports MP (intermetallics "
-          "and/or segregation) rather than a specific competing phase.",
-    "M2": "δ–ΔH<sub>mix</sub> phase-selection map for as-cast alloys: solid solution, amorphous phase (MG), "
-          "otherwise intermetallic-bearing multiphase (MP).",
-    "M3": "Packing-misfit parameter of the largest and smallest atoms; γ < 1.175 corresponds to the 15 % "
-          "Hume-Rothery limit.",
-    "M4": "Geometrical parameter: disordered solid solution (SS), solid solution + compounds (SS+IM) or "
-          "compounds only (IM).",
-    "M5": "Entropic dominance including the excess (packing/size) entropy; φ<sub>c</sub> ≈ 20.",
-    "M6": "Every binary compound must be neither too stable (IM precipitation) nor too unstable "
-          "(immiscibility, MP). Uses the published Troparevsky DFT matrix (30 elements).",
-    "M7": "Competition between the solid solution and a partially ordered intermetallic (k<sub>2</sub> = 0.6) at "
-          "temperature T.",
-    "M8": "Miedema-based Gibbs energy of the disordered solid solution against the strongest binary compound, at "
-          "the rule-of-mixtures melting temperature.",
+    "M8": [("phi_king", "Φ"), ("dg_ss", "ΔG<sub>ss</sub>"),
+           ("dg_max", "ΔG<sub>max</sub>"), ("dh_int_max", "ΔH<sub>int,max</sub>")],
 }
 
 
@@ -316,6 +298,8 @@ class DetailsPanel(Panel):
         for k in MODEL_KEYS:
             o = row.result.models[k]
             tile = Tile(MODELS[k].title, o.label)
+            if MODELS[k].name:
+                tile.lay.addWidget(_label(f"<b>{MODELS[k].name}:</b>"))
             tile.lay.addWidget(Equation(k, 1.3))
             vals = ", ".join(f"{lab} = {value_text(row, key, 3)}" for key, lab in MODEL_KEY_VALUES[k])
             tile.lay.addWidget(_label(f"Key values: {vals}"))
@@ -324,7 +308,9 @@ class DetailsPanel(Panel):
             if o.caution:
                 tile.lay.addWidget(_label(f"<span style='color:{t('support-warning')}'>⚠</span> "
                                           f"{html.escape(o.caution)}"))
-            tile.lay.addWidget(_label(INTERPRETATION[k]))
+            if MODELS[k].note:
+                tile.lay.addWidget(_label(MODELS[k].note))
+            tile.setToolTip(html.escape(MODELS[k].reference))
             lay.addWidget(tile)
         lay.addStretch(1)
 

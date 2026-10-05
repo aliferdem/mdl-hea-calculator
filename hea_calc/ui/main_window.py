@@ -200,7 +200,9 @@ class MainWindow(QMainWindow):
         m = self.table.model
         n = len(m.rows)
         flt = f" · filter active ({len(m.view_rows)} shown)" if m.filters else ""
-        self.table.status.setText(f"{n:,} result{'s' if n != 1 else ''}{flt}" if n else "")
+        # The reference toolbar carries no standing label - the paginator already reports the
+        # range - so this slot is reserved for filter state and for cell info on hover.
+        self.table.status.setText(flt.strip() if flt else "")
 
     # ------------------------------------------------------------------ selection sync
     def _composition_elements(self, elements: list[str]):
