@@ -24,8 +24,8 @@ from ...core.expression import (ExpressionError, VariableRange, block_variables,
                                  parse_blocks)
 from ...core.generation import RangeError, SweepSpec, generate_space, summarize_space
 from ..theme import t
-from .common import (Divider, IconButton, IconContentSwitcher, InfoButton, Panel, button, install_wheel_guard,
-                     refresh_style)
+from .common import (Divider, EmptyState, IconButton, IconContentSwitcher, InfoButton, Panel, button,
+                     install_wheel_guard, refresh_style)
 
 COL_ELEMENT = 64
 COL_VALUE = 88
@@ -194,7 +194,8 @@ class SingleView(QWidget):
 
         self.rows_widget = _Rows()
         self.scroll = scroll_wrap(self.rows_widget)
-        self.empty = EmptyState("Start by selecting elements", "Click elements in the periodic table.")
+        self.empty = EmptyState("Start by selecting elements", "Click elements in the periodic table.",
+                                 art="magnifier")
         self.rows_stack = QStackedWidget()
         self.rows_stack.addWidget(self.empty)
         self.rows_stack.addWidget(self.scroll)
@@ -463,38 +464,6 @@ class SingleView(QWidget):
 
 
 # ======================================================================== shared bits
-class EmptyState(QWidget):
-    """Carbon empty state: pictogram, title, body (Figma 'Start by selecting elements')."""
-
-    def __init__(self, title: str, body: str, icon_name: str = "search", parent=None):
-        super().__init__(parent)
-        self.icon_name = icon_name
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(40, 40, 20, 0)
-        lay.setSpacing(4)
-        self.pict = QWidget()
-        self.pict.setFixedSize(64, 64)
-        self.pict.paintEvent = self._paint_pict
-        lay.addWidget(self.pict)
-        lay.addSpacing(20)
-        tt = QLabel(title)
-        tt.setStyleSheet("font-size: 20px;")
-        bd = QLabel(body)
-        bd.setWordWrap(True)
-        lay.addWidget(tt)
-        lay.addWidget(bd)
-        lay.addStretch(1)
-
-    def _paint_pict(self, _e):
-        from PySide6.QtCore import QRectF
-        from PySide6.QtGui import QPainter
-        from .. import icons
-        p = QPainter(self.pict)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        icons.paint(p, self.icon_name, QRectF(0, 0, 64, 64), "text-helper")
-        p.end()
-
-
 class Toggle(QAbstractButton):
     """Carbon toggle, small (32 × 16): checked track uses support-success, unchecked border-strong."""
 
@@ -669,7 +638,8 @@ class SweepView(QWidget):
         sl.addLayout(srow)
         pl.addWidget(sum_w)
         self.empty = EmptyState("Start by selecting elements",
-                                "Click elements in the periodic table to set their ranges.")
+                                "Click elements in the periodic table to set their ranges.",
+                                art="magnifier")
         self.stack = QStackedWidget()
         self.stack.addWidget(self.empty)
         self.stack.addWidget(self.page)

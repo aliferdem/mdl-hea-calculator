@@ -51,6 +51,9 @@ class ProgressBanner(QWidget):
         self.hide()
 
 
+_SHEET_CACHE: dict[str, str] = {}
+
+
 class MainWindow(QMainWindow):
     def __init__(self, engine: Engine | None = None, settings: QSettings | None = None):
         super().__init__()
@@ -181,8 +184,21 @@ class MainWindow(QMainWindow):
         self.settings.setValue("theme", name)
 
     def apply_theme(self, *_):
+        # The sheet is scoped to this window rather than to QApplication.  Qt re-polishes every
+        # registered widget for an application-wide sheet - measured at ~2.0 s for the 2783
+        # widgets this window creates, against ~0.33 s for the window-scoped sheet.  Every dialog
+        # is parented to this window, so it inherits the sheet and nothing loses styling.
+        # The generated sheet is also memoised per theme: rebuilding it re-resolved every icon URL
+        # and re-checked the icon cache on disk on every switch.
         app = QApplication.instance()
-        app.setStyleSheet(stylesheet(lambda name, token: icons.file_url(name, token)))
+        if app.styleSheet():
+            # only if something else left one behind: clearing it is itself a full re-polish
+            app.setStyleSheet("")
+        sheet = _SHEET_CACHE.get(THEME.name)
+        if sheet is None:
+            sheet = stylesheet(lambda name, token: icons.file_url(name, token))
+            _SHEET_CACHE[THEME.name] = sheet
+        self.setStyleSheet(sheet)
         for act in self.theme_actions.actions():
             act.setChecked(act.text().lower().startswith(THEME.name))
         self.update()
@@ -284,7 +300,7 @@ class MainWindow(QMainWindow):
 
     def _check_details(self):
         if self.details.row is not None and self.details.row not in self.table.model.rows:
-            self.details.show_row(None)
+            self.details.show_row(None, has_results=bool(self.table.model.rows))
         self._update_status()
 
     # ------------------------------------------------------------------ table actions
@@ -298,7 +314,7 @@ class MainWindow(QMainWindow):
             self.table.model.set_rows([])
         else:
             self.table.model.remove_rows(rows)
-        self.details.show_row(None)
+        self.details.show_row(None, has_results=bool(self.table.model.rows))
         self._update_status()
 
     def edit_filters(self):
@@ -306,7 +322,7 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self.table.model.set_filters(dlg.result_filters)
             self.table.set_filter_active(bool(dlg.result_filters))
-            self.details.show_row(None)
+            self.details.show_row(None, has_results=bool(self.table.model.rows))
             self._update_status()
         dlg.deleteLater()
 

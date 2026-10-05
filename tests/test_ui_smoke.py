@@ -273,7 +273,9 @@ def test_recalculate_all_uses_new_temperature(win, app):
 def test_theme_switch(win, app):
     from hea_calc.ui.theme import THEME
     win.set_theme("light")
-    assert THEME.name == "light" and "#f4f4f4" in app.styleSheet()
+    # the sheet is scoped to the main window (see MainWindow.apply_theme), not to QApplication
+    assert THEME.name == "light" and "#f4f4f4" in win.styleSheet()
+    assert app.styleSheet() == "", "no application-wide sheet may be kept alive"
     win.set_theme("dark")
     assert THEME.name == "dark"
 
@@ -298,3 +300,74 @@ def test_overview_ratio_column(win):
     win.composition.calc_btn.click()
     row = win.table.model.rows[-1]
     assert list(row.result.composition) == ["Al", "Co", "Cr", "Fe", "Ni"]
+
+
+def test_button_sizes_follow_the_carbon_size_property(win, app):
+    """md buttons are 40 px and sm buttons 32 px, per theme.BUTTON_HEIGHT / CONTROL_HEIGHT.
+
+    Regression: the selector used to be the Qt property ``size``, which QWidget already declares
+    as a read-only QSize, so ``setProperty("size", "md")`` failed silently and every md button
+    rendered at the 32 px sm height.  The Figma footer puts a 40 px primary button flush with the
+    bottom of the 40 px footer bar, so this is measurable against the design.
+    """
+    from hea_calc.ui.theme import BUTTON_HEIGHT, CONTROL_HEIGHT
+
+    md = [win.composition.clear_btn, win.composition.calc_btn, win.details.print_btn]
+    sm = [win.table.export_btn]
+    for b in md:
+        assert b.property("btnsize") == "md", b
+        assert (b.minimumHeight(), b.maximumHeight()) == (BUTTON_HEIGHT, BUTTON_HEIGHT), b
+    for b in sm:
+        assert b.property("btnsize") == "sm", b
+        assert (b.minimumHeight(), b.maximumHeight()) == (CONTROL_HEIGHT, CONTROL_HEIGHT), b
+    # and the rendered footer matches the export: Calculate is 141 x 40, flush with the bar
+    app.processEvents()
+    bar = win.composition.calc_btn.parentWidget()
+    assert win.composition.calc_btn.height() == BUTTON_HEIGHT == bar.height()
+    assert win.composition.calc_btn.width() == 141
+
+
+def test_empty_states_use_the_exported_illustrations(win, app):
+    """The three empty states render the Figma artwork, at its exported size."""
+    from hea_calc.ui.widgets.common import Illustration
+
+    from PySide6.QtWidgets import QLabel
+
+    for view, art in ((win.composition.single, "magnifier"), (win.composition.sweep, "magnifier")):
+        found = view.empty.findChildren(Illustration)
+        assert [i.name for i in found] == [art], view
+    # details: two variants of one artwork, driven by whether results exist
+    page = win.details.pages[0].widget()
+    names = [i.name for i in page.findChildren(Illustration)]
+    assert names == ["document"], names
+    texts = [lab.text() for lab in page.findChildren(QLabel)]
+    assert "No alloy to show yet" in texts, texts
+    click_elements(win, "Co", "Cr", "Fe", "Ni")
+    win.composition.calc_btn.click()
+    app.processEvents()
+    assert win.table.model.rows
+    # a row is shown, then it goes away while other results remain (Figma 289:44646)
+    win._jump_to(0)
+    app.processEvents()
+    assert win.details.row is not None
+    win.details.show_row(None, has_results=True)   # as delete_rows / edit_filters call it
+    app.processEvents()
+    texts = [lab.text() for lab in win.details.pages[0].widget().findChildren(QLabel)]
+    assert "No alloy selected" in texts, texts
+    assert [i.name for i in win.details.pages[0].widget().findChildren(Illustration)] == ["document"]
+
+
+def test_illustrations_are_cached_and_sized_from_the_svg(win):
+    from hea_calc.ui.widgets.common import illustration
+    from hea_calc.ui.theme import THEME
+
+    for name, w, h in (("magnifier", 80, 80), ("document", 55, 81), ("box", 80, 97)):
+        size, pm = illustration(name)
+        assert (size.width(), size.height()) == (w, h), (name, size)
+        assert (pm.width(), pm.height()) == (w, h), name
+    # the dark pixmap is cached per theme, so a repeated call is the same object
+    first = illustration("box")
+    THEME.set_theme("dark")
+    assert illustration("box")[1] is first[1]
+    light = illustration("box", "light")[1]
+    assert light is not first[1], "the light theme needs its own (inverted) pixmap"

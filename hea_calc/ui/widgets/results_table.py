@@ -17,7 +17,7 @@ from ...core.results import (COLUMN_BY_KEY, DEFAULT_COLUMNS, ResultRow, apply_fi
                              table_tsv)
 from .. import icons
 from ..theme import BODY_COMPACT_01, HEADING_COMPACT_01, THEME, font, t
-from .common import Divider, IconButton, button, paint_tag
+from .common import Divider, IconButton, button, illustration, paint_tag
 
 PAGE_SIZES = (10, 20, 50, 100)
 MODEL_COL_WIDTH = 79
@@ -515,6 +515,7 @@ class TableEmptyState(QWidget):
         self.view = view
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.title, self.body = "", ""
+        THEME.changed.connect(self._theme_changed)
 
     def set_text(self, title: str, body: str):
         self.title, self.body = title, body
@@ -525,19 +526,25 @@ class TableEmptyState(QWidget):
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        x, y = 32, 32
-        icons.paint(p, "box", QRectF(x, y, 80, 80), "text-helper")
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        # Figma 289:44643 - artwork at x = 64, its exported height, title 24 px below it.
+        x, y = 64, 32
+        size, pm = illustration("box")
+        p.drawPixmap(QRect(x, y, size.width(), size.height()), pm, QRect(pm.rect()))
         f = font(BODY_COMPACT_01)
         f.setPixelSize(20)
         p.setFont(f)
         p.setPen(QColor(t("text-primary")))
-        p.drawText(QRectF(x, y + 100, 600, 28), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-                   self.title)
+        p.drawText(QRectF(x, y + size.height() + 24, 600, 28),
+                   int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), self.title)
         p.setFont(font(BODY_COMPACT_01))
         p.setPen(QColor(t("text-secondary")))
-        p.drawText(QRectF(x, y + 132, 600, 20), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-                   self.body)
+        p.drawText(QRectF(x, y + size.height() + 56, 600, 20),
+                   int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), self.body)
         p.end()
+
+    def _theme_changed(self, *_):
+        self.update()
 
 
 class ResultsTable(QFrame):

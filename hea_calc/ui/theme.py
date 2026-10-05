@@ -235,8 +235,8 @@ QPushButton[kind="icon"][active="true"] {{ background: {k['layer-selected-01']};
 QPushButton:focus {{ border: 2px solid {k['focus']}; }}
 QPushButton[kind="primary"]:focus, QPushButton[kind="secondary"]:focus {{
     border: 2px solid {k['focus']}; padding: 0px 14px; }}
-QPushButton[size="md"] {{ min-height: {BUTTON_HEIGHT}px; max-height: {BUTTON_HEIGHT}px; }}
-QPushButton[size="sm"] {{ min-height: {CONTROL_HEIGHT}px; max-height: {CONTROL_HEIGHT}px; }}
+QPushButton[btnsize="md"] {{ min-height: {BUTTON_HEIGHT}px; max-height: {BUTTON_HEIGHT}px; }}
+QPushButton[btnsize="sm"] {{ min-height: {CONTROL_HEIGHT}px; max-height: {CONTROL_HEIGHT}px; }}
 
 /* ---------------- text inputs (Carbon text input, sm) */
 QLineEdit {{ background: {k['field-02']}; color: {k['text-primary']}; border: none;

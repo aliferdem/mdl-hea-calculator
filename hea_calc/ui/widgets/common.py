@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (QColor, QFontMetrics, QImage, QPainter, QPainterPath, QPen, QPixmap)
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton,
                                QSizePolicy, QVBoxLayout, QWidget)
 
@@ -79,10 +82,92 @@ class Divider(QFrame):
 def button(text: str, kind: str = "ghost", size: str = "sm", parent=None) -> QPushButton:
     b = QPushButton(text, parent)
     b.setProperty("kind", kind)
-    b.setProperty("size", size)
+    # Not "size": QWidget already declares a read-only `size` QSize property, so setProperty("size")
+    # fails silently and the QSS selectors below never matched - every md button rendered 32 px
+    # instead of 40 px.  `btnsize` has no collision.
+    b.setProperty("btnsize", size)
     b.setCursor(Qt.CursorShape.PointingHandCursor)
     b.setFocusPolicy(Qt.FocusPolicy.TabFocus)
     return b
+
+
+ILLUSTRATIONS_DIR = Path(__file__).resolve().parent.parent / "illustrations"
+_ILLUSTRATIONS: dict[tuple[str, str], tuple[QSize, QPixmap]] = {}
+
+
+def illustration(name: str, theme: str | None = None) -> tuple[QSize, QPixmap]:
+    """Size and pixmap of an empty-state illustration, rendered at its exported Figma size.
+
+    The artwork in ``hea_calc/ui/illustrations`` carries the dark-theme gradients baked in, so in
+    the light theme the RGB channels are inverted: white highlights become near-black and the
+    shading structure survives on a light background.  Alpha is untouched, and the result is
+    cached per theme.
+    """
+    theme = theme or THEME.name
+    key = (name, theme)
+    hit = _ILLUSTRATIONS.get(key)
+    if hit is not None:
+        return hit
+    renderer = QSvgRenderer(str(ILLUSTRATIONS_DIR / f"{name}.svg"))
+    size = renderer.defaultSize()
+    pm = QPixmap(size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    renderer.render(p)
+    p.end()
+    if theme != "dark":
+        img = pm.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+        img.invertPixels(QImage.InvertMode.InvertRgb)
+        pm = QPixmap.fromImage(img)
+    _ILLUSTRATIONS[key] = (size, pm)
+    return _ILLUSTRATIONS[key]
+
+
+class Illustration(QWidget):
+    """An empty-state illustration, sized to its exported artwork and left-aligned by its layout."""
+
+    def __init__(self, name: str, parent=None):
+        super().__init__(parent)
+        self.name = name
+        self.setFixedSize(illustration(name)[0])
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        THEME.changed.connect(self._theme_changed)
+
+    def _theme_changed(self, *_):
+        self.update()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        p.drawPixmap(self.rect(), illustration(self.name)[1])
+        p.end()
+
+
+class EmptyState(QWidget):
+    """Carbon empty state: illustration, title, body.
+
+    Geometry is the Figma one: the artwork sits at the panel's content margin, 24 px below it the
+    title (20 px), directly under it the body (14 px).  Both are left-aligned, as in the design -
+    Carbon's centred variant is not used anywhere in this app.
+    """
+
+    def __init__(self, title: str, body: str, art: str | None = None, margin_x: int = 40,
+                 margin_top: int = 40, parent=None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(margin_x, margin_top, 20, 0)
+        lay.setSpacing(0)
+        if art:
+            lay.addWidget(Illustration(art), 0, Qt.AlignmentFlag.AlignLeft)
+            lay.addSpacing(24)
+        tt = QLabel(title)
+        tt.setStyleSheet("font-size: 20px;")
+        bd = QLabel(body)
+        bd.setWordWrap(True)
+        lay.addWidget(tt)
+        lay.addWidget(bd)
+        lay.addStretch(1)
 
 
 class IconButton(QPushButton):

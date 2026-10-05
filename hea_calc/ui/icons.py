@@ -98,8 +98,18 @@ def paint(painter: QPainter, name: str, rect, token: str = "icon-primary", color
     renderer.render(painter, QRectF(rect))
 
 
+_FILE_URLS: dict[tuple[str, str], str] = {}
+
+
 def file_url(name: str, token: str) -> str:
-    """Path usable in QSS ``url(...)`` for the icon in the current theme colour."""
+    """Path usable in QSS ``url(...)`` for the icon in the current theme colour.
+
+    Memoised: a theme switch used to re-hash and re-check every icon file on disk.
+    """
+    key = (name, token)
+    cached = _FILE_URLS.get(key)
+    if cached is not None:
+        return cached
     color = THEME.tokens.get(token, token)
     data = svg_text(name, color)
     digest = hashlib.sha1(data.encode("utf-8")).hexdigest()[:12]
@@ -107,11 +117,13 @@ def file_url(name: str, token: str) -> str:
     path = _CACHE_DIR / f"{name}_{digest}.svg"
     if not path.exists():
         path.write_text(data, encoding="utf-8")
-    return path.as_posix()
+    _FILE_URLS[key] = path.as_posix()
+    return _FILE_URLS[key]
 
 
 def clear_cache() -> None:
     _pixmaps.clear()
+    _FILE_URLS.clear()
 
 
 THEME.changed.connect(lambda _name: clear_cache())
