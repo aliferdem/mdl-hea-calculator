@@ -258,7 +258,10 @@ class ElementInfo(QWidget):
         self.z.setObjectName("KeyValueValue")
         self.cat = QLabel()
         self.cat.setObjectName("KeyValueValue")
+        # 108 px fits the identity row (symbol + name). The empty-state hint is longer, so it
+        # re-measures itself while nothing is selected - see show_element().
         self.name.setFixedWidth(108)
+        self.name_min_width = 108
         self.z.setFixedWidth(49)
         for w in (self.name, self.z, self.cat):
             w.setTextFormat(Qt.TextFormat.RichText)
@@ -302,12 +305,19 @@ class ElementInfo(QWidget):
 
     def show_element(self, el: str | None):
         if not el:
-            self.name.setText("Hover or select an element")
-            self.z.setText("")
-            self.cat.setText("")
+            # design/screenshots/03: the hint owns the whole identity row while nothing is
+            # selected, so it is never elided against the Z / category fields.
+            self.name.setText("Hover over an element to see its properties")
+            # sizeHint is measured before the stylesheet font applies, so allow a margin.
+            self.name.setFixedWidth(self.name.sizeHint().width() + 24)
+            self.z.setVisible(False)
+            self.cat.setVisible(False)
             for v, _f, _s in self.values.values():
                 v.setText("—")
             return
+        self.z.setVisible(True)
+        self.cat.setVisible(True)
+        self.name.setFixedWidth(self.name_min_width)
         self.name.setText(f"{el} <b>{self.data.name(el)}</b>")
         z = int(self.data.prop(el, "atomic_number") or 0)
         self.z.setText(f"Z <b>{z}</b>")
