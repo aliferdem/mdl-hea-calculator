@@ -185,8 +185,8 @@ class CarbonToolTip(QWidget):
     """
 
     PAD_X, PAD_Y = 16, 6
-    CARET_W, CARET_H, RADIUS = 12, 4, 2
-    GAP = 6          # distance from the anchor's edge to the tooltip body
+    CARET_W, CARET_H, RADIUS = 6, 3, 2
+    GAP = 6          # from the caret's tip to the anchor's edge
     WRAP = 170       # the reference's two-line tip breaks after 166 px of text
 
     def __init__(self):
@@ -198,6 +198,7 @@ class CarbonToolTip(QWidget):
         self._lines: list[str] = [""]
         self._below = False
         self._caret_x = 0
+        self._caret = False
         self.setFont(font(BODY_COMPACT_01))
 
     def text_rect(self) -> QRectF:
@@ -219,17 +220,20 @@ class CarbonToolTip(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(t("border-inverse")))
-        body = QRectF(0, 0, self.width(), self.height() - self.CARET_H)
+        caret = self.CARET_H if self._caret else 0
+        body = QRectF(0, 0, self.width(), self.height() - caret)
         p.drawRoundedRect(body, self.RADIUS, self.RADIUS)
-        cx = self._caret_x
-        if self._below:
-            base = body.bottom()
-            tri = QPolygonF([QPointF(cx - self.CARET_W / 2, base), QPointF(cx + self.CARET_W / 2, base),
-                             QPointF(cx, self.height() - 1)])
-        else:
-            tri = QPolygonF([QPointF(cx - self.CARET_W / 2, self.CARET_H),
-                             QPointF(cx + self.CARET_W / 2, self.CARET_H), QPointF(cx, 0)])
-        p.drawPolygon(tri)
+        if self._caret:
+            cx = self._caret_x
+            half = self.CARET_W / 2
+            if self._below:
+                base = body.bottom()
+                tri = QPolygonF([QPointF(cx - half, base), QPointF(cx + half, base),
+                                 QPointF(cx, self.height() - 0.5)])
+            else:
+                tri = QPolygonF([QPointF(cx - half, self.CARET_H), QPointF(cx + half, self.CARET_H),
+                                 QPointF(cx, 0.5)])
+            p.drawPolygon(tri)
         fm = QFontMetrics(self.font())
         p.setPen(QColor(t("text-inverse")))
         p.setFont(self.font())
@@ -241,7 +245,16 @@ class CarbonToolTip(QWidget):
         p.end()
 
     def show_for(self, anchor: QRect, text: str, screen: QRect) -> None:
-        """Place the tip above ``anchor`` (or below it if there is no room), caret on the anchor."""
+        """Place the tip above ``anchor`` (or below it if there is no room), caret on the anchor.
+
+        The reference places the body so the **caret** lands on the anchor's centre, not so the
+        body is centred on it: measured in 21_dark_mode_fullscreen_tooltips, the "Clear table" body
+        is x 1615..1716 with the caret at 1696.5 while the trash button's centre is 1696 - the body
+        hangs 66 px to the left of the button.  The caret tip is 6 px above the anchor's top edge.
+
+        Near a screen edge the body may not fit at all, and then the caret would point at nothing:
+        in that case it is dropped rather than drawn somewhere misleading.
+        """
         fm = QFontMetrics(self.font())
         lines: list[str] = []
         for line in (text.split("\n") or [text]):
@@ -251,13 +264,16 @@ class CarbonToolTip(QWidget):
         self.resize(size.width(), size.height() + self.CARET_H)
         below = anchor.top() - self.GAP - self.height() < screen.top()
         self._below = below
-        x = anchor.center().x() - self.width() // 2
         y = anchor.top() - self.GAP - self.height() if not below else anchor.bottom() + self.GAP
-        x = max(screen.left(), min(x, screen.right() - self.width()))
+        y = max(screen.top(), min(y, screen.bottom() - self.height() + 1))
+        # centre the body on the anchor, then keep it on screen (QRect::right() is inclusive)
+        x = anchor.center().x() - self.width() // 2
+        x = max(screen.left(), min(x, screen.right() - self.width() + 1))
         self.move(x, y)
-        # the caret points at the anchor's centre, kept inside the body even after clamping
         centre = anchor.center().x() - self.x()
-        self._caret_x = int(max(self.CARET_W // 2, min(self.width() - self.CARET_W // 2, centre)))
+        margin = self.CARET_W          # keep the triangle off the rounded corners
+        self._caret = (margin <= centre <= self.width() - margin)
+        self._caret_x = int(centre)
         self.show()
 
     @staticmethod

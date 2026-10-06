@@ -630,28 +630,39 @@ def test_export_button_label_and_chevron(win):
 
 
 def test_carbon_tooltip_matches_the_component_reference(win, app):
-    """Background, text colour, size and caret, against design/components at 3x."""
+    """Background, text, size, caret and placement, against the 3x components and reference 21."""
     from hea_calc.ui.widgets.common import CarbonToolTip
 
     tip = CarbonToolTip()
-    screen = app.primaryScreen().availableGeometry()
-    tip.show_for(QRect(1800, 580, 32, 32), "Clear table", screen)
+    screen = QRect(0, 0, 1920, 1032)      # the desktop the reference was exported from
+    anchor = QRect(1680, 600, 32, 32)    # the reference's trash button sits at x 1681
+    tip.show_for(anchor, "Clear table", screen)
     app.processEvents()
-    # reference: 102 x 28 including the caret, body #f4f4f4, text #161616, caret ~12 px x 4 px
-    assert (tip.width(), tip.height()) == (102, 28), (tip.width(), tip.height())
+    # reference: body 102 x 24, a 6 px wide / 3 px tall caret below it, #f4f4f4 with #161616 text
+    assert (tip.width(), tip.height()) == (102, 27), (tip.width(), tip.height())
     img = tip.grab().toImage().convertToFormat(QImage.Format_RGB32)
-    body = img.pixelColor(10, 10).name().lstrip("#").upper()
-    assert body == "F4F4F4", body
+    assert img.pixelColor(10, 10).name().lstrip("#").upper() == "F4F4F4"
     ink = [img.pixelColor(x, y).red() for y in range(3, 20) for x in range(3, 90)]
     assert min(ink) < 60, "dark text on the inverse surface"
-    # the caret narrows the bottom rows
-    widths = {y: sum(1 for x in range(tip.width())
-                     if img.pixelColor(x, y).name().lstrip("#").upper() == "F4F4F4")
-              for y in range(tip.height() - 5, tip.height())}
-    assert widths[tip.height() - 1] < widths[tip.height() - 5], widths
-    tip.show_for(QRect(1800, 580, 32, 32), "Composition space", screen)
+    # the caret narrows over the last three rows
+    widths = [sum(1 for x in range(tip.width())
+                  if img.pixelColor(x, y).name().lstrip("#").upper() == "F4F4F4")
+              for y in (tip.height() - 4, tip.height() - 3, tip.height() - 2, tip.height() - 1)]
+    assert widths[0] > widths[-1], widths
+
+    # placement: the caret points at the anchor's centre and its tip is 6 px above the anchor's
+    # top edge, with the body hanging to the left - measured in 21_dark_mode_fullscreen_tooltips
+    assert tip._caret, "the caret is drawn when the tip can reach the anchor"
+    assert tip.x() + tip._caret_x == anchor.center().x()
+    assert anchor.top() - (tip.y() + tip.height()) == tip.GAP == 6
+    assert tip.x() < anchor.x(), "the body extends left of the anchor, as in the reference"
+    assert tip.x() + tip.width() - 1 <= screen.right(), "stays on the screen"
+
+    tip.show_for(QRect(940, 600, 32, 32), "Composition space", screen)
     app.processEvents()
-    assert (tip.width(), tip.height()) == (154, 30), (tip.width(), tip.height())
+    # 154 x 29 against the component's 155 x 30: the component's caret is 4 px, reference 21's is 3
+    assert (tip.width(), tip.height()) == (154, 29), (tip.width(), tip.height())
+    assert tip.x() + tip._caret_x == QRect(940, 600, 32, 32).center().x()
     tip.hide()
 
 
