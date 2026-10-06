@@ -305,16 +305,17 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ table actions
     def delete_rows(self):
-        rows = self.table.view.selected_rows()
-        if not rows:
-            if not self.table.model.rows:
-                return
-            if QMessageBox.question(self, "Delete results", "Delete all results?") != QMessageBox.StandardButton.Yes:
-                return
-            self.table.model.set_rows([])
-        else:
-            self.table.model.remove_rows(rows)
-        self.details.show_row(None, has_results=bool(self.table.model.rows))
+        """Clear the results table.
+
+        The toolbar's trash button is "Clear table" (tooltip in 21_dark_mode_fullscreen_tooltips),
+        so it empties the table outright rather than acting on the selection, and it does so
+        immediately - no confirmation dialog.  The composition panel is left untouched: only the
+        table's rows go, which also resets its filters, page and page size through ``set_rows``.
+        """
+        if not self.table.model.rows:
+            return
+        self.table.model.set_rows([])
+        self.details.show_row(None, has_results=False)
         self._update_status()
 
     def edit_filters(self):

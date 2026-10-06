@@ -8,9 +8,11 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QSettings  # noqa: E402
+from PySide6.QtCore import QRect, QSettings  # noqa: E402
 from PySide6.QtGui import QColor, QImage  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
+
+from hea_calc.ui.widgets.common import IconButton  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -236,10 +238,18 @@ def test_copy_filter_columns_delete(win, app):
     m.set_filters([])
     m.set_keys(["name", "dhmix", "M1"])
     assert m.columnCount() == 3
+    # the toolbar trash button is "Clear table": it empties the table whatever is selected,
+    # resets the pagination, and leaves the composition alone
     win.table.view.selectRow(0)
-    win.delete_rows()
-    assert [r.name for r in m.rows] == ["CoCrFeNiAl"]  # selection order
+    win.table.delete_btn.click()
+    assert m.rows == []
+    assert m.view_rows == [] and m.page == 0
+    assert win.table.pagination.prev_btn.isEnabled() is False
+    assert win.table.pagination.next_btn.isEnabled() is False
     assert win.details.row is None
+    assert set(win.composition.single.rows) == {"Co", "Cr", "Fe", "Ni", "Al"}, \
+        "the composition must not be cleared"
+    assert win.table.empty.isVisible()
 
 
 def test_import_and_export_through_ui(win, app, tmp_path, monkeypatch):
@@ -438,25 +448,230 @@ def test_focus_border_is_two_px_on_all_four_sides(win, app):
     app.processEvents()
 
 
-def test_export_label_sits_on_the_padding_grid(win, app):
-    """A button with an attached menu must not lose the sheet's 16 px label padding.
+def test_element_tiles_have_no_tooltip_and_the_right_selected_border(win, app):
+    """No tile tooltip (the inspector reports the name on hover), and a theme-correct frame."""
+    from hea_calc.ui.theme import DARK, LIGHT, THEME, t
 
-    Regression: Qt reserves the platform menu-indicator width inside the button's contents rect,
-    so the Export label rendered 4 px from the button edge instead of 17 px, against
-    `19_data_table_populated.png`.  `::menu-indicator { width: 0 }` does not release it.
+    tiles = win.elements.table.tiles
+    assert len(tiles) > 100
+    assert all(t.toolTip() == "" for t in tiles.values()), "the tile tooltip duplicated the inspector"
+    # the inspector still reports the element on hover - only the tooltip was removed
+    win.elements.table.tiles["Cr"].enterEvent(None)
+    app.processEvents()
+    texts = [lab.text() for lab in win.elements.info.findChildren(QLabel)]
+    assert any("Chromium" in t for t in texts), texts
+
+    tile = tiles["Cr"]
+    assert t("tile-selected-border") == DARK["tile-selected-border"] == "#f4f4f4"
+    assert LIGHT["tile-selected-border"] == "#0f62fe"
+    tile.setChecked(True)
+    img = tile.grab().toImage().convertToFormat(QImage.Format.Format_RGB32)
+    assert img.pixelColor(0, 14).name() == "#" + DARK["tile-selected-border"].lstrip("#"), \
+        "the selected frame is 2 px of tile-selected-border on the tile's left edge"
+    THEME.set_theme("light")
+    app.processEvents()
+    img = tile.grab().toImage().convertToFormat(QImage.Format.Format_RGB32)
+    assert img.pixelColor(0, 14).name() == "#0f62fe", img.pixelColor(0, 14).name()
+    THEME.set_theme("dark")
+    app.processEvents()
+
+
+def test_icon_only_buttons_centre_their_icon(win, app):
+    """Every icon-only button centres its icon horizontally and vertically.
+
+    Regression: the sheet's base `QPushButton` rule sets `text-align: left`, which Qt applies to a
+    text-less button's icon too, so every IconButton drew its icon 8 px left of centre in a 32 x 32
+    button (12.5 px in the 40 x 40 pagination buttons) - most obvious on hover.  IconButton now
+    paints the icon itself.
     """
+    from hea_calc.ui.widgets.common import IconButton  # noqa: E402
+
+    from collections import Counter
+
+    def hx(c):
+        return f"#{c.red():02x}{c.green():02x}{c.blue():02x}"
+
+    def offset(btn):
+        img = btn.grab().toImage().convertToFormat(QImage.Format.Format_RGB32)
+        bg = hx(img.pixelColor(1, 1))
+        pts = [(x, y) for y in range(img.height()) for x in range(img.width())
+               if hx(img.pixelColor(x, y)) != bg]
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        return ((min(xs) + max(xs) + 1) / 2 - btn.width() / 2,
+                (min(ys) + max(ys) + 1) / 2 - btn.height() / 2)
+
+    buttons = [win.table.delete_btn, win.table.filter_btn, win.table.columns_btn,
+               win.table.pagination.prev_btn, win.table.pagination.next_btn,
+               win.composition.expr.preview_btn]
+    buttons += win.findChildren(IconButton)
+    assert len(buttons) >= 8, "the audit must cover every icon-only button"
+    for b in buttons:
+        dx, dy = offset(b)
+        # a 1:1 bitmap of an odd-width glyph can only land on a half pixel
+        assert abs(dx) <= 1.0 and abs(dy) <= 0.5, (b.toolTip(), dx, dy)
+
+    # and on hover, which is when the misalignment was most visible
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QEnterEvent
+
+    b = win.table.delete_btn
+    app.sendEvent(b, QEnterEvent(QPointF(16, 16), QPointF(1, 1), QPointF(1, 1)))
+    app.processEvents()
+    img = b.grab().toImage().convertToFormat(QImage.Format_RGB32)
+    assert hx(img.pixelColor(1, 1)) == "#333333", "hover surface"
+    dx, dy = offset(b)
+    assert abs(dx) <= 0.5 and abs(dy) <= 0.5, (dx, dy)
+
+
+def test_content_switcher_surfaces_outline_and_icon_tokens(win, app):
+    """Segment surfaces, the 1 px group outline and the icon tokens, per the reference."""
+    from hea_calc.ui.theme import THEME, t
+
+    sw = win.composition.switcher
+    assert (sw.width(), sw.height()) == (96, 32)
+    assert [i.width() for i in sw.items] == [32, 32, 32], "contiguous 32 px segments, no gaps"
+    app.processEvents()
+    img = sw.grab().toImage().convertToFormat(QImage.Format_RGB32)
+
+    def hx(x, y):
+        return "#" + img.pixelColor(x, y).name().lstrip("#")
+
+    assert t("switcher-selected") == "#404040" and hx(16, 16) == "#404040", "selected surface"
+    assert t("switcher-unselected") == "#212121" and hx(34, 16) == "#212121", "unselected surface"
+    assert t("border-strong-02") == "#8d8d8d"
+    assert hx(48, 0) == "#8d8d8d" and hx(48, 31) == "#8d8d8d", "1 px outline, top and bottom"
+    assert hx(95, 16) == "#8d8d8d", "1 px outline, right edge"
+    # the selected frame is 1 px of border-inverse over the selected surface
+    assert hx(0, 16) == "#f4f4f4" and hx(31, 16) == "#f4f4f4"
+
+    # icon tokens: bright when selected or hovered, dim otherwise.  Measured on the frame's grab,
+    # which is what the window actually shows (an item's own grab leaves the surface transparent).
+    assert t("icon-primary") == "#f4f4f4" and t("icon-secondary") == "#c6c6c6"
+
+    def icon_peak(index):
+        frame = sw.grab().toImage().convertToFormat(QImage.Format.Format_RGB32)
+        x0 = index * 32 + 8
+        return max((frame.pixelColor(x, y).red() for y in range(8, 24) for x in range(x0, x0 + 16)),
+                   default=0)
+
+    sw.items[2]._hover = True
+    sw.update()
+    app.processEvents()
+    assert icon_peak(2) > 200, "a hovered segment shows the bright icon"
+    sw.items[2]._hover = False
+    sw.update()
+    app.processEvents()
+    assert 150 < icon_peak(2) < 215, f"an unselected segment's icon is #c6c6c6-ish ({icon_peak(2)})"
+    THEME.set_theme("light")
+    app.processEvents()
+    from hea_calc.ui.theme import LIGHT
+    assert LIGHT["icon-primary"] == "#161616" and LIGHT["icon-secondary"] == "#525252"
+    THEME.set_theme("dark")
+    app.processEvents()
+
+
+def test_mode_single_icon_follows_the_icon_token(win):
+    """The Single-composition icon carried `style="fill:#000000"`, which beat `currentColor`.
+
+    Regression: it rendered black on the selected segment's #404040 surface, in both themes,
+    because an inline `style` fill overrides the root's `fill="currentColor"`.
+    """
+    from hea_calc.ui import icons
+
+    src = icons.svg_text("mode_single", "#f4f4f4")
+    assert "style=" not in src, src[:120]
+    assert 'fill="#f4f4f4"' in src
+    for name in ("mode_single", "mode_sweep", "mode_expression"):
+        assert "style=" not in icons.svg_text(name, "#f4f4f4"), name
+
+
+def test_results_toolbar_has_no_copy_button(win):
+    """Export's menu keeps the copy action; the redundant toolbar button is gone."""
+    tb = win.table
+    assert not hasattr(tb, "copy_btn"), "the icon-only Copy table button was removed"
+    tips = [b.toolTip() for b in tb.findChildren(IconButton)]
+    assert not any("copy" in t.lower() for t in tips), tips
+    menu = tb.export_btn.menu()
+    assert menu is not None
+    labels = [a.text() for a in menu.actions() if a.text()]
+    assert "Copy table to clipboard" in labels, labels
+    # and the File menu still offers it
+    file_actions = [a.text() for a in win.file_menu.actions()]
+    assert "Copy table" in file_actions, file_actions
+
+
+def test_export_button_label_and_chevron(win):
+    """Label on the padding grid *and* the design's chevron, both measured in reference 21."""
     b = win.table.export_btn
-    assert b.menu() is not None, "the export menu is a feature; this test guards its geometry"
-    img = b.grab().toImage()
-    xs = [x for y in range(img.height()) for x in range(img.width())
-          if QColor(img.pixel(x, y)).lightness() > 150]
-    assert min(xs) >= 15, f"label starts {min(xs)} px from the button edge, expected 16 + bearing"
-    # no other button in the toolbar or pagination carries its own stylesheet, which would stop it
-    # inheriting the sheet
-    for other in (win.table.copy_btn, win.table.delete_btn, win.table.filter_btn,
+    assert (b.width(), b.height()) == (123, 32)
+    img = b.grab().toImage().convertToFormat(QImage.Format.Format_RGB32)
+    bg = img.pixelColor(1, 16).name().lstrip("#").upper()
+    pts = [(x, y) for y in range(img.height()) for x in range(img.width())
+           if img.pixelColor(x, y).name().lstrip("#").upper() != bg
+           and 0.299 * img.pixelColor(x, y).red() + 0.587 * img.pixelColor(x, y).green()
+           + 0.114 * img.pixelColor(x, y).blue() > 150]
+    cols = sorted({p[0] for p in pts})
+    groups, start, prev = [], None, None
+    for x in cols:
+        if start is None:
+            start = prev = x
+        elif x - prev <= 4:
+            prev = x
+        else:
+            groups.append((start, prev))
+            start = prev = x
+    groups.append((start, prev))
+    assert len(groups) == 2, groups
+    label, chevron = groups
+    assert label[0] == 17, f"label starts at {label[0]}, reference 17"
+    assert chevron == (94, 103), f"chevron ink {chevron}, reference (94, 103)"
+    assert img.width() - 1 - chevron[1] == 19, "chevron right gap, reference 19"
+
+
+def test_carbon_tooltip_matches_the_component_reference(win, app):
+    """Background, text colour, size and caret, against design/components at 3x."""
+    from hea_calc.ui.widgets.common import CarbonToolTip
+
+    tip = CarbonToolTip()
+    screen = app.primaryScreen().availableGeometry()
+    tip.show_for(QRect(1800, 580, 32, 32), "Clear table", screen)
+    app.processEvents()
+    # reference: 102 x 28 including the caret, body #f4f4f4, text #161616, caret ~12 px x 4 px
+    assert (tip.width(), tip.height()) == (102, 28), (tip.width(), tip.height())
+    img = tip.grab().toImage().convertToFormat(QImage.Format_RGB32)
+    body = img.pixelColor(10, 10).name().lstrip("#").upper()
+    assert body == "F4F4F4", body
+    ink = [img.pixelColor(x, y).red() for y in range(3, 20) for x in range(3, 90)]
+    assert min(ink) < 60, "dark text on the inverse surface"
+    # the caret narrows the bottom rows
+    widths = {y: sum(1 for x in range(tip.width())
+                     if img.pixelColor(x, y).name().lstrip("#").upper() == "F4F4F4")
+              for y in range(tip.height() - 5, tip.height())}
+    assert widths[tip.height() - 1] < widths[tip.height() - 5], widths
+    tip.show_for(QRect(1800, 580, 32, 32), "Composition space", screen)
+    app.processEvents()
+    assert (tip.width(), tip.height()) == (154, 30), (tip.width(), tip.height())
+    tip.hide()
+
+
+def test_no_button_in_the_toolbars_carries_its_own_stylesheet(win):
+    """A widget-level sheet stops it inheriting the theme rules - the Export padding bug."""
+    for other in (win.table.delete_btn, win.table.filter_btn,
                   win.table.columns_btn, win.table.pagination.prev_btn,
                   win.table.pagination.next_btn):
         assert other.styleSheet() == "", other
+
+
+def test_install_tooltips_is_idempotent(win, app):
+    from hea_calc.ui.widgets.common import install_tooltips
+
+    install_tooltips(app)
+    install_tooltips(app)
+    assert win.table.delete_btn.toolTip() == "Clear table"
+
+
+def test_illustrations_are_cached_and_sized_from_the_svg(win):
     """The artwork renders once, at its exported size, and a theme switch must not recolour it."""
     from hea_calc.ui.theme import THEME
     from hea_calc.ui.widgets.common import illustration

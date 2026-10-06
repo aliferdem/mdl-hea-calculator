@@ -576,11 +576,10 @@ class ResultsTable(QFrame):
         self.status = QLabel("")
         self.status.setObjectName("Secondary")
         bl.addWidget(self.status, 1)
-        self.copy_btn = IconButton("copy", "Copy table (tab-separated, pastes into Excel)")
-        self.delete_btn = IconButton("trash_can", "Delete selected rows (all rows if none selected)")
+        self.delete_btn = IconButton("trash_can", "Clear table")
         self.filter_btn = IconButton("filter", "Filter results")
         self.columns_btn = IconButton("settings", "Table columns")
-        for b in (self.copy_btn, self.delete_btn, self.filter_btn, self.columns_btn):
+        for b in (self.delete_btn, self.filter_btn, self.columns_btn):
             bl.addWidget(b)
         self.export_btn = MenuButton("Export")
         self.export_btn.setProperty("kind", "secondary")
@@ -602,7 +601,6 @@ class ResultsTable(QFrame):
         self.model.modelReset.connect(self._update_empty)
         self.view.viewport().installEventFilter(self)
         self._update_empty()
-        self.copy_btn.clicked.connect(self.copy_requested.emit)
         self.delete_btn.clicked.connect(self.delete_requested.emit)
         self.filter_btn.clicked.connect(self.filter_requested.emit)
         self.columns_btn.clicked.connect(self.columns_requested.emit)

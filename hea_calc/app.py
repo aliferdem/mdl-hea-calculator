@@ -23,6 +23,10 @@ def run(argv: list[str] | None = None) -> int:
     theme = QSettings("MDL", "HEA Calculator").value("theme", "dark")
     THEME.set_theme(theme if theme in ("dark", "light") else "dark")
 
+    from .ui.widgets.common import install_tooltips
+
+    install_tooltips(app)   # the design's tooltip has a caret; Qt's own does not
+
     from .ui.main_window import MainWindow
 
     win = MainWindow()

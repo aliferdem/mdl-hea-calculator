@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import (QColor, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap, QPolygonF)
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton,
-                               QSizePolicy, QStyleOptionButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QFrame, QHBoxLayout,
+                               QLabel, QPushButton, QSizePolicy, QStyleOptionButton, QVBoxLayout,
+                               QWidget)
 
 from .. import icons
-from ..theme import (CONTROL_HEIGHT, LABEL_01, PANEL_PADDING_X, TAG_LONG_NAMES, THEME, font, t)
+from ..theme import (BODY_COMPACT_01, CONTROL_HEIGHT, LABEL_01, PANEL_PADDING_X, TAG_LONG_NAMES,
+                     THEME, font, t)
 
 
 _SUPERSCRIPTS = {"⁻": "−", "¹": "1", "²": "2", "³": "3", "⁰": "0", "⁴": "4"}
@@ -171,23 +173,194 @@ class EmptyState(QWidget):
         lay.addStretch(1)
 
 
+class CarbonToolTip(QWidget):
+    """The design's tooltip: inverse surface, 2 px radius and a caret on the anchor's edge.
+
+    Qt's native ``QToolTip`` is a plain rectangle with no caret, and the design has one -
+    ``design/components/_Tooltip body item.png`` ("Composition space") carries a downward caret
+    centred under the button, and ``Group 241.png`` (the model-support legend) a small upward
+    caret on its top edge because that tooltip opens *below* its anchor.  Measured at 3x:
+    body #f4f4f4, text #161616, radius ~2 px, caret ~12 px wide at the base tapering over ~4 px,
+    single-line body 28 px tall with the text band 6.7-16.7 px inside it.
+    """
+
+    PAD_X, PAD_Y = 16, 6
+    CARET_W, CARET_H, RADIUS = 12, 4, 2
+    GAP = 6          # distance from the anchor's edge to the tooltip body
+    WRAP = 170       # the reference's two-line tip breaks after 166 px of text
+
+    def __init__(self):
+        super().__init__(None, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint
+                         | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._lines: list[str] = [""]
+        self._below = False
+        self._caret_x = 0
+        self.setFont(font(BODY_COMPACT_01))
+
+    def text_rect(self) -> QRectF:
+        """Box holding the glyphs.  Its height follows the ink, not the line box: the reference's
+        single-line tip measures 10.3 px of ink inside a 24 px body with ~6.5 px of padding, so a
+        font-metrics line height would make the tip 7 px too tall."""
+        fm = QFontMetrics(self.font())
+        w = max((fm.horizontalAdvance(l) for l in self._lines), default=0)
+        ink = fm.tightBoundingRect(self._lines[0] if self._lines else "").height()
+        h = ink + max(0, len(self._lines) - 1) * fm.lineSpacing()
+        return QRectF(self.PAD_X, self.PAD_Y, w, h)
+
+    def body_size(self) -> QSize:
+        r = self.text_rect()
+        return QSize(int(r.width()) + 2 * self.PAD_X, int(r.height()) + 2 * self.PAD_Y)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(t("border-inverse")))
+        body = QRectF(0, 0, self.width(), self.height() - self.CARET_H)
+        p.drawRoundedRect(body, self.RADIUS, self.RADIUS)
+        cx = self._caret_x
+        if self._below:
+            base = body.bottom()
+            tri = QPolygonF([QPointF(cx - self.CARET_W / 2, base), QPointF(cx + self.CARET_W / 2, base),
+                             QPointF(cx, self.height() - 1)])
+        else:
+            tri = QPolygonF([QPointF(cx - self.CARET_W / 2, self.CARET_H),
+                             QPointF(cx + self.CARET_W / 2, self.CARET_H), QPointF(cx, 0)])
+        p.drawPolygon(tri)
+        fm = QFontMetrics(self.font())
+        p.setPen(QColor(t("text-inverse")))
+        p.setFont(self.font())
+        tight = fm.tightBoundingRect(self._lines[0] if self._lines else "")
+        y = self.PAD_Y + (tight.top() if tight.height() else fm.ascent())
+        for line in self._lines:
+            p.drawText(QPointF(self.PAD_X, y - tight.top()), line)
+            y += fm.lineSpacing()
+        p.end()
+
+    def show_for(self, anchor: QRect, text: str, screen: QRect) -> None:
+        """Place the tip above ``anchor`` (or below it if there is no room), caret on the anchor."""
+        fm = QFontMetrics(self.font())
+        lines: list[str] = []
+        for line in (text.split("\n") or [text]):
+            lines.extend(self._wrap(line, fm, self.WRAP))
+        self._lines = lines
+        size = self.body_size()
+        self.resize(size.width(), size.height() + self.CARET_H)
+        below = anchor.top() - self.GAP - self.height() < screen.top()
+        self._below = below
+        x = anchor.center().x() - self.width() // 2
+        y = anchor.top() - self.GAP - self.height() if not below else anchor.bottom() + self.GAP
+        x = max(screen.left(), min(x, screen.right() - self.width()))
+        self.move(x, y)
+        # the caret points at the anchor's centre, kept inside the body even after clamping
+        centre = anchor.center().x() - self.x()
+        self._caret_x = int(max(self.CARET_W // 2, min(self.width() - self.CARET_W // 2, centre)))
+        self.show()
+
+    @staticmethod
+    def _wrap(line: str, fm: QFontMetrics, width: int) -> list[str]:
+        out, cur = [], ""
+        for word in line.split(" "):
+            trial = f"{cur} {word}".strip()
+            if cur and fm.horizontalAdvance(trial) > width:
+                out.append(cur)
+                cur = word
+            else:
+                cur = trial
+        out.append(cur)
+        return out
+
+
+class _ToolTipFilter(QObject):
+    """Shows :class:`CarbonToolTip` for any widget with a tooltip, in place of Qt's own.
+
+    Installed once on the application, so every existing ``setToolTip`` call site keeps working and
+    a call site that clears the tooltip removes ours too.
+    """
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.app = app
+        self.tip: CarbonToolTip | None = None
+
+    def hide(self):
+        if self.tip is not None:
+            self.tip.hide()
+
+    def eventFilter(self, obj, ev):
+        if ev.type() != QEvent.Type.ToolTip:
+            return False
+        tip = obj.toolTip() if hasattr(obj, "toolTip") else ""
+        if not tip:
+            self.hide()
+            return False
+        if self.tip is None:
+            self.tip = CarbonToolTip()
+        g = obj.mapToGlobal(QPoint(0, 0))
+        rect = QRect(g.x(), g.y(), obj.width(), obj.height())
+        screen = QApplication.screenAt(g) or self.app.primaryScreen()
+        self.tip.show_for(rect, tip, screen.availableGeometry())
+        return True
+
+
+_TOOLTIP_FILTER: _ToolTipFilter | None = None
+
+
+def install_tooltips(app) -> None:
+    """Route every tooltip through :class:`CarbonToolTip` (idempotent)."""
+    global _TOOLTIP_FILTER
+    if _TOOLTIP_FILTER is None:
+        _TOOLTIP_FILTER = _ToolTipFilter(app)
+        app.installEventFilter(_TOOLTIP_FILTER)
+
+
 class MenuButton(QPushButton):
-    """A button with an attached menu whose label stays on the sheet's padding grid.
+    """A button with an attached menu: label on the padding grid, chevron painted at the right.
 
     Qt reserves the platform's menu-indicator width inside the button's contents rect, so an
     attached menu silently moves the label off the grid: on the table toolbar's Export button the
-    label rendered 4 px from the edge instead of 17 px, against `19_data_table_populated`.
-    ``::menu-indicator { width: 0 }`` does not release the reservation - only clearing ``HasMenu``
-    does.  ``setMenu`` still drives the popup, so the behaviour is unchanged.
+    label rendered 4 px from the edge instead of 17 px, against `19_data_table_populated` and
+    `21_dark_mode_fullscreen_tooltips`.  ``::menu-indicator { width: 0 }`` does not release the
+    reservation - only clearing ``HasMenu`` does - but that also removes the indicator the design
+    *does* show, so the chevron is painted here instead.
+
+    Measured on the reference's 123x32 Export button: label ink at x 17..57 and a 16 px chevron
+    whose ink is x 94..103, i.e. 16 px from the right edge.  ``setMenu`` still drives the popup.
     """
+
+    CHEVRON = 16
+    INDICATOR_PAD = 16
 
     def initStyleOption(self, option):
         super().initStyleOption(option)
         option.features &= ~QStyleOptionButton.ButtonFeature.HasMenu
 
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if not self.isEnabled():
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        size = self.CHEVRON
+        x = self.width() - self.INDICATOR_PAD - size
+        icons.paint(p, "chevron_down", QRectF(x, (self.height() - size) / 2, size, size),
+                    "icon-primary" if not self.isDown() else "icon-primary")
+        p.end()
+
 
 class IconButton(QPushButton):
-    """32 × 32 ghost icon button with a tooltip (Carbon icon-only button)."""
+    """Ghost icon-only button (Carbon icon button), painted rather than laid out by Qt.
+
+    The icon is painted centred instead of going through ``QPushButton``'s icon+label layout.
+    Qt inherits ``text-align: left`` from the sheet's base ``QPushButton`` rule, and a button
+    with no text then places its icon at the *left* edge: measured 8 px left of centre in every
+    32 × 32 button and 12.5 px in the 40 × 40 pagination buttons, in every state.  Painting here
+    also keeps hover / pressed / active / disabled and the icon colour in one place instead of
+    spread over stylesheet rules.
+    """
 
     def __init__(self, icon_name: str, tooltip: str, parent=None, token: str = "icon-primary"):
         super().__init__(parent)
@@ -199,11 +372,34 @@ class IconButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setIconSize(QSize(16, 16))
         self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
-        self.refresh_icon()
-        THEME.changed.connect(self.refresh_icon)
 
-    def refresh_icon(self, *_):
-        self.setIcon(icons.icon(self.icon_name, self.token))
+    def _size(self) -> int:
+        return 16 if min(self.width(), self.height()) >= 32 else 12
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        r = self.rect()
+        enabled = self.isEnabled()
+        bg = None
+        if not enabled:
+            bg = None
+        elif self.isDown():
+            bg = t("button-ghost-active")
+        elif self.property("active") == "true" or self.isChecked():
+            bg = t("layer-selected-01")
+        elif self.underMouse():
+            bg = t("button-ghost-hover")
+        if bg:
+            p.fillRect(r, QColor(bg))
+        token = self.token if enabled else "icon-disabled"
+        size = self._size()
+        icons.paint(p, self.icon_name, QRectF((self.width() - size) / 2, (self.height() - size) / 2,
+                                              size, size), token)
+        if enabled and self.hasFocus():
+            p.setPen(QPen(QColor(t("focus")), 2))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRect(QRectF(r).adjusted(1, 1, -1, -1))
+        p.end()
 
 
 class LineTabs(QWidget):
@@ -276,6 +472,11 @@ class _SwitchItem(QAbstractButton):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        # Measured in 21_dark_mode_fullscreen_tooltips: three contiguous 32 px segments, no gap;
+        # the selected one carries a 1 px #f4f4f4 frame over #404040 and its icon is #f4f4f4; a
+        # hovered segment is #333333 with the same bright icon; an unselected one is #212121 with a
+        # #c6c6c6 icon.  The group's own surface, outline and the hover fill are painted by
+        # IconContentSwitcher so the 1 px outline is not covered by the segments.
         if self.isChecked():
             path = QPainterPath()
             path.addRoundedRect(r, 4, 4)
@@ -284,9 +485,7 @@ class _SwitchItem(QAbstractButton):
             p.drawPath(path)
             token = "icon-primary"
         else:
-            if self._hover:
-                p.fillRect(r, QColor(t("layer-hover-01")))
-            token = "icon-secondary"
+            token = "icon-primary" if self._hover else "icon-secondary"
         if self.hasFocus():
             p.setPen(QPen(QColor(t("focus")), 2))
             p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 4, 4)
@@ -295,7 +494,13 @@ class _SwitchItem(QAbstractButton):
 
 
 class IconContentSwitcher(QFrame):
-    """Carbon icon-only content switcher (Figma 278:30258: 96 × 32, 4 px radius)."""
+    """Carbon icon-only content switcher (Figma 278:30258: 96 × 32, 4 px radius).
+
+    Paints the group's surface (#212121 in the dark theme - darker than the panel's #262626), its
+    1 px ``border-strong-02`` outline (#8d8d8d, measured on the top, bottom and right edges of
+    21_dark_mode_fullscreen_tooltips) and the hovered segment's fill; the segments themselves only
+    add the selected frame and the icons, so the outline stays visible across the open segments.
+    """
 
     changed = Signal(int)
 
@@ -314,6 +519,31 @@ class IconContentSwitcher(QFrame):
             self.items.append(it)
         self.items[0].setChecked(True)
         self.group.idClicked.connect(self._clicked)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(t("switcher-unselected")))
+        p.drawRoundedRect(r, 4, 4)
+        for i, it in enumerate(self.items):
+            if it._hover and not it.isChecked():
+                p.fillRect(QRectF(i * 32, 1, 32, self.height() - 2), QColor(t("layer-hover-01")))
+        # the outline last, without antialiasing, so its 1 px rows are crisp like the reference's
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        p.setPen(QPen(QColor(t("border-strong-02")), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(r, 4, 4)
+        p.end()
+
+    def _clicked(self, i):
+        self.update()
+        self.changed.emit(i)
+
+    def set_index(self, i: int):
+        self.items[i].setChecked(True)
+        self.update()
 
     def _clicked(self, i):
         self.update()

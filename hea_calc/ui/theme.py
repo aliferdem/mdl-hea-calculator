@@ -41,6 +41,9 @@ DARK = {
     "field-01": "#262626", "field-02": "#393939", "field-hover-02": "#474747",
     "border-subtle-00": "#393939", "border-subtle-01": "#393939", "border-subtle-02": "#525252",
     "border-strong-01": "#6f6f6f", "border-strong-02": "#8d8d8d", "border-tile": "#6f6f6f",
+    # 2 px frame of a selected periodic-table tile: white on dark (as designed), and the
+    # interactive blue on light, where a near-black frame disappears against the tile.
+    "tile-selected-border": "#f4f4f4",
     "border-interactive": "#4589ff", "border-inverse": "#f4f4f4", "border-disabled": "#393939",
     "text-primary": "#f4f4f4", "text-secondary": "#c6c6c6", "text-helper": "#a8a8a8",
     "text-placeholder": "#6f6f6f", "text-disabled": "#6f6f6f", "text-on-color": "#ffffff",
@@ -74,6 +77,7 @@ LIGHT = {
     "field-01": "#ffffff", "field-02": "#f4f4f4", "field-hover-02": "#e8e8e8",
     "border-subtle-00": "#e0e0e0", "border-subtle-01": "#e0e0e0", "border-subtle-02": "#c6c6c6",
     "border-strong-01": "#8d8d8d", "border-strong-02": "#8d8d8d", "border-tile": "#a8a8a8",
+    "tile-selected-border": "#0f62fe",
     "border-interactive": "#0f62fe", "border-inverse": "#161616", "border-disabled": "#c6c6c6",
     "text-primary": "#161616", "text-secondary": "#525252", "text-helper": "#6f6f6f",
     "text-placeholder": "#a8a8a8", "text-disabled": "#a8a8a8", "text-on-color": "#ffffff",
@@ -188,8 +192,8 @@ def stylesheet(icon_url) -> str:
 * {{ font-family: "{FONT_FAMILY}"; font-size: 14px; outline: none; }}
 QWidget {{ color: {k['text-primary']}; }}
 QMainWindow, #AppBody, #ContentScroll {{ background: {k['background']}; }}
-QToolTip {{ background: {k['border-inverse']}; color: {k['text-inverse']}; border: none; padding: 4px 8px;
-           font-size: 12px; }}
+/* Tooltips are painted by widgets/common.CarbonToolTip (installed by app.run), because the design
+   has a caret on the anchor's edge and Qt's QToolTip is a plain rectangle. */
 
 /* ---------------- panels */
 #Panel {{ background: {k['layer-01']}; }}

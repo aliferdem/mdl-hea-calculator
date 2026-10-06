@@ -22,7 +22,12 @@ class ElementTile(QAbstractButton):
     """Selectable element tile — a customised Carbon selectable Tile (29 × 29).
 
     States: rest (layer-02), hover (layer-hover-02), pressed (layer-active-02), selected (2 px
-    border-inverse frame, Figma), keyboard focus (Carbon focus ring with inset line).
+    ``tile-selected-border`` frame: #f4f4f4 in the dark theme, #0f62fe in the light one, so the
+    selected tile keeps the design's white frame on dark and the interactive blue on light),
+    keyboard focus (Carbon focus ring with inset line).
+
+    The tiles carry **no tooltip**: the element inspector below the table already shows the symbol
+    and the full name on hover, so a tile tooltip only duplicated it.
     """
 
     hovered = Signal(str)
@@ -65,7 +70,7 @@ class ElementTile(QAbstractButton):
             bg = t("layer-02")
         p.fillRect(r, QColor(bg))
         if self.isChecked():
-            pen = QPen(QColor(t("border-inverse")), 2)
+            pen = QPen(QColor(t("tile-selected-border")), 2)
             pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
             p.setPen(pen)
             p.drawRect(QRectF(r).adjusted(1, 1, -1, -1))
@@ -99,7 +104,8 @@ class PeriodicTable(QWidget):
             row, col, _cat = datasets.position(el)
             row, col = _DISPLAY_POSITION.get(el, (row, col))
             tile = ElementTile(el, self)
-            tile.setToolTip(f"{el} — {datasets.name(el)}")
+            # No tile tooltip: the element inspector already reports the symbol and the full name
+            # on hover (see ElementSelection.show_element), so a tooltip only repeated it.
             x = col * pitch
             y = row * pitch + (_FBLOCK_EXTRA_GAP - pitch if row >= 8 else 0)
             tile.move(x, y)
