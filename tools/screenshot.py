@@ -84,5 +84,22 @@ def demo(win, mode: str):
     QApplication.processEvents()
 
 
+def demo_rows(win, n: int):
+    """Append ``n`` calculated rows (an Al_x CoCrFeNi series) so the table overflows the viewport."""
+    from PySide6.QtWidgets import QApplication
+
+    names, comps = [], []
+    for i in range(n):
+        x = round(0.05 * (i + 1), 2)
+        names.append(f"Al{x:g}CoCrFeNi")
+        comps.append({"Al": x, "Co": 1, "Cr": 1, "Fe": 1, "Ni": 1})
+    rows = []
+    from hea_calc.core.results import ResultRow
+    for name, c in zip(names, comps):
+        rows.append(ResultRow(name, c, win.engine.calculate(c, **win.options()), "single", {}))
+    win._add_rows(rows, select_first=False)
+    QApplication.processEvents()
+
+
 if __name__ == "__main__":
     main()

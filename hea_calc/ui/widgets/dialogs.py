@@ -12,6 +12,7 @@ from ... import __version__
 from ...core.composition import parse_number
 from ...core.engine import DEFAULT_TCRIT_FRACTION, MODEL_KEYS, MODELS
 from ...core.results import COLUMNS, COLUMN_BY_KEY, DEFAULT_COLUMNS, ModelFilter, RangeFilter
+from .scroll import inner_scroll_area
 from .common import IconButton, button, refresh_style, set_prop
 from .details_panel import DetailsPanel
 
@@ -76,11 +77,7 @@ class Modal(QDialog):
 
 
 def scroll(inner: QWidget) -> QScrollArea:
-    sa = QScrollArea()
-    sa.setWidgetResizable(True)
-    sa.setFrameShape(QFrame.Shape.NoFrame)
-    sa.setWidget(inner)
-    return sa
+    return inner_scroll_area(inner)
 
 
 class ColumnsDialog(Modal):

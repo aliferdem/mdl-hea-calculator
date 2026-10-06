@@ -4,17 +4,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, QTimer
+from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QIcon, QKeySequence
-from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMenu,
-                               QMessageBox, QProgressBar, QScrollArea, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMenu,
+                               QMessageBox, QProgressBar, QVBoxLayout, QWidget)
 
 from ..core.engine import DEFAULT_TCRIT_FRACTION, Engine, default_engine
 from ..core.results import DEFAULT_COLUMNS, COLUMN_BY_KEY, ResultRow, table_tsv
 from ..core.spreadsheet import SpreadsheetError, export_rows, read_compositions
 from . import icons
-from .theme import (CONTENT_MARGIN_BOTTOM, CONTENT_MARGIN_TOP, CONTENT_MARGIN_X, PANEL_GAP, THEME, TOP_ROW_HEIGHT,
-                    stylesheet)
+from .theme import (COMPOSITION_PANEL_MIN, COMPOSITION_PANEL_WIDTH, CONTENT_MARGIN_BOTTOM, CONTENT_MARGIN_TOP,
+                    CONTENT_MARGIN_X, DETAILS_PANEL_MIN, DETAILS_PANEL_WIDTH, ELEMENT_PANEL_MIN, ELEMENT_PANEL_WIDTH,
+                    PANEL_GAP, THEME, TOP_ROW_HEIGHT, stylesheet)
 from .widgets.common import InlineNotification, button
 from .widgets.composition_panel import CompositionPanel
 from .widgets.details_panel import DetailsPanel
@@ -22,7 +23,10 @@ from .widgets.dialogs import (AboutDialog, AlloyDetailsDialog, ColumnsDialog, Fi
                               SettingsDialog)
 from .widgets.element_panel import ElementPanel
 from .widgets.header import AppHeader
-from .widgets.results_table import PAGE_SIZES, ResultsTable
+from .widgets.layouts import ProportionalRowLayout
+from .widgets.results_table import HEADER_HEIGHT as TABLE_HEADER_HEIGHT
+from .widgets.results_table import PAGE_SIZES, ResultsTable, StickyHeader
+from .widgets.scroll import MainScrollArea
 from .worker import CalculationWorker
 
 APP_ICON = Path(__file__).resolve().parent / "icons" / "logo_icon.ico"
@@ -84,18 +88,21 @@ class MainWindow(QMainWindow):
         content = QVBoxLayout(content_w)
         content.setContentsMargins(CONTENT_MARGIN_X, CONTENT_MARGIN_TOP, CONTENT_MARGIN_X, CONTENT_MARGIN_BOTTOM)
         content.setSpacing(PANEL_GAP)
-        top = QHBoxLayout()
-        top.setSpacing(PANEL_GAP)
+        # Upper row: the design's 596 / 457 / 787 px panels (1920 px frame) as reference widths,
+        # compressed proportionally on narrower windows (Windows 125 % / 150 %) and grown only in
+        # Calculation details on wider ones.  See responsive.distribute.
+        top = ProportionalRowLayout(spacing=PANEL_GAP)
         self.elements = ElementPanel(self.engine)
         self.composition = CompositionPanel(self.engine.data)
         self.details = DetailsPanel()
-        top.addWidget(self.elements)
-        top.addWidget(self.composition)
-        top.addWidget(self.details, 1)
+        top.add(self.elements, ELEMENT_PANEL_WIDTH, ELEMENT_PANEL_MIN, ELEMENT_PANEL_WIDTH)
+        top.add(self.composition, COMPOSITION_PANEL_WIDTH, COMPOSITION_PANEL_MIN, COMPOSITION_PANEL_WIDTH)
+        top.add(self.details, DETAILS_PANEL_WIDTH, DETAILS_PANEL_MIN, None)
         top_w = QWidget()
         top_w.setLayout(top)
-        top.setContentsMargins(0, 0, 0, 0)
         top_w.setFixedHeight(TOP_ROW_HEIGHT)
+        self.top_row = top_w
+        self.top_layout = top
         content.addWidget(top_w)
         table_col = QVBoxLayout()
         table_col.setSpacing(0)
@@ -107,17 +114,25 @@ class MainWindow(QMainWindow):
         table_col.addWidget(self.progress)
         table_col.addWidget(self.table, 1)
         content.addLayout(table_col, 1)
-        self.table.setMinimumHeight(200)
-        # Below the design's minimum content size the content area scrolls (header stays fixed);
-        # at the design size (1920 × 1000) no outer scrolling occurs.
-        content_w.setMinimumSize(2 * CONTENT_MARGIN_X + 596 + 457 + 480 + 2 * PANEL_GAP,
-                                 CONTENT_MARGIN_TOP + TOP_ROW_HEIGHT + PANEL_GAP + 200 + CONTENT_MARGIN_BOTTOM)
-        outer = QScrollArea()
-        outer.setObjectName("ContentScroll")
-        outer.setWidgetResizable(True)
-        outer.setFrameShape(QFrame.Shape.NoFrame)
-        outer.setWidget(content_w)
-        root.addWidget(outer, 1)
+        # One primary vertical scrolling context below the fixed header.  The results section
+        # is at least as tall as its current page (ResultsTable.natural_height) and otherwise fills
+        # the remaining viewport height, so with few rows nothing scrolls and with many rows the
+        # main area - never the table - scrolls.
+        self.content = content_w
+        self.scroll = MainScrollArea()
+        self.scroll.setWidget(content_w)
+        root.addWidget(self.scroll, 1)
+        self.sticky = StickyHeader(self.table.view, self.scroll.viewport())
+        # coalesced re-placement of the sticky header (owned by the window, so it dies with it)
+        self._sticky_timer = QTimer(self)
+        self._sticky_timer.setSingleShot(True)
+        self._sticky_timer.setInterval(0)
+        self._sticky_timer.timeout.connect(self._place_sticky)
+        self.scroll.verticalScrollBar().valueChanged.connect(self._place_sticky)
+        self.scroll.horizontalScrollBar().valueChanged.connect(self._place_sticky)
+        content_w.installEventFilter(self)
+        self.table.installEventFilter(self)
+        self.table.model.modelReset.connect(self._sticky_timer.start)
         self.setCentralWidget(body)
         body.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         body.setFocus()  # no control shows a focus ring until the keyboard is used
@@ -151,6 +166,61 @@ class MainWindow(QMainWindow):
         THEME.changed.connect(self.apply_theme)
         self.apply_theme()
         self._update_status()
+        # keyboard navigation in the table moves the *main* scroll area to the current row
+        self.table.view.selectionModel().currentChanged.connect(self._reveal_current_row)
+
+    # ------------------------------------------------------------------ scrolling / layout
+    def eventFilter(self, obj, ev):
+        if obj in (self.content, self.table) and ev.type() in (QEvent.Type.Resize, QEvent.Type.Move,
+                                                               QEvent.Type.LayoutRequest):
+            self._sticky_timer.start()
+        return super().eventFilter(obj, ev)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if hasattr(self, "_sticky_timer"):
+            self._sticky_timer.start()
+
+    def _place_sticky(self):
+        self.sticky.place(self.scroll.viewport())
+
+    def _reveal_current_row(self, current, _previous=None):
+        if not current.isValid():
+            return
+        view = self.table.view
+        rect = view.visualRect(current)
+        top = view.viewport().mapTo(self.content, rect.topLeft()).y()
+        vbar = self.scroll.verticalScrollBar()
+        vp_h = self.scroll.viewport().height()
+        # rows hidden under the pinned header count as hidden
+        if top - TABLE_HEADER_HEIGHT < vbar.value():
+            vbar.setValue(max(0, top - TABLE_HEADER_HEIGHT))
+        elif top + rect.height() > vbar.value() + vp_h:
+            vbar.setValue(top + rect.height() - vp_h)
+
+    def layout_report(self) -> dict:
+        """Live layout facts for tools/dpi_diagnostics.py and the DPI tests."""
+        vbar = self.table.view.verticalScrollBar()
+        hbar = self.table.view.horizontalScrollBar()
+        return {
+            "upperPanels": [self.elements.width(), self.composition.width(), self.details.width()],
+            "upperRowWidth": self.top_row.width(),
+            "contentWidth": self.content.width(), "viewportWidth": self.scroll.viewport().width(),
+            "viewportHeight": self.scroll.viewport().height(), "contentHeight": self.content.height(),
+            "horizontalOverflow": self.content.width() > self.scroll.viewport().width(),
+            "mainScrollbarVisible": self.scroll.main_scrollbar_visible(),
+            "mainScrollMaximum": self.scroll.verticalScrollBar().maximum(),
+            "tableVerticalScrollbarVisible": vbar.isVisible(),
+            "tableVerticalScrollRange": vbar.maximum() - vbar.minimum(),
+            "tableHorizontalScrollbarVisible": hbar.isVisible(),
+            "tableWidth": self.table.width(),
+            "tableColumnsSum": sum(self.table.view.header.sectionSize(i)
+                                   for i in range(self.table.view.header.count())),
+            "tableViewportWidth": self.table.view.viewport().width(),
+            "tableRowsOnPage": self.table.model.rowCount(),
+            "stickyHeaderActive": self.sticky.isVisible(),
+            "tileSize": self.elements.table.tile_size,
+        }
 
     # ------------------------------------------------------------------ menus
     def _build_menus(self):

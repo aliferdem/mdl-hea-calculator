@@ -15,12 +15,16 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFrame, QHBoxLayout
 from ...core import composition as C
 from ...core.results import (COLUMN_BY_KEY, DEFAULT_COLUMNS, ResultRow, apply_filters, format_cell, full_precision,
                              table_tsv)
-from .. import icons
-from ..theme import BODY_COMPACT_01, HEADING_COMPACT_01, THEME, font, t
+from .. import crisp, icons
+from ..responsive import distribute
+from ..theme import BODY_COMPACT_01, FOCUS_WIDTH, HAIRLINE, HEADING_COMPACT_01, THEME, font, t
 from .common import (Divider, IconButton, MenuButton, button, illustration, paint_tag, set_prop)
+from .scroll import ThinScrollBar
 
 PAGE_SIZES = (10, 20, 50, 100)
 MODEL_COL_WIDTH = 79
+ROW_HEIGHT = 32
+HEADER_HEIGHT = 32
 
 
 class ResultsModel(QAbstractTableModel):
@@ -187,11 +191,11 @@ class Delegate(QStyledItemDelegate):
         row = index.row()
         selected = bool(opt.state & QStyle.StateFlag.State_Selected)
         if selected:
-            p.fillRect(r, QColor(t("row-selected")))
+            crisp.fill_rect(p, r, t("row-selected"))
         elif row == self.view.hover_row:
-            p.fillRect(r, QColor(t("row-hover")))
-        p.setPen(QPen(QColor(t("row-border")), 1))
-        p.drawLine(r.left(), r.bottom(), r.right(), r.bottom())
+            crisp.fill_rect(p, r, t("row-hover"))
+        # row rule in device pixels: a 1 px QPen line came out 1 or 2 px tall at DPR 1.25
+        crisp.hline_bottom(p, r, t("row-border"), HAIRLINE)
         key = index.data(Qt.ItemDataRole.UserRole)
         col = COLUMN_BY_KEY[key]
         text = index.data(Qt.ItemDataRole.DisplayRole) or ""
@@ -206,8 +210,7 @@ class Delegate(QStyledItemDelegate):
             p.drawText(tr, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
                        QFontMetrics(p.font()).elidedText(text, Qt.TextElideMode.ElideRight, tr.width()))
         if opt.state & QStyle.StateFlag.State_HasFocus and self.view.hasFocus():
-            p.setPen(QPen(QColor(t("focus")), 2))
-            p.drawRect(QRectF(r).adjusted(1, 1, -1, -1))
+            crisp.frame(p, r, FOCUS_WIDTH, t("focus"))
         p.restore()
 
     def _paint_name(self, p: QPainter, r: QRect, name: str, selected: bool):
@@ -230,7 +233,7 @@ class Delegate(QStyledItemDelegate):
             x += w
 
     def sizeHint(self, opt, index):
-        return QSize(80, 32)
+        return QSize(80, ROW_HEIGHT)
 
 
 class Header(QHeaderView):
@@ -241,7 +244,7 @@ class Header(QHeaderView):
         self.m = model
         self.setSectionsClickable(True)
         self.setHighlightSections(False)
-        self.setFixedHeight(32)
+        self.setFixedHeight(HEADER_HEIGHT)
         self.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self._hover = -1
         self.setMouseTracking(True)
@@ -262,11 +265,10 @@ class Header(QHeaderView):
         p.save()
         key = self.m.keys[logical]
         col = COLUMN_BY_KEY[key]
-        p.fillRect(rect, QColor(t("layer-hover-02" if logical == self._hover else "header-row")))
+        crisp.fill_rect(p, rect, t("layer-hover-02" if logical == self._hover else "header-row"))
         # 1 px rule under the header, in the same colour as the row rules (19_data_table_populated:
         # header #393939, then a 1 px #525252 line, then the first row).
-        p.setPen(QPen(QColor(t("row-border")), 1))
-        p.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
+        crisp.hline_bottom(p, rect, t("row-border"), HAIRLINE)
         f = font(HEADING_COMPACT_01)
         p.setPen(QColor(t("text-primary")))
         doc_x = rect.left() + 16
@@ -290,7 +292,7 @@ class Header(QHeaderView):
 
     def sizeHint(self):
         s = super().sizeHint()
-        return QSize(s.width(), 32)
+        return QSize(s.width(), HEADER_HEIGHT)
 
 
 class ResultsView(QTableView):
@@ -315,6 +317,13 @@ class ResultsView(QTableView):
         self.setWordWrap(False)
         self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        # Scroll ownership: the table never scrolls vertically - it is as tall as the rows of its
+        # current page (see natural_height) and the main content area scrolls instead.  A thin
+        # horizontal bar remains as the fallback for pathological column sets only.
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBar(ThinScrollBar(Qt.Orientation.Horizontal))
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setSizeAdjustPolicy(QAbstractItemView.SizeAdjustPolicy.AdjustIgnored)
         self.header.sectionClicked.connect(lambda i: self.m.sort_by(self.m.keys[i]))
         self.doubleClicked.connect(lambda idx: self.row_activated.emit(self.m.row_at(idx.row())))
         self.clicked.connect(self._cell_clicked)
@@ -377,9 +386,27 @@ class ResultsView(QTableView):
         self.viewport().update()
         super().leaveEvent(e)
 
-    # Figma widths at 1880 px: Alloy 180, rho 133, other descriptors 157, models 79.
-    BASE_WIDTH = {"name": 180, "density": 133}
-    MIN_WIDTH = {"name": 140}
+    # Figma widths at 1880 px: Alloy 180, rho 133, other descriptors 157, models 79.  These are the
+    # reference weights; narrower tables compress every column proportionally down to its minimum
+    # (no horizontal scroll bar for the default columns at 1440 logical px = Windows 150 % on a
+    # 2160 px display), wider tables grow every column proportionally up to its maximum.
+    BASE_WIDTH = {"name": 180, "density": 133, "composition": 220}
+    MIN_WIDTH = {"name": 140, "composition": 160}
+    MODEL_MIN = 64
+    FLEX_MIN = 72
+    GROW_LIMIT = 1.6          # no column wider than 1.6 × its reference (one column never hogs the row)
+
+    def column_specs(self) -> tuple[list[int], list[int], list[int | None]]:
+        refs, mins, maxs = [], [], []
+        for k in self.m.keys:
+            if COLUMN_BY_KEY[k].kind == "model":
+                ref, mn = MODEL_COL_WIDTH, self.MODEL_MIN
+            else:
+                ref, mn = self.BASE_WIDTH.get(k, 157), self.MIN_WIDTH.get(k, self.FLEX_MIN)
+            refs.append(ref)
+            mins.append(mn)
+            maxs.append(int(ref * self.GROW_LIMIT))
+        return refs, mins, maxs
 
     def apply_widths(self):
         h = self.header
@@ -392,27 +419,39 @@ class ResultsView(QTableView):
         keys = self.m.keys
         if not keys:
             return
-        avail = self.viewport().width()
-        fixed = sum(MODEL_COL_WIDTH for k in keys if COLUMN_BY_KEY[k].kind == "model")
-        flex = [k for k in keys if COLUMN_BY_KEY[k].kind != "model"]
-        weights = {k: self.BASE_WIDTH.get(k, 157) for k in flex}
-        total_w = sum(weights.values())
-        room = max(avail - fixed, 0)
-        scale = room / total_w if total_w else 1
-        used = 0
-        for i, k in enumerate(keys):
-            if COLUMN_BY_KEY[k].kind == "model":
-                w = MODEL_COL_WIDTH
-            else:
-                w = max(int(weights[k] * scale), self.MIN_WIDTH.get(k, 72))
-                if k == flex[-1]:
-                    w = max(room - used, self.MIN_WIDTH.get(k, 72))
-                used += w
-            self.header.resizeSection(i, w)
+        refs, mins, maxs = self.column_specs()
+        widths = distribute(self.viewport().width(), refs, mins, maxs)
+        for i, w in enumerate(widths):
+            if self.header.sectionSize(i) != w:
+                self.header.resizeSection(i, w)
+        self.widths_changed.emit()
+
+    widths_changed = Signal()
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self._distribute()
+
+    def natural_height(self) -> int:
+        """Header + the rows of the current page (+ the horizontal fallback bar when shown)."""
+        rows = self.m.rowCount()
+        h = HEADER_HEIGHT + rows * ROW_HEIGHT
+        if self.horizontalScrollBar().isVisible():
+            h += self.horizontalScrollBar().sizeHint().height()
+        return h
+
+    def wheelEvent(self, e):
+        # Vertical wheel always belongs to the main content area; only a horizontal gesture (or
+        # Shift+wheel) may move the fallback horizontal bar.
+        horizontal = abs(e.angleDelta().x()) > abs(e.angleDelta().y()) or \
+            bool(e.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        hbar = self.horizontalScrollBar()
+        if horizontal and hbar.maximum() > hbar.minimum():
+            delta = e.angleDelta().x() or e.angleDelta().y()
+            hbar.setValue(hbar.value() - delta)
+            e.accept()
+            return
+        e.ignore()
 
     def _context_menu(self, pos):
         idx = self.indexAt(pos)
@@ -435,6 +474,75 @@ class ResultsView(QTableView):
             self.row_activated.emit(row)
         elif act is a4:
             self.m.remove_rows([row])
+
+
+class StickyHeader(Header):
+    """Excel-like frozen header: a synchronised clone of the table's header.
+
+    It lives in the main scroll area's viewport (a direct child, so scrolling does not move it) and
+    is shown pinned at the top of the viewport - directly under the fixed HEA header - while the
+    table's own header is scrolled out of view but rows are still visible.  It shares the table's
+    model, so labels, sort indicators and the column set are the table's own; section sizes,
+    hidden sections and the horizontal offset are copied from the table header whenever they change,
+    so it never has a geometry of its own.  Clicking a section sorts, exactly like the original.
+    """
+
+    def __init__(self, view: ResultsView, host: QWidget):
+        super().__init__(view.m, host)
+        self.view = view
+        self.setObjectName("StickyHeader")
+        self.setModel(view.m)
+        self.sectionClicked.connect(lambda i: view.m.sort_by(view.m.keys[i]))
+        src = view.header
+        src.sectionResized.connect(lambda *_: self.sync())
+        src.geometriesChanged.connect(self.sync)
+        view.widths_changed.connect(self.sync)
+        view.m.modelReset.connect(self.sync)
+        view.m.headerDataChanged.connect(lambda *_: self.viewport().update())
+        view.horizontalScrollBar().valueChanged.connect(self.setOffset)
+        self.hide()
+
+    def sync(self):
+        src = self.view.header
+        n = self.count()
+        for i in range(n):
+            self.setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
+            if i < src.count():
+                hidden = src.isSectionHidden(i)
+                if self.isSectionHidden(i) != hidden:
+                    self.setSectionHidden(i, hidden)
+                if self.sectionSize(i) != src.sectionSize(i):
+                    self.resizeSection(i, src.sectionSize(i))
+        self.setOffset(self.view.horizontalScrollBar().value())
+        self.viewport().update()
+
+    def matches_source(self) -> bool:
+        src = self.view.header
+        return self.count() == src.count() and all(
+            self.sectionSize(i) == src.sectionSize(i) and self.isSectionHidden(i) == src.isSectionHidden(i)
+            for i in range(self.count())) and self.offset() == src.offset()
+
+    def place(self, host_viewport: QWidget) -> bool:
+        """Pin or hide according to where the table currently sits in ``host_viewport``.
+
+        Returns True while the sticky header is active.
+        """
+        src = self.view.header
+        top = src.mapTo(host_viewport, QPoint(0, 0))
+        rows_bottom = top.y() + HEADER_HEIGHT + self.view.m.rowCount() * ROW_HEIGHT
+        active = top.y() < 0 and rows_bottom > HEADER_HEIGHT and src.isVisible()
+        if not active:
+            if self.isVisible():
+                self.hide()
+            return False
+        # pushed up once only the last row is left under it, so it leaves together with the table
+        y = min(0, rows_bottom - HEADER_HEIGHT - ROW_HEIGHT)
+        self.setGeometry(top.x(), y, src.width(), HEADER_HEIGHT)
+        if not self.isVisible():
+            self.sync()
+            self.show()
+        self.raise_()
+        return True
 
 
 class PaginationBar(QFrame):
@@ -513,6 +621,8 @@ class PaginationBar(QFrame):
 class TableEmptyState(QWidget):
     """Figma 289:44643 / 291:45055: empty-state illustration over the table body."""
 
+    TOP = 32
+
     def __init__(self, view: QTableView):
         super().__init__(view.viewport())
         self.view = view
@@ -531,7 +641,7 @@ class TableEmptyState(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         # Figma 289:44643 - artwork at x = 64, its exported height, title 24 px below it.
-        x, y = 64, 32
+        x, y = 64, self.TOP
         size, pm = illustration("box")
         p.drawPixmap(QRect(x, y, size.width(), size.height()), pm, QRect(pm.rect()))
         f = font(BODY_COMPACT_01)
@@ -601,6 +711,10 @@ class ResultsTable(QFrame):
         self.model.modelReset.connect(self._update_empty)
         self.view.viewport().installEventFilter(self)
         self._update_empty()
+        # natural height: toolbar + header + current page rows + pagination (no inner scrolling)
+        self.model.modelReset.connect(self.update_natural_height)
+        self.view.horizontalScrollBar().rangeChanged.connect(lambda *_: self.update_natural_height())
+        self.update_natural_height()
         self.delete_btn.clicked.connect(self.delete_requested.emit)
         self.filter_btn.clicked.connect(self.filter_requested.emit)
         self.columns_btn.clicked.connect(self.columns_requested.emit)
@@ -609,6 +723,33 @@ class ResultsTable(QFrame):
     def _theme_changed(self, *_):
         self.view.viewport().update()
         self.view.header.viewport().update()
+
+    TOOLBAR_HEIGHT = 32
+    PAGINATION_HEIGHT = 40
+
+    def empty_body_height(self) -> int:
+        """Body height that shows the whole empty-state block (artwork, title, body, margin)."""
+        size, _pm = illustration("box")
+        return TableEmptyState.TOP + size.height() + 56 + 20 + TableEmptyState.TOP
+
+    def natural_height(self) -> int:
+        view_h = self.view.natural_height()
+        if not self.model.view_rows:
+            view_h = max(view_h, HEADER_HEIGHT + self.empty_body_height())
+        return self.TOOLBAR_HEIGHT + view_h + self.PAGINATION_HEIGHT
+
+    def update_natural_height(self):
+        # The view may grow beyond this (the section fills spare viewport height so the
+        # pagination bar sits at the bottom, as in the design), but never shrinks below its rows:
+        # the main content area scrolls instead.
+        view_h = self.natural_height() - self.TOOLBAR_HEIGHT - self.PAGINATION_HEIGHT
+        self.view.setMinimumHeight(view_h)
+        self.setMinimumHeight(self.natural_height())
+        self.updateGeometry()
+
+    def internal_vertical_scrollbar_visible(self) -> bool:
+        vbar = self.view.verticalScrollBar()
+        return vbar.isVisible() or vbar.maximum() > vbar.minimum()
 
     def _update_empty(self):
         m = self.model

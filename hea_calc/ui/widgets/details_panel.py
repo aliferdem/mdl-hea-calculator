@@ -18,7 +18,8 @@ from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QScroll
 from ...core import composition as C
 from ...core.engine import MODEL_KEYS, MODELS
 from ...core.results import COLUMN_BY_KEY, ResultRow, format_number, full_precision
-from ..theme import TAG_LONG_NAMES, THEME, t
+from ..theme import DETAILS_PANEL_MIN, TAG_LONG_NAMES, THEME, t
+from .scroll import inner_scroll_area
 from .common import Illustration, LineTabs, Panel, TagLabel, button, sup_html
 
 EQ_DIR = Path(__file__).resolve().parents[1] / "equations"
@@ -103,13 +104,24 @@ class Equation(QWidget):
         data = self._src.replace("currentColor", t("text-primary"))
         self._renderer = QSvgRenderer(QByteArray(data.encode("utf-8")))
         s = self._renderer.defaultSize()
-        self.setFixedSize(QSize(int(s.width() * self.scale * 1.1), int(s.height() * self.scale * 1.1)))
+        # Natural size is the design size; a narrower Details panel (Windows 125 % / 150 %) may
+        # give it less width, and the vector equation is then drawn smaller rather than clipped.
+        self.natural = QSize(int(s.width() * self.scale * 1.1), int(s.height() * self.scale * 1.1))
+        self.setFixedHeight(self.natural.height())
+        self.setMinimumWidth(min(self.natural.width(), 120))
+        self.setMaximumWidth(self.natural.width())
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+
+    def sizeHint(self) -> QSize:
+        return getattr(self, "natural", QSize(0, 0))
 
     def paintEvent(self, _e):
         if self._renderer:
             p = QPainter(self)
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            self._renderer.render(p, QRectF(self.rect()))
+            k = min(1.0, self.width() / max(1, self.natural.width()))
+            w, h = self.natural.width() * k, self.natural.height() * k
+            self._renderer.render(p, QRectF(0, (self.height() - h) / 2, w, h))
             p.end()
 
 
@@ -176,10 +188,7 @@ class DetailsPanel(Panel):
         self.stack = QStackedWidget()
         self.pages: list[QScrollArea] = []
         for _ in self.TABS:
-            sa = QScrollArea()
-            sa.setWidgetResizable(True)
-            sa.setFrameShape(QFrame.Shape.NoFrame)
-            sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            sa = inner_scroll_area()
             self.pages.append(sa)
             self.stack.addWidget(sa)
         stack_wrap = QHBoxLayout()
@@ -190,7 +199,7 @@ class DetailsPanel(Panel):
         self.tabs.set_index(2)
         self.stack.setCurrentIndex(2)
         self.row: ResultRow | None = None
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(DETAILS_PANEL_MIN)
         self.show_row(None)
         THEME.changed.connect(self._theme_changed)
 

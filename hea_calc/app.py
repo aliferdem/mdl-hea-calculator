@@ -7,7 +7,10 @@ import sys
 
 
 def run(argv: list[str] | None = None) -> int:
-    os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
+    # High DPI: Qt 6 is per-monitor DPI aware on Windows and scales natively; nothing is forced or
+    # faked here (no QT_SCALE_FACTOR / QT_FONT_DPI, and the Qt 5 QT_ENABLE_HIGHDPI_SCALING switch is
+    # obsolete).  PassThrough - already the Qt 6 default - keeps Windows' fractional factors
+    # (1.25 / 1.5) instead of rounding them; crisp strokes are handled by ui/crisp.py.
     from PySide6.QtCore import QSettings, Qt
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtWidgets import QApplication

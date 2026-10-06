@@ -15,26 +15,89 @@ import math
 import re
 
 from PySide6.QtCore import QPointF, QTimer, Qt, Signal
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
-                               QPlainTextEdit, QRadioButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
+                               QPlainTextEdit, QRadioButton, QScrollArea, QSizePolicy, QSpacerItem, QStackedWidget,
+                               QVBoxLayout, QWidget)
 
 from ...core import composition as C
 from ...core.data import Datasets
 from ...core.expression import (ExpressionError, VariableRange, block_variables, generate_blocks,
                                  parse_blocks)
 from ...core.generation import RangeError, SweepSpec, generate_space, summarize_space
-from ..theme import t
+from .. import crisp
+from ..theme import COMPOSITION_PANEL_MIN, FOCUS_WIDTH, HAIRLINE, t
+from .scroll import own_wheel, thin_scrollbars
 from .common import (Divider, EmptyState, IconButton, IconContentSwitcher, InfoButton, Panel, button,
                      install_wheel_guard, refresh_style)
 
 COL_ELEMENT = 64
 COL_VALUE = 88
 COL_GAP = 1
+COL_LOCK = 64
 ROW_H = 32
 ROW_GAP = 1
 REP_KEYS = ("ratio", "at", "wt", "mass")
 DECIMALS = {"ratio": 4, "at": 4, "wt": 4, "mass": 5}
 SWEEP_LIMIT = 200_000
+
+
+class ColumnGrid:
+    """Column widths shared by the three composition tables (single, sweep, expression).
+
+    The design columns (element 64, value 88, lock 64 px, 1 px gaps) fit the 457 px panel.  On a
+    narrower panel (Windows 125 % / 150 %) the columns compress with the panel and the value
+    fields' horizontal text padding shrinks from 16 px towards 8 px, so a five-digit value such as
+    ``14.2857`` still fits unclipped.  Widgets opt in with a ``col_role`` property (element / value
+    / lock); :meth:`apply` re-sizes every tagged descendant of a widget.
+    """
+
+    DESIGN_PANEL = 457
+    SINGLE_SPAN = COL_ELEMENT + 4 * COL_VALUE + 4 * COL_GAP     # 420 px of the 457 px panel
+    PAD = 16
+    PAD_MIN = 8
+
+    def __init__(self):
+        self.element, self.value, self.lock, self.pad = COL_ELEMENT, COL_VALUE, COL_LOCK, self.PAD
+
+    def set_panel_width(self, width: int) -> bool:
+        avail = min(self.SINGLE_SPAN, width - (self.DESIGN_PANEL - self.SINGLE_SPAN))
+        s = avail / self.SINGLE_SPAN
+        element = max(48, round(COL_ELEMENT * s))
+        value = max(68, (avail - element - 4 * COL_GAP) // 4)
+        lock = element
+        pad = max(self.PAD_MIN, min(self.PAD, self.PAD - (COL_VALUE - value) // 2))
+        new = (element, value, lock, pad)
+        changed = new != (self.element, self.value, self.lock, self.pad)
+        self.element, self.value, self.lock, self.pad = new
+        return changed
+
+    def width_of(self, role: str) -> int:
+        return {"element": self.element, "value": self.value, "lock": self.lock}[role]
+
+    def apply(self, root: QWidget) -> None:
+        widgets = [root] + root.findChildren(QWidget)
+        for w in widgets:
+            role = w.property("col_role")
+            if not role:
+                continue
+            w.setFixedWidth(self.width_of(role))
+            if isinstance(w, Field):
+                w.set_padding(self.pad if role == "value" else 4)
+            elif isinstance(w, QLabel) and role == "value" and w.property("col_header"):
+                w.setContentsMargins(self.pad, 0, 0, 0)
+            elif isinstance(w, QRadioButton):
+                # "At. ratio" = 20 px indicator + 8 px spacing + 51 px label; below an 80 px column
+                # the spacing tightens to 4 px so the label never runs into the next radio
+                compact = self.value < 80
+                if bool(w.property("compact")) != compact:
+                    w.setProperty("compact", compact)
+                    refresh_style(w)
+
+
+def col_role(w: QWidget, role: str) -> QWidget:
+    w.setProperty("col_role", role)
+    return w
 
 
 def fmt(v: float | None, decimals: int) -> str:
@@ -44,13 +107,41 @@ def fmt(v: float | None, decimals: int) -> str:
 
 
 class Field(QLineEdit):
-    """Carbon text input (sm, 32 px) with an ``invalid`` state."""
+    """Carbon text input (sm, 32 px) with an ``invalid`` state.
+
+    Its strokes - the 1 px bottom rule, the 2 px focus frame and the 2 px invalid frame - are
+    painted in device pixels (``crisp``) rather than by QSS borders: at DPR 1.25 a QSS 1 px rule
+    rendered 1 or 2 device px depending on the field's position, and a 2 px frame 2 px on some sides
+    and 3 px on others.  The QSS only provides background, text and the hover state.
+    """
 
     def __init__(self, width: int, parent=None, cell: str = "value"):
         super().__init__(parent)
         self.setFixedSize(width, ROW_H)
         self.setProperty("cell", cell)
+        self.setProperty("crisp", True)
+        col_role(self, "element" if width == COL_ELEMENT else "value")
+        self.set_padding(4 if width == COL_ELEMENT else ColumnGrid.PAD)
         install_wheel_guard(self)
+
+    def set_padding(self, pad: int) -> None:
+        m = self.textMargins()
+        if m.left() != pad or m.right() != pad:
+            self.setTextMargins(pad, 0, pad, 0)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        p = QPainter(self)
+        r = self.rect()
+        cell = self.property("cell")
+        if self.property("invalid"):
+            crisp.frame(p, r, FOCUS_WIDTH, t("support-error"))
+        elif self.hasFocus() and not self.isReadOnly():
+            crisp.frame(p, r, FOCUS_WIDTH, t("focus"))
+        elif self.isEnabled():
+            quiet = self.isReadOnly() or cell == "element-filled"
+            crisp.hline_bottom(p, r, t("border-strong-01" if quiet else "border-strong-02"), HAIRLINE)
+        p.end()
 
     def set_invalid(self, invalid: bool, message: str = ""):
         if bool(self.property("invalid")) != invalid:
@@ -116,7 +207,9 @@ def scroll_wrap(inner: QWidget) -> QScrollArea:
     sa = QScrollArea()
     sa.setWidgetResizable(True)
     sa.setFrameShape(QFrame.Shape.NoFrame)
+    thin_scrollbars(sa)
     sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    own_wheel(sa)
     sa.setWidget(inner)
     sa.fade = FadeOverlay(sa)
     return sa
@@ -146,6 +239,7 @@ class SingleRow(QWidget):
 
 
 class SingleView(QWidget):
+    grid = ColumnGrid()          # replaced by the panel's shared grid
     changed = Signal()
     element_renamed = Signal(str, str)  # old, new
     message = Signal(str, str)          # kind, text
@@ -180,6 +274,7 @@ class SingleView(QWidget):
                                            ("wt", COL_VALUE), ("mass", COL_VALUE))):
             rb = QRadioButton(C.REPRESENTATION_LABELS[key])
             rb.setFixedSize(width, 20)
+            col_role(rb, "element" if key == "element" else "value")
             rb.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             rb.setCursor(Qt.CursorShape.PointingHandCursor)
             self.radio_group.addButton(rb, i)
@@ -211,7 +306,7 @@ class SingleView(QWidget):
         trow = QHBoxLayout()
         trow.setContentsMargins(19, 16, 0, 18)
         trow.setSpacing(COL_GAP)
-        tot_lab = QLabel("Total:")
+        tot_lab = col_role(QLabel("Total:"), "element")
         tot_lab.setFixedSize(COL_ELEMENT, ROW_H)
         tot_lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
         tot_lab.setStyleSheet("font-weight: 600;")
@@ -226,7 +321,7 @@ class SingleView(QWidget):
                 self.totals[rep] = f
                 trow.addWidget(f)
             else:
-                lab = QLabel("")
+                lab = col_role(QLabel(""), "value")
                 lab.setFixedSize(COL_VALUE, ROW_H)
                 lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.totals[rep] = lab
@@ -248,6 +343,7 @@ class SingleView(QWidget):
         for el in elements:
             if el not in self.rows:
                 row = SingleRow(el)
+                self.grid.apply(row)
                 self._wire(row)
                 self.rows[el] = row
                 self.rows_widget.insert(row)
@@ -489,22 +585,23 @@ class Toggle(QAbstractButton):
         if self.mixed:
             track = QColor(t("border-strong-01"))
         path = QPainterPath()
-        path.addRoundedRect(r, 8, 8)
+        pill = r.height() / 2           # toggle track is a pill, not the CORNER_RADIUS token
+        path.addRoundedRect(r, pill, pill)
         p.fillPath(path, track)
         knob = QRectF(r.right() - 14, 2, 12, 12) if on else QRectF(2, 2, 12, 12)
         p.setBrush(QColor("#ffffff"))
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(knob)
         if self.hasFocus():
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.setPen(QPen(QColor(t("focus")), 2))
-            p.drawRoundedRect(r.adjusted(1, 1, -1, -1), 7, 7)
+            crisp.frame(p, self.rect(), FOCUS_WIDTH, t("focus"), pill)
         p.end()
 
 
-def header_label(text: str, width: int, center: bool = False) -> QLabel:
+def header_label(text: str, width: int, center: bool = False, role: str | None = None) -> QLabel:
     c = QLabel(text)
     c.setFixedSize(width, ROW_H)
+    col_role(c, role or ("element" if width == COL_ELEMENT else "value"))
+    c.setProperty("col_header", not center)
     c.setStyleSheet("font-weight: 600;")
     if center:
         c.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -515,7 +612,7 @@ def header_label(text: str, width: int, center: bool = False) -> QLabel:
 
 # ======================================================================== composition space (sweep)
 SWEEP_MARGIN = 31  # Figma 278:17008: table starts at x = 31
-COL_LOCK = 64
+
 
 
 class SweepRow(QWidget):
@@ -534,7 +631,7 @@ class SweepRow(QWidget):
         for f, name in ((self.min, "Min"), (self.max, "Max"), (self.step, "Step")):
             f.setAccessibleName(f"{element} {name}")
             lay.addWidget(f)
-        lock_cell = QFrame()
+        lock_cell = col_role(QFrame(), "lock")
         lock_cell.setObjectName("LockCell")
         lock_cell.setFixedSize(COL_LOCK, ROW_H)
         ll = QHBoxLayout(lock_cell)
@@ -550,6 +647,7 @@ class SweepRow(QWidget):
 
 
 class SweepView(QWidget):
+    grid = ColumnGrid()
     """Composition space (Figma 278:17008): per-element ranges, Lock (required/optional), All row,
     system-size filter and live counts."""
 
@@ -572,7 +670,7 @@ class SweepView(QWidget):
         self.h_step = header_label("Step", COL_VALUE)
         for w in (self.h_min, self.h_max, self.h_step):
             head.addWidget(w)
-        head.addWidget(header_label("Lock", COL_LOCK, True))
+        head.addWidget(header_label("Lock", COL_LOCK, True, role="lock"))
         head.addStretch(1)
         hw = QWidget()
         hw.setLayout(head)
@@ -595,7 +693,7 @@ class SweepView(QWidget):
         ar = QHBoxLayout()
         ar.setContentsMargins(SWEEP_MARGIN, 12, 0, 12)
         ar.setSpacing(COL_GAP)
-        lab = QLabel("All:")
+        lab = col_role(QLabel("All:"), "element")
         lab.setFixedSize(COL_ELEMENT, ROW_H)
         lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lab.setStyleSheet("font-weight: 600;")
@@ -605,7 +703,7 @@ class SweepView(QWidget):
             f.setAccessibleName(f"All {attr}")
             f.editingFinished.connect(lambda a=attr, fld=f: self._apply_all(a, fld))
             ar.addWidget(f)
-        lc = QWidget()
+        lc = col_role(QWidget(), "lock")
         lc.setFixedSize(COL_LOCK, ROW_H)
         lcl = QHBoxLayout(lc)
         lcl.setContentsMargins(0, 0, 0, 0)
@@ -661,6 +759,7 @@ class SweepView(QWidget):
         for el in elements:
             if el not in self.rows:
                 row = SweepRow(el)
+                self.grid.apply(row)
                 if self.unit == "ratio":
                     row.min.setText("1.0")
                     row.max.setText("1.0")
@@ -841,6 +940,7 @@ EXPRESSION_HELP = (
 
 
 class ExpressionView(QWidget):
+    grid = ColumnGrid()
     """Expression mode (Figma 256:38340): multi-block expression text area, detected variables with
     Min / Max / Step, live count of valid compositions."""
 
@@ -863,11 +963,13 @@ class ExpressionView(QWidget):
         lab = QLabel("Composition expression")
         lab.setObjectName("Label01")
         lab_row.addWidget(lab)
-        lab_row.addWidget(InfoButton(EXPRESSION_HELP))
+        lab_row.addWidget(InfoButton(EXPRESSION_HELP, title="Expression syntax"))
         lab_row.addStretch(1)
         root.addLayout(lab_row)
         root.addSpacing(8)
         self.edit = QPlainTextEdit()
+        thin_scrollbars(self.edit)
+        own_wheel(self.edit)
         self.edit.setPlaceholderText("e.g. (Fe1.6CoCr0.4Mn)0.9Al0.1")
         self.edit.setFixedHeight(142)
         self.edit.setAccessibleName("Composition expression")
@@ -882,6 +984,7 @@ class ExpressionView(QWidget):
         self.helper.setObjectName("Helper")
         self.helper.setWordWrap(True)
         self.helper.setTextFormat(Qt.TextFormat.RichText)
+        self.helper.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         root.addWidget(self.helper)
         root.addSpacing(10)
         cols = QHBoxLayout()
@@ -897,6 +1000,10 @@ class ExpressionView(QWidget):
         root.addWidget(self.var_header)
         self.rows_widget = _Rows(margin=0)
         self.scroll = scroll_wrap(self.rows_widget)
+        # One variable row is the least it needs; QScrollArea's own minimum hint (76 px) made the
+        # view taller than the panel once the helper wrapped (Windows 150 %), and the layout then
+        # overlapped the helper with the expression field.
+        self.scroll.setMinimumHeight(ROW_H)
         root.addWidget(self.scroll, 1)
         self.summary = QLabel("")
         self.summary.setTextFormat(Qt.TextFormat.RichText)
@@ -915,7 +1022,15 @@ class ExpressionView(QWidget):
     def eventFilter(self, obj, ev):
         if obj is self.edit and ev.type() == ev.Type.Resize:
             self.preview_btn.move(self.edit.width() - 40, 8)
+            self._fit_helper()
         return False
+
+    def _fit_helper(self):
+        # On a narrow panel (Windows 150 %) the helper wraps to two lines; reserve that height, or the
+        # layout keeps a one-line box and the second line is drawn over the field above it.
+        w = self.edit.width()
+        if w > 0:
+            self.helper.setMinimumHeight(self.helper.heightForWidth(w))
 
     def _dirty(self):
         self._parse_timer.start()
@@ -929,6 +1044,7 @@ class ExpressionView(QWidget):
             self.expressions = []
             self._set_invalid(False)
             self.helper.setText(HELPER_TEXT)
+            self._fit_helper()
             self._set_variables([])
             self.summary.setText("")
             self.changed.emit()
@@ -939,6 +1055,7 @@ class ExpressionView(QWidget):
             self.expressions = []
             self._set_invalid(True)
             self.helper.setText(f"<span style='color:{t('text-error')}'>{exc}</span>")
+            self._fit_helper()
             self._set_variables([])
             self.summary.setText("")
             self.changed.emit()
@@ -950,6 +1067,7 @@ class ExpressionView(QWidget):
             _collect_elements(ex.items, els)
         names = block_variables(exprs)
         self.helper.setText(HELPER_TEXT)
+        self._fit_helper()
         self.detected = (len(exprs), els, names)
         self._set_variables(names)
         self.elements_parsed.emit(els)
@@ -972,6 +1090,7 @@ class ExpressionView(QWidget):
         self.var_rows = {}
         for name in names:
             row = VariableRow(name)
+            self.grid.apply(row)
             mn, mx, st = self._remembered.get(name, ("0", "1", "0.1"))
             row.min.setText(mn)
             row.max.setText(mx)
@@ -1088,7 +1207,8 @@ class CompositionPanel(Panel):
         self.unit_box.setFixedWidth(104)
         self.unit_box.hide()
         self.title_row.addWidget(self.unit_box)
-        self.title_row.addSpacing(16)
+        self.unit_gap = QSpacerItem(16, 1, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
+        self.title_row.addSpacerItem(self.unit_gap)
         self.switcher = IconContentSwitcher([("mode_single", "Single composition"),
                                              ("mode_sweep", "Composition sweep"),
                                              ("mode_expression", "Expression mode")])
@@ -1133,12 +1253,34 @@ class CompositionPanel(Panel):
         self.copy_btn.clicked.connect(self._copy_compositions)
         self.calc_btn.clicked.connect(self.calculate)
         self.switcher.changed.connect(self.set_mode)
+        for b in (self.clear_btn, self.normalize_btn, self.equal_btn, self.copy_btn, self.calc_btn):
+            b.setProperty("tip_align", "bottom")
         self.normalize_btn.setToolTip("Scale at.% or wt.% values to sum to 100 %")
         self.equal_btn.setToolTip("Equal values in the active input column")
         self.copy_btn.setToolTip("Copy the generated compositions (tab-separated)")
-        self.setFixedWidth(457)
+        self.setMinimumWidth(COMPOSITION_PANEL_MIN)
+        self.grid = ColumnGrid()
+        for v in (self.single, self.sweep, self.expr):
+            v.grid = self.grid
         self._elements: list[str] = []
         self.set_mode(0)
+
+    CALC_WIDTH = 141
+    UNIT_WIDTH = 104
+    CALC_WIDTH_MIN = 112
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if self.grid.set_panel_width(self.width()):
+            self.grid.apply(self)
+        self.calc_btn.setFixedWidth(max(self.CALC_WIDTH_MIN,
+                                        self.CALC_WIDTH - max(0, ColumnGrid.DESIGN_PANEL - self.width())))
+        # sweep header: the 104 px unit select gives up to 8 px so the title is never clipped
+        self.unit_box.setFixedWidth(self.UNIT_WIDTH - min(8, max(0, ColumnGrid.DESIGN_PANEL - self.width())))
+        gap = 16 - min(8, max(0, ColumnGrid.DESIGN_PANEL - self.width()) // 4)
+        if self.unit_gap.sizeHint().width() != gap:
+            self.unit_gap.changeSize(gap, 1, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
+            self.title_row.invalidate()
 
     @property
     def mode(self) -> str:

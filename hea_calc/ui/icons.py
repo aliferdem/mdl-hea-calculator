@@ -121,6 +121,11 @@ def file_url(name: str, token: str) -> str:
     return _FILE_URLS[key]
 
 
+def status_url(name: str) -> str:
+    """File URL of a multi-colour status icon in the current theme (for rich-text <img>)."""
+    return file_url(name, f"status@{THEME.name}")
+
+
 def clear_cache() -> None:
     _pixmaps.clear()
     _FILE_URLS.clear()

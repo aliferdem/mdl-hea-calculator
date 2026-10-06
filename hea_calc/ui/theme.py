@@ -26,11 +26,38 @@ BUTTON_HEIGHT = 40       # Carbon "md" buttons in panel footers
 FIELD_CONTENT_HEIGHT = CONTROL_HEIGHT - 1
 PANEL_TITLE_TOP = 20
 PANEL_PADDING_X = 20
-TILE_SIZE = 29
+TILE_SIZE = 29          # design tile; the periodic table shrinks it down to TILE_SIZE_MIN on narrow windows
+TILE_SIZE_MIN = 24
 TILE_GAP = 2
 ELEMENT_PANEL_WIDTH = 596
 COMPOSITION_PANEL_WIDTH = 457
+DETAILS_PANEL_WIDTH = 787
 TOP_ROW_HEIGHT = 465
+
+# Responsive upper row.  The 1920 px design frame (20 px margins and gaps) gives the reference widths
+# above; narrower windows compress the panels proportionally down to these minimums (at Windows 150 %
+# on a 2160 × 1440 display the client is 1440 logical px wide: 506 + 400 + 454 + 4 × 20 = 1440).
+# Wider windows give the extra width to Calculation details only - the periodic table and the
+# composition columns have nothing to show in extra width.
+ELEMENT_PANEL_MIN = 506      # 18 tiles of TILE_SIZE_MIN + gaps, plus 2 × 20 px padding
+COMPOSITION_PANEL_MIN = 400
+DETAILS_PANEL_MIN = 454      # the five line tabs at compact padding, plus 2 × 20 px padding
+
+# ------------------------------------------------------------------ shape tokens (shared)
+# One corner radius for every *rounded* component (tooltip, toggletip, content switcher, focus ring of
+# a rounded control).  Components the design draws square - panels, tiles, buttons, fields, table
+# cells - stay square; pills (tags, toggle track) are fully rounded by construction.
+CORNER_RADIUS = 7
+# Scroll bars: 4 px visible track/thumb inside a wider invisible hit target.
+SCROLLBAR_VISIBLE = 4
+SCROLLBAR_HIT = 12
+SCROLLBAR_MIN_THUMB = 24
+# Crisp stroke widths (logical px).  Painted through ui/crisp.py, which converts them to whole
+# device pixels once (floor, min 1) so every side of a frame is identical at fractional DPR.
+BORDER_SELECTED = 2
+FOCUS_WIDTH = 2
+TAB_UNDERLINE = 2
+HAIRLINE = 1
 
 DARK = {
     "background": "#161616", "background-hover": "#292929",
@@ -56,6 +83,7 @@ DARK = {
     "button-danger-secondary": "#ff8389", "button-danger-hover": "#b81922",
     "button-disabled": "#6f6f6f", "button-disabled-bg": "#6f6f6f", "text-on-color-disabled": "#a8a8a8",
     "focus": "#ffffff", "focus-inset": "#161616",
+    "background-inverse": "#f4f4f4",
     "support-error": "#fa4d56", "support-success": "#42be65", "support-warning": "#f1c21b",
     "support-info": "#4589ff",
     "status-green": "#24a148", "status-yellow": "#f1c21b", "status-red": "#fa4d56", "status-gray": "#8d8d8d",
@@ -90,6 +118,7 @@ LIGHT = {
     "button-danger-secondary": "#da1e28", "button-danger-hover": "#b81922",
     "button-disabled": "#a8a8a8", "button-disabled-bg": "#c6c6c6", "text-on-color-disabled": "#8d8d8d",
     "focus": "#0f62fe", "focus-inset": "#ffffff",
+    "background-inverse": "#393939",
     "support-error": "#da1e28", "support-success": "#24a148", "support-warning": "#f1c21b",
     "support-info": "#0043ce",
     "status-green": "#24a148", "status-yellow": "#f1c21b", "status-red": "#da1e28", "status-gray": "#8d8d8d",
@@ -192,8 +221,8 @@ def stylesheet(icon_url) -> str:
 * {{ font-family: "{FONT_FAMILY}"; font-size: 14px; outline: none; }}
 QWidget {{ color: {k['text-primary']}; }}
 QMainWindow, #AppBody, #ContentScroll {{ background: {k['background']}; }}
-/* Tooltips are painted by widgets/common.CarbonToolTip (installed by app.run), because the design
-   has a caret on the anchor's edge and Qt's QToolTip is a plain rectangle. */
+/* Tooltips and toggletips are painted by widgets/tooltip.py (Carbon inverse surface, caret, the
+   CORNER_RADIUS token); Qt's native QToolTip is never shown. */
 
 /* ---------------- panels */
 #Panel {{ background: {k['layer-01']}; }}
@@ -278,18 +307,17 @@ QLineEdit:read-only {{ background: transparent; border: none; border-bottom: 1px
                       color: {k['text-primary']}; }}
 QLineEdit:read-only:focus {{ border: none; border-bottom: 1px solid {k['border-strong-01']}; padding: 0px 16px; }}
 QLineEdit:disabled {{ color: {k['text-disabled']}; border-bottom: 1px solid transparent; background: transparent; }}
-QLineEdit[cell="element"] {{ font-weight: 600; background: transparent; border-bottom: 1px solid {k['border-strong-01']};
-                            qproperty-alignment: AlignCenter; padding: 0px 4px; }}
-QLineEdit[cell="element"]:read-only:focus {{ padding: 0px 4px; }}
-QLineEdit[cell="element"]:!read-only {{ background: {k['field-02']}; border-bottom: 1px solid {k['border-strong-02']}; }}
-QLineEdit[cell="element"]:!read-only:focus {{ border-top: 2px solid {k['focus']};
-                                             border-right: 2px solid {k['focus']};
-                                             border-bottom: 2px solid {k['focus']};
-                                             border-left: 2px solid {k['focus']}; padding: 0px 2px; }}
+/* Composition fields (widgets/composition_panel.Field) paint their own strokes in device pixels -
+   bottom rule, focus frame, invalid frame - so they carry no QSS border at all, in any state, and
+   their text padding is set per column through QLineEdit.setTextMargins. */
+QLineEdit[crisp="true"], QLineEdit[crisp="true"]:hover, QLineEdit[crisp="true"]:focus,
+QLineEdit[crisp="true"]:read-only, QLineEdit[crisp="true"]:read-only:focus, QLineEdit[crisp="true"]:disabled,
+QLineEdit[crisp="true"][invalid="true"], QLineEdit[crisp="true"][invalid="true"]:focus {{
+    border: none; padding: 0px; min-height: {CONTROL_HEIGHT}px; max-height: {CONTROL_HEIGHT}px; }}
+QLineEdit[cell="element"] {{ font-weight: 600; background: transparent; qproperty-alignment: AlignCenter; }}
+QLineEdit[cell="element"]:!read-only {{ background: {k['field-02']}; }}
 QLineEdit[cell="total"] {{ font-weight: 400; }}
-QLineEdit[cell="element-filled"] {{ font-weight: 600; background: {k['layer-02']}; border: none;
-                                   border-bottom: 1px solid {k['border-strong-01']}; qproperty-alignment: AlignCenter;
-                                   padding: 0px 4px; }}
+QLineEdit[cell="element-filled"] {{ font-weight: 600; background: {k['layer-02']}; qproperty-alignment: AlignCenter; }}
 #LockCell {{ border-bottom: 1px solid {k['border-strong-01']}; }}
 QPlainTextEdit[invalid="true"] {{ border: 2px solid {k['support-error']}; }}
 QPlainTextEdit, QTextEdit {{ background: {k['field-02']}; color: {k['text-primary']}; border: none;
@@ -298,6 +326,7 @@ QPlainTextEdit:focus, QTextEdit:focus {{ border: 2px solid {k['focus']}; }}
 
 /* ---------------- radio buttons / checkboxes */
 QRadioButton, QCheckBox {{ spacing: 8px; color: {k['text-primary']}; background: transparent; }}
+QRadioButton[compact="true"] {{ spacing: 4px; }}
 QRadioButton::indicator, QCheckBox::indicator {{ width: 20px; height: 20px; }}
 QRadioButton::indicator:unchecked {{ image: url({icon_url('radio', 'icon-primary')}); }}
 QRadioButton::indicator:checked {{ image: url({icon_url('radio_checked', 'icon-primary')}); }}
@@ -320,13 +349,7 @@ QComboBox QAbstractItemView {{ background: {k['layer-01']}; color: {k['text-prim
 QComboBox[field="true"] {{ background: {k['field-02']}; border-bottom: 1px solid {k['border-strong-02']};
              padding: 0px 16px; }}
 
-/* ---------------- tabs (Carbon line tabs, sm) */
-#TabButton {{ background: transparent; border: none; border-bottom: 2px solid {k['border-strong-01']};
-              color: {k['text-secondary']}; padding: 0px 16px; min-height: 32px; max-height: 32px; }}
-#TabButton:hover {{ color: {k['text-primary']}; border-bottom: 2px solid {k['border-strong-02']}; }}
-#TabButton:checked {{ color: {k['text-primary']}; font-weight: 600; border-bottom: 2px solid {k['border-interactive']}; }}
-#TabButton:focus {{ border: 2px solid {k['focus']}; }}
-#TabButton:disabled {{ color: {k['text-disabled']}; border-bottom: 2px solid {k['border-disabled']}; }}
+/* ---------------- tabs: painted by widgets/common.TabButton (crisp 2 px underline) */
 
 /* ---------------- tiles / details */
 #Tile {{ background: {k['layer-02']}; border: 1px solid {k['border-tile']}; }}
@@ -335,15 +358,19 @@ QComboBox[field="true"] {{ background: {k['field-02']}; border-bottom: 1px solid
 #KeyValueKey {{ color: {k['text-secondary']}; font-size: 12px; font-weight: 600; letter-spacing: 0.16px; }}
 #KeyValueValue {{ color: {k['text-secondary']}; font-size: 12px; letter-spacing: 0.16px; }}
 
-/* ---------------- scroll bars (thin, Carbon-like) */
+/* ---------------- scroll bars
+   Application scroll areas use widgets/scroll.ThinScrollBar (custom painted, device-pixel thumb).
+   These rules give any remaining style-drawn bar (combo popups, text areas, dialogs) the same
+   geometry: a {SCROLLBAR_VISIBLE} px visible thumb centred in a {SCROLLBAR_HIT} px hit target. */
 QScrollArea {{ background: transparent; border: none; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
-QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0px; }}
-QScrollBar::handle:vertical {{ background: {k['border-strong-01']}; min-height: 24px; border-radius: 0px;
-                               margin: 0px 2px; }}
+QScrollBar:vertical {{ background: transparent; width: {SCROLLBAR_HIT}px; margin: 0px; }}
+QScrollBar::handle:vertical {{ background: {k['border-strong-01']}; min-height: {SCROLLBAR_MIN_THUMB}px;
+                               border-radius: 0px; margin: 0px {(SCROLLBAR_HIT - SCROLLBAR_VISIBLE) // 2}px; }}
 QScrollBar::handle:vertical:hover {{ background: {k['border-strong-02']}; }}
-QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 0px; }}
-QScrollBar::handle:horizontal {{ background: {k['border-strong-01']}; min-width: 24px; margin: 2px 0px; }}
+QScrollBar:horizontal {{ background: transparent; height: {SCROLLBAR_HIT}px; margin: 0px; }}
+QScrollBar::handle:horizontal {{ background: {k['border-strong-01']}; min-width: {SCROLLBAR_MIN_THUMB}px;
+                                 margin: {(SCROLLBAR_HIT - SCROLLBAR_VISIBLE) // 2}px 0px; }}
 QScrollBar::handle:horizontal:hover {{ background: {k['border-strong-02']}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ width: 0px; height: 0px; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}

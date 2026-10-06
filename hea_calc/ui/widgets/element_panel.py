@@ -4,13 +4,17 @@ per-model data-support indicators and the element property readout."""
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
-from PySide6.QtWidgets import (QAbstractButton, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget)
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtWidgets import (QAbstractButton, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QSpacerItem, QVBoxLayout,
+                               QWidget)
 
 from ...core.data import Datasets
 from ...core.engine import MODEL_KEYS, MODELS, Engine
-from .. import icons
-from ..theme import BODY_COMPACT_01, THEME, TILE_GAP, TILE_SIZE, font, t
+from .. import crisp, icons
+from ..crisp import device_inset
+from ..responsive import distribute, tile_size_for
+from ..theme import (BODY_COMPACT_01, BORDER_SELECTED, ELEMENT_PANEL_MIN, FOCUS_WIDTH, LABEL_01, PANEL_PADDING_X, THEME,
+                     TILE_GAP, TILE_SIZE, TILE_SIZE_MIN, font, t)
 from .common import Divider, InfoButton, Panel
 
 # Figma places La and Ac at the start of the f-block rows (row 8/9, column 2).
@@ -44,7 +48,7 @@ class ElementTile(QAbstractButton):
         self.setFont(font(BODY_COMPACT_01))
 
     def sizeHint(self):
-        return QSize(TILE_SIZE, TILE_SIZE)
+        return QSize(self.width(), self.height())
 
     def enterEvent(self, e):
         self._hover = True
@@ -60,6 +64,9 @@ class ElementTile(QAbstractButton):
         self.hovered.emit(self.symbol)
 
     def paintEvent(self, _e):
+        # Background, selected frame and focus ring are painted in device pixels (ui/crisp.py):
+        # a QPen / QSS 2 px frame rasterised 2 px on some sides and 3 px on others at DPR 1.25,
+        # depending on the tile's fractional physical offset.
         p = QPainter(self)
         r = self.rect()
         if self.isDown():
@@ -68,19 +75,13 @@ class ElementTile(QAbstractButton):
             bg = t("layer-hover-02")
         else:
             bg = t("layer-02")
-        p.fillRect(r, QColor(bg))
+        crisp.fill_rect(p, r, bg)
         if self.isChecked():
-            pen = QPen(QColor(t("tile-selected-border")), 2)
-            pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
-            p.setPen(pen)
-            p.drawRect(QRectF(r).adjusted(1, 1, -1, -1))
+            crisp.frame(p, r, BORDER_SELECTED, t("tile-selected-border"))
         if self.hasFocus() and self.focusPolicy() != Qt.FocusPolicy.NoFocus:
-            pen = QPen(QColor(t("focus")), 2)
-            pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
-            p.setPen(pen)
-            p.drawRect(QRectF(r).adjusted(1, 1, -1, -1))
-            p.setPen(QPen(QColor(t("focus-inset")), 1))
-            p.drawRect(QRectF(r).adjusted(2.5, 2.5, -2.5, -2.5))
+            crisp.frame(p, r, FOCUS_WIDTH, t("focus"))
+            inset = device_inset(p, FOCUS_WIDTH)
+            crisp.frame(p, QRectF(r).adjusted(inset, inset, -inset, -inset), 1, t("focus-inset"))
         p.setPen(QColor(t("text-primary")))
         p.setFont(self.font())
         p.drawText(r, Qt.AlignmentFlag.AlignCenter, self.symbol)
@@ -98,24 +99,42 @@ class PeriodicTable(QWidget):
         self.data = datasets
         self.tiles: dict[str, ElementTile] = {}
         self.grid_pos: dict[tuple[int, int], str] = {}
-        pitch = TILE_SIZE + TILE_GAP
-        max_x = max_y = 0
         for el in datasets.elements:
             row, col, _cat = datasets.position(el)
             row, col = _DISPLAY_POSITION.get(el, (row, col))
             tile = ElementTile(el, self)
             # No tile tooltip: the element inspector already reports the symbol and the full name
             # on hover (see ElementSelection.show_element), so a tooltip only repeated it.
-            x = col * pitch
-            y = row * pitch + (_FBLOCK_EXTRA_GAP - pitch if row >= 8 else 0)
-            tile.move(x, y)
             tile.toggled.connect(lambda checked, s=el: self.toggled.emit(s, checked))
             tile.hovered.connect(self.hovered.emit)
             self.tiles[el] = tile
             self.grid_pos[(row, col)] = el
-            max_x, max_y = max(max_x, x + TILE_SIZE), max(max_y, y + TILE_SIZE)
-        self.setFixedSize(max_x, max_y)
+        self.tile_size = 0
+        self.set_tile_size(TILE_SIZE)
         THEME.changed.connect(self.update_all)
+
+    @property
+    def pitch(self) -> int:
+        return self.tile_size + TILE_GAP
+
+    def set_tile_size(self, size: int) -> None:
+        """Lay the tiles out at ``size`` px (design 29; narrower windows use down to TILE_SIZE_MIN).
+
+        Only the cell size changes - gap, typography and the f-block offset stay as designed.
+        """
+        if size == self.tile_size:
+            return
+        self.tile_size = size
+        pitch = self.pitch
+        max_x = max_y = 0
+        for (row, col), el in self.grid_pos.items():
+            x = col * pitch
+            y = row * pitch + (_FBLOCK_EXTRA_GAP - pitch if row >= 8 else 0)
+            tile = self.tiles[el]
+            tile.setFixedSize(size, size)
+            tile.move(x, y)
+            max_x, max_y = max(max_x, x + size), max(max_y, y + size)
+        self.setFixedSize(max_x, max_y)
 
     def update_all(self, *_):
         for tile in self.tiles.values():
@@ -177,13 +196,25 @@ class _StatusIcon(QWidget):
         p.end()
 
 
-SUPPORT_LEGEND = (
-    "<b>Model support</b> for the highlighted element:<br>"
-    "✔ data available from the model's source dataset<br>"
-    "⚠ computable, but a supplementary (non-source) value is used<br>"
-    "◆ depends on the partner elements (binary data exist only for pairs within the dataset)<br>"
-    "✖ required data unavailable — the model returns N/A"
+SUPPORT_LEGEND_ROWS = (
+    ("status_ok", "data available from the model\u2019s source dataset"),
+    ("status_warn", "computable, but a supplementary (non-source) value is used"),
+    ("status_pair", "depends on the partner elements (binary data exist only for pairs within the dataset)"),
+    ("status_none", "required data unavailable \u2014 the model returns N/A"),
 )
+
+
+def support_legend_html() -> str:
+    """Model-support legend for the toggletip (design/components/Group 241.png): the status icons
+    themselves, inline, each followed by ': explanation'.  Built at open time so the icons follow
+    the current theme."""
+    rows = [f"<img src='{icons.status_url(name)}' width='16' height='16' style='vertical-align: middle'>"
+            f": {text}" for name, text in SUPPORT_LEGEND_ROWS]
+    return "Model support for the highlighted element:<br>" + "<br>".join(rows)
+
+
+# Plain-text form (accessibility, tests).
+SUPPORT_LEGEND = "Model support for the highlighted element: " + "; ".join(t for _n, t in SUPPORT_LEGEND_ROWS)
 
 
 class ModelSupport(QWidget):
@@ -200,7 +231,8 @@ class ModelSupport(QWidget):
         lbl = QLabel("Model support")
         lbl.setObjectName("Label01")
         head.addWidget(lbl)
-        head.addWidget(InfoButton(SUPPORT_LEGEND))
+        # 308 px: the design component (design/components/Group 241.png, 924 px at 3x)
+        head.addWidget(InfoButton(support_legend_html, title="Model support legend", width=308))
         head.addStretch(1)
         lay.addLayout(head)
         lay.addSpacing(10)
@@ -249,6 +281,11 @@ class ElementInfo(QWidget):
         [("n<sub>ws</sub>", "n_ws", "{:.2f}", 1.0), ("r<sub>CN12</sub>", "atomic_radius_cn12", "{:.0f} pm", 1.0)],
     ]
     KEY_WIDTHS = (35, 68, 22, 31)
+    GROUP_WIDTHS = (125, 177, 107, 85)    # design (596 px panel)
+    GROUP_GAP = 20                        # after each divider; compresses to GROUP_GAP_MIN
+    GROUP_GAP_MIN = 10
+    # widest value each group must show without clipping (12 px Plex), used as the group minimum
+    WORST_VALUES = ("22.59 g cm-3", "10.00 cm3 mol-1 *", "450.0 GPa", "190 pm")
 
     def __init__(self, datasets: Datasets, parent=None):
         super().__init__(parent)
@@ -277,13 +314,16 @@ class ElementInfo(QWidget):
         row = QHBoxLayout()
         row.setSpacing(0)
         self.values: dict[str, QLabel] = {}
+        self.group_wraps: list[QWidget] = []
+        self.group_gaps: list[QSpacerItem] = []
         for gi, group in enumerate(self.GROUPS):
             if gi:
                 d = Divider(vertical=True)
                 d.setFixedHeight(44)
-                row.addSpacing(0)
                 row.addWidget(d, 0, Qt.AlignmentFlag.AlignTop)
-                row.addSpacing(20)
+                gap = QSpacerItem(self.GROUP_GAP, 1, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
+                row.addSpacerItem(gap)
+                self.group_gaps.append(gap)
             g = QGridLayout()
             g.setContentsMargins(0, 0, 0, 0)
             g.setHorizontalSpacing(0)
@@ -302,12 +342,36 @@ class ElementInfo(QWidget):
                 self.values[prop] = (v, fmt, scale)
             wrap = QWidget()
             wrap.setLayout(g)
-            wrap.setFixedWidth((125, 177, 107, 85)[gi])
+            wrap.setFixedWidth(self.GROUP_WIDTHS[gi])
             row.addWidget(wrap, 0, Qt.AlignmentFlag.AlignTop)
+            self.group_wraps.append(wrap)
         row.addStretch(1)
         lay.addLayout(row)
         lay.addStretch(1)
         self.show_element(None)
+
+    def group_minimums(self) -> list[int]:
+        fm = QFontMetrics(font(LABEL_01))
+        return [k + fm.horizontalAdvance(v) + 4 for k, v in zip(self.KEY_WIDTHS, self.WORST_VALUES)]
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.fit_groups()
+
+    def fit_groups(self):
+        """Design widths at 596 px; on a narrower panel the gaps after the dividers shrink first
+        (20 -> 10 px), then the groups compress proportionally down to their content."""
+        n_gaps = len(self.group_gaps)
+        avail = self.width() - 40 - n_gaps                     # 20 px margins, 1 px dividers
+        design = sum(self.GROUP_WIDTHS) + self.GROUP_GAP * n_gaps
+        gap = self.GROUP_GAP if avail >= design else max(
+            self.GROUP_GAP_MIN, self.GROUP_GAP - -(-(design - avail) // max(1, n_gaps)))
+        widths = distribute(avail - gap * n_gaps, self.GROUP_WIDTHS, self.group_minimums(), self.GROUP_WIDTHS)
+        for sp in self.group_gaps:
+            sp.changeSize(gap, 1, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
+        for w, wd in zip(self.group_wraps, widths):
+            w.setFixedWidth(wd)
+        self.layout().invalidate()
 
     def show_element(self, el: str | None):
         if not el:
@@ -362,7 +426,20 @@ class ElementPanel(Panel):
         self.table.hovered.connect(self._preview)
         self.table.toggled.connect(self._toggled)
         self.table.installEventFilter(self)
-        self.setFixedWidth(596)
+        self.setMinimumWidth(ELEMENT_PANEL_MIN)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.relayout()
+
+    def relayout(self):
+        """Fit the periodic table to the panel width and keep the model-support block in the gap of
+        the first three periods (columns 2-11), at its design position when the tiles are 29 px."""
+        tile = tile_size_for(self.width() - 2 * PANEL_PADDING_X, 18, TILE_GAP, TILE_SIZE, TILE_SIZE_MIN)
+        self.table.set_tile_size(tile)
+        pitch = self.table.pitch
+        x = min(3 * pitch + 1, 12 * pitch - TILE_GAP - self.support.width())
+        self.support.move(PANEL_PADDING_X + max(2 * pitch, x), 6)
 
     def _preview(self, el: str):
         self.support.show_element(el)
