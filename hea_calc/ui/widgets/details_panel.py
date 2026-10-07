@@ -196,6 +196,13 @@ class DetailsPanel(Panel):
         stack_wrap.addWidget(self.stack)
         self.root.addLayout(stack_wrap, 1)
         self.tabs.changed.connect(self.stack.setCurrentIndex)
+        # Pages are built on demand: one row's five pages are ~280 labels (measured 0.20-0.25 s to
+        # build them all), and every widget alive is re-polished on a theme switch.  Only the
+        # visible page is built when a row is shown; another is built the first time it is shown.
+        self._builder = None
+        self._built: set[int] = set()
+        self.has_results = False
+        self.stack.currentChanged.connect(self.ensure_page)
         self.tabs.set_index(2)
         self.stack.setCurrentIndex(2)
         self.row: ResultRow | None = None
@@ -225,45 +232,66 @@ class DetailsPanel(Panel):
         self.pages[i].setWidget(w)
         return lay
 
+    def ensure_page(self, i: int) -> None:
+        if self._builder is not None and 0 <= i < len(self.TABS) and i not in self._built:
+            self._built.add(i)
+            self._builder(i)
+
+    def page_widget(self, i: int) -> QWidget:
+        """Page ``i``'s content, building it if it has not been shown yet."""
+        self.ensure_page(i)
+        return self.pages[i].widget()
+
     def show_row(self, row: ResultRow | None, has_results: bool = False):
         self.row = row
+        self.has_results = has_results or row is not None
         self.print_btn.setEnabled(row is not None and row.result.ok)
         if row is None:
             self.title_suffix.setText("")
             # Figma 287:44318 (nothing calculated) and 289:44646 (results exist, none selected).
             title, body = ("No alloy to show yet", "Calculate a composition to see its details here.") \
                 if not has_results else \
-                ("No alloy selected", "Click a row in the table to see its details.")
-            for i in range(len(self.TABS)):
-                lay = self._page(i)
-                wrap = QWidget()
-                wl = QVBoxLayout(wrap)
-                wl.setContentsMargins(64, 40, 36, 0)
-                wl.setSpacing(0)
-                wl.addWidget(Illustration("document"), 0, Qt.AlignmentFlag.AlignLeft)
-                wl.addSpacing(24)
-                tt = QLabel(title)
-                tt.setStyleSheet("font-size: 20px;")
-                bd = _label(body, "Helper", wrap=False)
-                bd.setWordWrap(True)
-                bd.setMaximumWidth(420)
-                wl.addWidget(tt)
-                wl.addWidget(bd)
-                wl.addStretch(1)
-                lay.addWidget(wrap)
+                ("No alloy selected", "Double-click a row in the table to see its details.")
+            self._set_builder(lambda i: self._empty_page(i, title, body))
             return
         self.title_suffix.setText(C.name_html(row.name))
         if not row.result.ok:
-            for i in range(len(self.TABS)):
-                lay = self._page(i)
-                lay.addWidget(_label(f"<b>Calculation not possible.</b> {html.escape(row.result.error)}"))
-                lay.addStretch(1)
+            self._set_builder(lambda i: self._error_page(i, row))
             return
-        self._overview(self._page(0), row)
-        self._descriptors(self._page(1), row)
-        self._models(self._page(2), row)
-        self._model_details(self._page(3), row)
-        self._all_results(self._page(4), row)
+        builders = (self._overview, self._descriptors, self._models, self._model_details, self._all_results)
+        self._set_builder(lambda i: builders[i](self._page(i), row))
+
+    def _set_builder(self, builder) -> None:
+        for i in range(len(self.TABS)):          # drop every stale page now; rebuild lazily
+            old = self.pages[i].takeWidget()
+            if old is not None:
+                old.deleteLater()
+        self._builder = builder
+        self._built = set()
+        self.ensure_page(self.stack.currentIndex())
+
+    def _error_page(self, i: int, row: ResultRow) -> None:
+        lay = self._page(i)
+        lay.addWidget(_label(f"<b>Calculation not possible.</b> {html.escape(row.result.error)}"))
+        lay.addStretch(1)
+
+    def _empty_page(self, i: int, title: str, body: str) -> None:
+        lay = self._page(i)
+        wrap = QWidget()
+        wl = QVBoxLayout(wrap)
+        wl.setContentsMargins(64, 40, 36, 0)
+        wl.setSpacing(0)
+        wl.addWidget(Illustration("document"), 0, Qt.AlignmentFlag.AlignLeft)
+        wl.addSpacing(24)
+        tt = QLabel(title)
+        tt.setStyleSheet("font-size: 20px;")
+        bd = _label(body, "Helper", wrap=False)
+        bd.setWordWrap(True)
+        bd.setMaximumWidth(420)
+        wl.addWidget(tt)
+        wl.addWidget(bd)
+        wl.addStretch(1)
+        lay.addWidget(wrap)
 
     def _overview(self, lay: QVBoxLayout, row: ResultRow):
         res = row.result

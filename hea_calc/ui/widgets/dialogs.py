@@ -20,6 +20,11 @@ from .details_panel import DetailsPanel
 class Modal(QDialog):
     """Carbon modal: 20 px title, label, scrollable body, footer of 64 px buttons."""
 
+    def showEvent(self, e):
+        from .menu import carbonize_popups
+        carbonize_popups(self)       # content is added after __init__: done when first shown
+        super().showEvent(e)
+
     def __init__(self, title: str, label: str = "", parent=None, width: int = 640):
         super().__init__(parent)
         self.setWindowTitle(title)

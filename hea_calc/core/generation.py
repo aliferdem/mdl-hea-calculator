@@ -179,6 +179,45 @@ def _positive_grid(spec: SweepSpec, scale: int) -> list[int]:
     return [v for v in grid(spec.as_range(), scale) if v > 0]
 
 
+def _space_grids(specs: list[SweepSpec], total: float) -> tuple[int, int]:
+    for s in specs:
+        s.as_range().validate()
+    vals = [v for s in specs for v in (s.minimum, s.maximum, s.step)] + [total]
+    scale = 10 ** _decimals(*vals)
+    return scale, round(total * scale)
+
+
+def _sum_combos(grids: list[list[int]], target: int, prefix: tuple = ()):
+    """Combinations of one value per grid summing to ``target``, in lexicographic grid order
+    (the order of ``itertools.product`` filtered by the sum) without visiting the rest of the product."""
+    n = len(grids)
+    suffix_min = [sum(g[0] for g in grids[i:]) for i in range(n + 1)]
+    suffix_max = [sum(g[-1] for g in grids[i:]) for i in range(n + 1)]
+
+    def rec(i: int, rest: int, values: tuple):
+        if i == n - 1:
+            g = grids[i]
+            if g[0] <= rest <= g[-1] and _on_grid(g, rest):
+                yield values + (rest,)
+            return
+        for v in grids[i]:
+            r = rest - v
+            if r < suffix_min[i + 1]:
+                break
+            if r > suffix_max[i + 1]:
+                continue
+            yield from rec(i + 1, r, values + (v,))
+
+    if n and suffix_min[0] <= target <= suffix_max[0]:
+        yield from rec(0, target, prefix)
+
+
+def _on_grid(g: list[int], v: int) -> bool:
+    if len(g) == 1:
+        return v == g[0]
+    return (v - g[0]) % (g[1] - g[0]) == 0
+
+
 def iter_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | None = None,
                total: float = 100.0):
     """Yield compositions of the space.
@@ -186,13 +225,13 @@ def iter_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | No
     ``unit="ratio"``: every element of a system takes each positive value of its grid independently
     (cartesian product); proportional duplicates are removed. ``unit="at"``: as above but only
     combinations summing to ``total`` at.% are valid.
+
+    Duplicates can only occur inside one system: every value is positive, so two systems never
+    share an element set.  In at.% every combination of a system has the same sum, so two
+    proportional combinations are equal - at.% therefore has no duplicates at all and its valid
+    combinations are enumerated directly (``_sum_combos``) instead of filtering the product.
     """
-    for s in specs:
-        s.as_range().validate()
-    vals = [v for s in specs for v in (s.minimum, s.maximum, s.step)] + [total]
-    scale = 10 ** _decimals(*vals)
-    target = round(total * scale)
-    seen: set[tuple] = set()
+    scale, target = _space_grids(specs, total)
     from itertools import product
     from math import gcd
     for system in systems(specs, sizes):
@@ -200,30 +239,129 @@ def iter_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | No
         if any(not g for g in grids):
             continue
         names = [s.element for s in system]
+        if unit == "at":
+            for combo in _sum_combos(grids, target):
+                yield {el: v / scale for el, v in zip(names, combo)}
+            continue
+        seen: set[tuple] = set()
         for combo in product(*grids):
-            if unit == "at" and sum(combo) != target:
-                continue
-            g = 0
-            for v in combo:
-                g = gcd(g, v)
-            key = tuple(sorted(zip(names, (v // g for v in combo))))
-            if key in seen:
-                continue
-            seen.add(key)
+            g = gcd(*combo)
+            if g > 1:
+                key = tuple(v // g for v in combo)
+                if key in seen:
+                    continue
+                seen.add(key)
+            else:
+                if combo in seen:
+                    continue
+                seen.add(combo)
             yield {el: v / scale for el, v in zip(names, combo)}
 
 
-def summarize_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | None = None,
-                    limit: int = DEFAULT_LIMIT) -> SpaceSummary:
+# ---------------------------------------------------------------------- pre-flight counting
+@dataclass(frozen=True)
+class SpaceCount:
+    """Result of :func:`count_space`: ``count`` is exact unless ``exceeds`` (then ``count > stop_after``)."""
+    count: int
+    exceeds: bool
+    systems: int
+
+
+def _count_sum(grids: list[list[int]], target: int, cap: int) -> int:
+    """Number of one-value-per-grid combinations summing to ``target`` (bounded knapsack DP).
+
+    Each grid is an arithmetic progression ``a + k·s`` (k = 0..K), so the question is the number of
+    ``Σ kᵢ·sᵢ = target − Σaᵢ`` solutions; the DP runs over that remainder divided by the common gcd of
+    the steps, with sliding-window sums, and saturates at ``cap`` (all terms are non-negative)."""
+    rem = target - sum(g[0] for g in grids)
+    if rem < 0:
+        return 0
+    steps = [(g[1] - g[0]) if len(g) > 1 else 0 for g in grids]
+    from math import gcd
+    sg = 0
+    for s in steps:
+        sg = gcd(sg, s)
+    if sg == 0:
+        return 1 if rem == 0 else 0
+    if rem % sg:
+        return 0
+    R = rem // sg
+    if R > 4_000_000:                       # pathological grids: count by enumeration instead
+        n = 0
+        for _ in _sum_combos(grids, target):
+            n += 1
+            if n >= cap:
+                break
+        return n
+    dp = [0] * (R + 1)
+    dp[0] = 1
+    for g, s in zip(grids, steps):
+        if s == 0:
+            continue
+        s //= sg
+        K = len(g) - 1
+        new = [0] * (R + 1)
+        for r0 in range(min(s, R + 1)):
+            window = 0
+            idx = list(range(r0, R + 1, s))
+            for j, x in enumerate(idx):
+                window += dp[x]
+                if j > K:
+                    window -= dp[idx[j - K - 1]]
+                new[x] = window if window < cap else cap
+        dp = new
+    return min(dp[R], cap)
+
+
+def count_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | None = None,
+                stop_after: int = DEFAULT_LIMIT, total: float = 100.0, cancelled=None) -> SpaceCount:
+    """Number of compositions :func:`iter_space` yields, without materialising them.
+
+    at.%: exact, per system, by :func:`_count_sum` (no duplicates exist, see :func:`iter_space`).
+    Ratio: a system's product of ``P`` tuples holds at least ``P / min |gridᵢ|`` distinct directions
+    (a ray meets each grid at most ``|gridᵢ|`` times), so a system that alone proves the count
+    exceeds ``stop_after`` stops immediately; otherwise the product is walked with the same duplicate
+    rule as ``iter_space`` and stopped once ``stop_after`` is exceeded.
+    ``cancelled()`` (optional) is polled while walking a product; a cancelled count returns early.
+    """
+    scale, target = _space_grids(specs, total)
+    syst = systems(specs, sizes)
+    cap = stop_after + 1
     n = 0
-    truncated = False
-    for _ in iter_space(specs, unit, sizes):
-        n += 1
-        if n > limit:
-            truncated = True
-            break
+    from math import gcd, prod
+    from itertools import product
+    for system in syst:
+        grids = [_positive_grid(s, scale) for s in system]
+        if any(not g for g in grids):
+            continue
+        if unit == "at":
+            n += _count_sum(grids, target, cap - n)
+        else:
+            sizes_ = [len(g) for g in grids]
+            if prod(sizes_) // min(sizes_) >= cap - n:
+                return SpaceCount(cap, True, len(syst))
+            seen: set[tuple] = set()
+            for i, combo in enumerate(product(*grids)):
+                if cancelled is not None and not i & 0xFFF and cancelled():
+                    return SpaceCount(n, False, len(syst))
+                g = gcd(*combo)
+                key = tuple(v // g for v in combo) if g > 1 else combo
+                if key in seen:
+                    continue
+                seen.add(key)
+                n += 1
+                if n >= cap:
+                    break
+        if n >= cap:
+            return SpaceCount(cap, True, len(syst))
+    return SpaceCount(n, False, len(syst))
+
+
+def summarize_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | None = None,
+                    limit: int = DEFAULT_LIMIT, cancelled=None) -> SpaceSummary:
+    c = count_space(specs, unit, sizes, stop_after=limit, cancelled=cancelled)
     req = sum(1 for s in specs if s.required)
-    return SpaceSummary(len(specs), req, len(specs) - req, len(systems(specs, sizes)), n, truncated)
+    return SpaceSummary(len(specs), req, len(specs) - req, c.systems, c.count, c.exceeds)
 
 
 def generate_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | None = None,

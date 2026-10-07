@@ -175,25 +175,57 @@ class PeriodicTable(QWidget):
         super().keyPressEvent(e)
 
 
+STATUS_ICONS = {"pending": "status_pending", "ok": "status_ok", "warn": "status_warn", "pair": "status_pair",
+                "none": "status_none"}
+STATUS_LABELS = {"pending": "Pending", "ok": "Data available", "warn": "Supplementary data used",
+                 "pair": "Depends on partner elements", "none": "Data unavailable"}
+PENDING_TEXT = "Pending: select or hover an element to see this model\u2019s data support."
+
+
 class _StatusIcon(QWidget):
-    def __init__(self, parent=None):
+    """One model's support status - always an explicit state, never blank.
+
+    ``pending`` (no element highlighted: 03_element_empty shows the grey Carbon pending--filled icon
+    for every model) or one of the model-support results ``ok`` / ``warn`` / ``pair`` / ``none``.
+    The brief description is the Carbon tooltip on hover *and* keyboard focus, and the accessible
+    name / description for screen readers - no visible text is added.
+    """
+
+    def __init__(self, key: str = "", parent=None):
         super().__init__(parent)
+        self.key = key
         self.setFixedSize(16, 16)
-        self.status = None
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.status = "pending"
+        self.set_status("pending")
 
     def set_status(self, status: str | None, tip: str = ""):
+        status = status or "pending"
         self.status = status
+        title = MODELS[self.key].title if self.key in MODELS else self.key
+        if status == "pending":
+            tip = f"{title}\n{PENDING_TEXT}" if title else PENDING_TEXT
         self.setToolTip(tip)
+        self.setAccessibleName(f"{self.key} model support: {STATUS_LABELS[status]}")
+        self.setAccessibleDescription(tip)
         self.update()
 
     def paintEvent(self, _e):
-        if not self.status:
-            return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        name = {"ok": "status_ok", "warn": "status_warn", "pair": "status_pair", "none": "status_none"}[self.status]
-        icons.paint(p, name, QRectF(0, 0, 16, 16))
+        icons.paint(p, STATUS_ICONS[self.status], QRectF(0, 0, 16, 16))
+        if self.hasFocus():
+            from .. import crisp
+            crisp.frame(p, self.rect(), FOCUS_WIDTH, t("focus"))
         p.end()
+
+    def focusInEvent(self, e):
+        super().focusInEvent(e)
+        self.update()
+
+    def focusOutEvent(self, e):
+        super().focusOutEvent(e)
+        self.update()
 
 
 SUPPORT_LEGEND_ROWS = (
@@ -247,7 +279,7 @@ class ModelSupport(QWidget):
             m.setAlignment(Qt.AlignmentFlag.AlignCenter)
             m.setToolTip(MODELS[key].title)
             grid.addWidget(m, 0, i, Qt.AlignmentFlag.AlignCenter)
-            ic = _StatusIcon()
+            ic = _StatusIcon(key)
             grid.addWidget(ic, 1, i, Qt.AlignmentFlag.AlignCenter)
             self.icons[key] = ic
         lay.addLayout(grid)
@@ -261,7 +293,7 @@ class ModelSupport(QWidget):
     def show_element(self, element: str | None):
         if not element:
             for ic in self.icons.values():
-                ic.set_status(None)
+                ic.set_status("pending")
             return
         support = self.engine.model_support(element)
         for key, (status, text) in support.items():

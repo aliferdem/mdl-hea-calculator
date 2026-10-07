@@ -20,11 +20,15 @@ Visual specification (Carbon tooltip specs, HEA design where it customises them)
   body-01 line height 20 px;
 * caret 12 × 6 px (Carbon ``popover-caret``; measured 12 × 6 in reference 21), tip 4 px from the
   trigger (``$spacing-02``);
-* corner radius: the HEA ``CORNER_RADIUS`` token (7 px) - the HEA design's one radius for rounded
-  components;
-* placement: above the trigger by default (``tip_align`` property ``"bottom"`` places it below),
-  flipped when it would leave the screen, clamped horizontally, caret kept on the trigger's
-  centre - and dropped when the clamped body can no longer reach it;
+* corner radius ``TOOLTIP_RADIUS`` = 2 px - an intentional exception to the 7 px HEA radius,
+  measured on the HEA toggletip reference (``design/components/Group 241.png``);
+* placement (:func:`place_popover`, Carbon popover guidelines "Placement" / "Alignment"): the
+  preferred side (tooltips above, toggletips below), flipped to the opposite side and then to the
+  right / left when it would leave the screen; the body is aligned *center* (tooltips) or *start*
+  (toggletips: the HEA reference puts the caret 22 px from the body's left edge), then shifted
+  to stay on screen; the caret is computed from the trigger's screen position, independently of
+  the body, so it keeps pointing at the trigger after any shift (Carbon: "align the caret tip
+  center with the trigger button"), limited only by the rounded corners;
 * timing: Carbon React defaults, enter 100 ms, leave 300 ms; immediate on keyboard focus.
 """
 
@@ -32,16 +36,19 @@ from __future__ import annotations
 
 import time
 
+from dataclasses import dataclass
+
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPolygonF, QTextDocumentFragment
 from PySide6.QtWidgets import (QAbstractButton, QAbstractItemView, QApplication, QHeaderView, QLabel, QVBoxLayout,
                                QWidget)
 
 from .. import icons
-from ..theme import BODY_COMPACT_01, CORNER_RADIUS, FOCUS_WIDTH, THEME, font, t
+from ..theme import BODY_COMPACT_01, FOCUS_WIDTH, THEME, TOOLTIP_RADIUS, font, t
 
 CARET_W, CARET_H = 12, 6
 CARET_GAP = 4
+START_CARET_INSET = 22      # start-aligned body: caret centre 22 px from its edge (Group 241.png, 66/3)
 ENTER_DELAY_MS = 100
 LEAVE_DELAY_MS = 300
 
@@ -59,45 +66,104 @@ def _wrap(line: str, fm: QFontMetrics, width: int) -> list[str]:
     return out
 
 
-def _bubble_path(body: QRectF, radius: float, caret_x: float | None, below: bool) -> QPainterPath:
-    """Rounded body plus caret, as one path (no seam between caret and body)."""
-    path = QPainterPath()
-    path.addRoundedRect(body, radius, radius)
-    if caret_x is not None:
-        half = CARET_W / 2
-        if below:          # bubble below the anchor: caret on the top edge, pointing up
-            tri = QPolygonF([QPointF(caret_x - half, body.top() + 0.5), QPointF(caret_x + half, body.top() + 0.5),
-                             QPointF(caret_x, body.top() - CARET_H)])
-        else:              # bubble above the anchor: caret on the bottom edge, pointing down
-            tri = QPolygonF([QPointF(caret_x - half, body.bottom() - 0.5), QPointF(caret_x + half, body.bottom() - 0.5),
-                             QPointF(caret_x, body.bottom() + CARET_H)])
-        caret = QPainterPath()
-        caret.addPolygon(tri)
-        caret.closeSubpath()
-        path = path.united(caret)
-    return path
+@dataclass
+class Placement:
+    """Where a popover sits: ``pos`` (top-left of the widget, body + caret), ``side`` of the trigger
+    it is on (``top`` = above it), and ``caret`` - the caret centre along the edge facing the
+    trigger, in widget coordinates (x for top/bottom, y for left/right; None if unreachable)."""
+    pos: QPoint
+    side: str
+    caret: float | None
+
+    @property
+    def below(self) -> bool:
+        return self.side == "bottom"
+
+
+def popover_size(body: QSize, side: str) -> QSize:
+    if side in ("top", "bottom"):
+        return QSize(body.width(), body.height() + CARET_H)
+    return QSize(body.width() + CARET_H, body.height())
+
+
+def place_popover(body: QSize, anchor: QRect, screen: QRect, prefer: str = "top", align: str = "center",
+                  radius: float = TOOLTIP_RADIUS) -> Placement:
+    """Anchor-aware placement (see module docstring).  ``anchor`` and ``screen`` are global rects."""
+    opposite = {"top": "bottom", "bottom": "top", "left": "right", "right": "left"}[prefer]
+    order = [prefer, opposite] + [s for s in ("right", "left", "bottom", "top") if s not in (prefer, opposite)]
+    cx = anchor.left() + anchor.width() / 2
+    cy = anchor.top() + anchor.height() / 2
+    margin = radius + CARET_W / 2            # the caret stays on the straight part of the edge
+
+    def fit(side: str) -> tuple[bool, Placement]:
+        size = popover_size(body, side)
+        w, h = size.width(), size.height()
+        if side in ("top", "bottom"):
+            y = anchor.top() - CARET_GAP - h if side == "top" else anchor.bottom() + 1 + CARET_GAP
+            ok = screen.top() <= y and y + h - 1 <= screen.bottom()
+            if align == "start":
+                x = round(cx - START_CARET_INSET)
+            elif align == "end":
+                x = round(cx - (w - START_CARET_INSET))
+            else:
+                x = round(cx - w / 2)
+            x = max(screen.left(), min(x, screen.right() - w + 1))
+            y = max(screen.top(), min(y, screen.bottom() - h + 1))
+            c = cx - x
+            caret = min(max(c, margin), w - margin) if -CARET_W / 2 <= c <= w + CARET_W / 2 else None
+            return ok, Placement(QPoint(x, y), side, None if caret is None else round(caret))
+        x = anchor.right() + 1 + CARET_GAP if side == "right" else anchor.left() - CARET_GAP - w
+        ok = screen.left() <= x and x + w - 1 <= screen.right()
+        y = round(cy - h / 2)
+        y = max(screen.top(), min(y, screen.bottom() - h + 1))
+        x = max(screen.left(), min(x, screen.right() - w + 1))
+        c = cy - y
+        caret = min(max(c, margin), h - margin) if -CARET_W / 2 <= c <= h + CARET_W / 2 else None
+        return ok, Placement(QPoint(x, y), side, None if caret is None else round(caret))
+
+    for side in order:
+        ok, placement = fit(side)
+        if ok:
+            return placement
+    return fit(prefer)[1]
 
 
 def place_bubble(size: QSize, anchor: QRect, screen: QRect, prefer_below: bool) -> tuple[QPoint, bool, int | None]:
-    """Top-left of a bubble (body + caret) of ``size``, whether it sits below the anchor, and the
-    caret's x inside the bubble (None when the clamped body cannot reach the anchor's centre)."""
+    """Compatibility wrapper: centre-aligned, vertical placement of a bubble of ``size`` (with caret)."""
+    pl = place_popover(QSize(size.width(), size.height() - CARET_H), anchor, screen,
+                       "bottom" if prefer_below else "top")
+    return pl.pos, pl.below, pl.caret
+
+
+def body_rect(size: QSize, side: str) -> QRectF:
     w, h = size.width(), size.height()
-    above_y = anchor.top() - CARET_GAP - h
-    below_y = anchor.bottom() + 1 + CARET_GAP
-    below = prefer_below
-    if below and below_y + h - 1 > screen.bottom() and above_y >= screen.top():
-        below = False
-    elif not below and above_y < screen.top() and below_y + h - 1 <= screen.bottom():
-        below = True
-    y = below_y if below else above_y
-    y = max(screen.top(), min(y, screen.bottom() - h + 1))
-    centre = anchor.left() + anchor.width() / 2
-    x = round(centre - w / 2)
-    x = max(screen.left(), min(x, screen.right() - w + 1))
-    cx = centre - x
-    margin = CORNER_RADIUS + CARET_W / 2       # keep the caret on the straight part of the edge
-    caret = int(round(cx)) if margin <= cx <= w - margin else None
-    return QPoint(x, y), below, caret
+    return {"top": QRectF(0, 0, w, h - CARET_H), "bottom": QRectF(0, CARET_H, w, h - CARET_H),
+            "right": QRectF(CARET_H, 0, w - CARET_H, h), "left": QRectF(0, 0, w - CARET_H, h)}[side]
+
+
+def bubble_path(body: QRectF, radius: float, caret: float | None, side: str) -> QPainterPath:
+    """Rounded body plus caret pointing at the trigger, as one path (no seam)."""
+    path = QPainterPath()
+    path.addRoundedRect(body, radius, radius)
+    if caret is not None:
+        half = CARET_W / 2
+        if side == "bottom":       # bubble below the trigger: caret on the top edge, pointing up
+            pts = [QPointF(caret - half, body.top() + 0.5), QPointF(caret + half, body.top() + 0.5),
+                   QPointF(caret, body.top() - CARET_H)]
+        elif side == "top":        # bubble above: caret on the bottom edge, pointing down
+            pts = [QPointF(caret - half, body.bottom() - 0.5), QPointF(caret + half, body.bottom() - 0.5),
+                   QPointF(caret, body.bottom() + CARET_H)]
+        elif side == "right":      # bubble right of the trigger: caret on the left edge, pointing left
+            pts = [QPointF(body.left() + 0.5, caret - half), QPointF(body.left() + 0.5, caret + half),
+                   QPointF(body.left() - CARET_H, caret)]
+        else:
+            pts = [QPointF(body.right() - 0.5, caret - half), QPointF(body.right() - 0.5, caret + half),
+                   QPointF(body.right() + CARET_H, caret)]
+        tri = QPainterPath()
+        tri.addPolygon(QPolygonF(pts))
+        tri.closeSubpath()
+        path = path.united(tri)
+    return path
 
 
 class CarbonToolTip(QWidget):
@@ -109,7 +175,7 @@ class CarbonToolTip(QWidget):
     MAX_SINGLE = 208          # Carbon single-line container max-width
     MAX_MULTI = 288           # Carbon multi-line container max-width
     LINE_MULTI = 20           # body-01 line height for multi-line tooltips
-    CARET_W, CARET_H, GAP, RADIUS = CARET_W, CARET_H, CARET_GAP, CORNER_RADIUS
+    CARET_W, CARET_H, GAP, RADIUS = CARET_W, CARET_H, CARET_GAP, TOOLTIP_RADIUS
 
     def __init__(self):
         super().__init__(None, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint
@@ -120,14 +186,21 @@ class CarbonToolTip(QWidget):
         self.setFont(font(BODY_COMPACT_01))
         self._lines: list[str] = [""]
         self._multi = False
-        self._below = False
-        self._caret_x: int | None = None
+        self.placement = Placement(QPoint(), "top", None)
         self.anchor = QRect()
         self.text = ""
 
     @property
     def _caret(self) -> bool:
-        return self._caret_x is not None
+        return self.placement.caret is not None
+
+    @property
+    def _below(self) -> bool:
+        return self.placement.below
+
+    @property
+    def _caret_x(self) -> int | None:
+        return self.placement.caret if self.placement.side in ("top", "bottom") else None
 
     def layout_text(self, text: str) -> QSize:
         """Wrap ``text`` and return the body size (without caret)."""
@@ -151,24 +224,22 @@ class CarbonToolTip(QWidget):
         self.text = text
         self.anchor = QRect(anchor)
         body = self.layout_text(text)
-        size = QSize(body.width(), body.height() + CARET_H)
-        self.resize(size)
-        pos, self._below, self._caret_x = place_bubble(size, anchor, screen, below)
-        self.move(pos)
+        self.placement = place_popover(body, anchor, screen, "bottom" if below else "top", "center")
+        self.resize(popover_size(body, self.placement.side))
+        self.move(self.placement.pos)
         self.setAccessibleName(text)
         self.show()
         self.update()
 
     def body_rect(self) -> QRectF:
-        if self._below:
-            return QRectF(0, CARET_H, self.width(), self.height() - CARET_H)
-        return QRectF(0, 0, self.width(), self.height() - CARET_H)
+        return body_rect(self.size(), self.placement.side)
 
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         body = self.body_rect()
-        p.fillPath(_bubble_path(body, CORNER_RADIUS, self._caret_x, self._below), QColor(t("background-inverse")))
+        p.fillPath(bubble_path(body, TOOLTIP_RADIUS, self.placement.caret, self.placement.side),
+                   QColor(t("background-inverse")))
         p.setPen(QColor(t("text-inverse")))
         p.setFont(self.font())
         fm = QFontMetrics(self.font())
@@ -179,7 +250,7 @@ class CarbonToolTip(QWidget):
         for line in self._lines:
             # centre the 14 px font's ascent+descent inside the line box
             base = y + (line_h - fm.height()) / 2 + fm.ascent()
-            p.drawText(QPointF(pad_x, base), line)
+            p.drawText(QPointF(body.left() + pad_x, base), line)
             y += line_h
         p.end()
 
@@ -347,7 +418,10 @@ def controller() -> ToolTipController | None:
 
 # ==================================================================================== toggletip
 class Toggletip(QWidget):
-    """Carbon toggletip popover: inverse surface, 16 px padding, caret on the trigger, max 288 px.
+    """Carbon toggletip popover: inverse surface, 16 px padding, 2 px corners, caret on the trigger.
+
+    Start-aligned below the trigger (HEA reference: caret 22 px from the body's left edge), with the
+    general collision handling of :func:`place_popover`.
 
     A ``Qt.Popup`` window, so a click anywhere outside closes it (Carbon), and ``Esc`` closes it;
     on close, focus returns to the trigger.  Content is rich text (status icons inline, as in the
@@ -365,8 +439,6 @@ class Toggletip(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setAccessibleName(title or "More information")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self._below = True
-        self._caret_x: int | None = None
         self.max_w = width or self.MAX_W
         lay = QVBoxLayout(self)
         self.label = QLabel(html)
@@ -379,21 +451,32 @@ class Toggletip(QWidget):
         self.label.setFixedWidth(self.max_w - 2 * self.PAD)
         lay.addWidget(self.label)
         body_h = self.label.heightForWidth(self.label.width())
-        size = QSize(self.max_w, body_h + 2 * self.PAD + CARET_H)
+        body = QSize(self.max_w, body_h + 2 * self.PAD)
         g = anchor.mapToGlobal(QPoint(0, 0))
         screen = (QApplication.screenAt(g) or QApplication.primaryScreen()).availableGeometry()
-        pos, self._below, self._caret_x = place_bubble(size, QRect(g, anchor.size()), screen, True)
-        top = CARET_H if self._below else 0
-        lay.setContentsMargins(self.PAD, self.PAD + top, self.PAD, self.PAD + (CARET_H - top))
-        self.setFixedSize(size)
-        self.move(pos)
+        self.placement = place_popover(body, QRect(g, anchor.size()), screen, "bottom", "start")
+        side = self.placement.side
+        lay.setContentsMargins(self.PAD + (CARET_H if side == "right" else 0),
+                               self.PAD + (CARET_H if side == "bottom" else 0),
+                               self.PAD + (CARET_H if side == "left" else 0),
+                               self.PAD + (CARET_H if side == "top" else 0))
+        self.setFixedSize(popover_size(body, side))
+        self.move(self.placement.pos)
+
+    @property
+    def _below(self) -> bool:
+        return self.placement.below
+
+    @property
+    def _caret_x(self) -> int | None:
+        return self.placement.caret if self.placement.side in ("top", "bottom") else None
 
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        body = QRectF(0, CARET_H, self.width(), self.height() - CARET_H) if self._below else \
-            QRectF(0, 0, self.width(), self.height() - CARET_H)
-        p.fillPath(_bubble_path(body, CORNER_RADIUS, self._caret_x, self._below), QColor(t("background-inverse")))
+        body = body_rect(self.size(), self.placement.side)
+        p.fillPath(bubble_path(body, TOOLTIP_RADIUS, self.placement.caret, self.placement.side),
+                   QColor(t("background-inverse")))
         p.end()
 
     def keyPressEvent(self, e):
@@ -432,7 +515,10 @@ class InfoButton(QAbstractButton):
         self.setAccessibleDescription("Opens an explanation; press Escape to close it.")
         self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.clicked.connect(self.toggle)
-        THEME.changed.connect(lambda *_: self.update())
+        THEME.changed.connect(self._theme_changed)   # bound: auto-disconnected on deletion
+
+    def _theme_changed(self, *_):
+        self.update()
 
     def is_open(self) -> bool:
         try:

@@ -5,13 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QIcon, QKeySequence
-from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMenu,
-                               QMessageBox, QProgressBar, QVBoxLayout, QWidget)
+from PySide6.QtGui import QActionGroup, QGuiApplication, QIcon
+from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
+                               QProgressBar, QVBoxLayout, QWidget)
 
 from ..core.engine import DEFAULT_TCRIT_FRACTION, Engine, default_engine
+from ..core.jobs import CalculationJob, CalculationService, JobInput
 from ..core.results import DEFAULT_COLUMNS, COLUMN_BY_KEY, ResultRow, table_tsv
 from ..core.spreadsheet import SpreadsheetError, export_rows, read_compositions
+from ..core.store import StoredRow
 from . import icons
 from .theme import (COMPOSITION_PANEL_MIN, COMPOSITION_PANEL_WIDTH, CONTENT_MARGIN_BOTTOM, CONTENT_MARGIN_TOP,
                     CONTENT_MARGIN_X, DETAILS_PANEL_MIN, DETAILS_PANEL_WIDTH, ELEMENT_PANEL_MIN, ELEMENT_PANEL_WIDTH,
@@ -23,11 +25,11 @@ from .widgets.dialogs import (AboutDialog, AlloyDetailsDialog, ColumnsDialog, Fi
                               SettingsDialog)
 from .widgets.element_panel import ElementPanel
 from .widgets.header import AppHeader
-from .widgets.layouts import ProportionalRowLayout
-from .widgets.results_table import HEADER_HEIGHT as TABLE_HEADER_HEIGHT
+from .widgets.layouts import UpperPanels
+from .widgets.menu import CarbonMenu, carbonize_popups
 from .widgets.results_table import PAGE_SIZES, ResultsTable, StickyHeader
 from .widgets.scroll import MainScrollArea
-from .worker import CalculationWorker
+from .worker import JobRunner
 
 APP_ICON = Path(__file__).resolve().parent / "icons" / "logo_icon.ico"
 
@@ -66,7 +68,9 @@ class MainWindow(QMainWindow):
         self.annealing: float | None = self.settings.value("annealing", None, float) if self.settings.contains(
             "annealing") else None
         self.fraction = float(self.settings.value("tcrit_fraction", DEFAULT_TCRIT_FRACTION))
-        self.worker: CalculationWorker | None = None
+        # CPU-bound batches run in worker processes (core/jobs.py); the runner feeds the table at 10 Hz
+        self.jobs = CalculationService()
+        QApplication.instance().aboutToQuit.connect(self.jobs.shutdown)   # also when quit without a close
         self._first_new = 0
         self.setWindowTitle("HEA Calculator")
         if APP_ICON.exists():
@@ -88,28 +92,29 @@ class MainWindow(QMainWindow):
         content = QVBoxLayout(content_w)
         content.setContentsMargins(CONTENT_MARGIN_X, CONTENT_MARGIN_TOP, CONTENT_MARGIN_X, CONTENT_MARGIN_BOTTOM)
         content.setSpacing(PANEL_GAP)
-        # Upper row: the design's 596 / 457 / 787 px panels (1920 px frame) as reference widths,
+        # Upper area: the design's 596 / 457 / 787 px panels (1920 px frame) as reference widths,
         # compressed proportionally on narrower windows (Windows 125 % / 150 %) and grown only in
-        # Calculation details on wider ones.  See responsive.distribute.
-        top = ProportionalRowLayout(spacing=PANEL_GAP)
+        # Calculation details on wider ones (responsive.distribute).  Once the three no longer fit at
+        # their minimum widths, Details moves below the other two (widgets/layouts.UpperPanels).
         self.elements = ElementPanel(self.engine)
         self.composition = CompositionPanel(self.engine.data)
         self.details = DetailsPanel()
-        top.add(self.elements, ELEMENT_PANEL_WIDTH, ELEMENT_PANEL_MIN, ELEMENT_PANEL_WIDTH)
-        top.add(self.composition, COMPOSITION_PANEL_WIDTH, COMPOSITION_PANEL_MIN, COMPOSITION_PANEL_WIDTH)
-        top.add(self.details, DETAILS_PANEL_WIDTH, DETAILS_PANEL_MIN, None)
-        top_w = QWidget()
-        top_w.setLayout(top)
-        top_w.setFixedHeight(TOP_ROW_HEIGHT)
+        top_w = UpperPanels([(self.elements, ELEMENT_PANEL_WIDTH, ELEMENT_PANEL_MIN, ELEMENT_PANEL_WIDTH),
+                             (self.composition, COMPOSITION_PANEL_WIDTH, COMPOSITION_PANEL_MIN,
+                              COMPOSITION_PANEL_WIDTH),
+                             (self.details, DETAILS_PANEL_WIDTH, DETAILS_PANEL_MIN, None)],
+                            TOP_ROW_HEIGHT, PANEL_GAP)
         self.top_row = top_w
-        self.top_layout = top
         content.addWidget(top_w)
         table_col = QVBoxLayout()
         table_col.setSpacing(0)
         self.notification = InlineNotification()
         self.progress = ProgressBanner()
         self.progress.cancel.clicked.connect(self.cancel_calculation)
-        self.table = ResultsTable()
+        self.table = ResultsTable(engine=self.engine)
+        self.runner = JobRunner(self.jobs, self.table.model, self)
+        self.runner.progress.connect(self._progress)
+        self.runner.finished.connect(self._done)
         table_col.addWidget(self.notification)
         table_col.addWidget(self.progress)
         table_col.addWidget(self.table, 1)
@@ -132,7 +137,7 @@ class MainWindow(QMainWindow):
         self.scroll.horizontalScrollBar().valueChanged.connect(self._place_sticky)
         content_w.installEventFilter(self)
         self.table.installEventFilter(self)
-        self.table.model.modelReset.connect(self._sticky_timer.start)
+        self.table.model.page_changed.connect(self._sticky_timer.start)
         self.setCentralWidget(body)
         body.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         body.setFocus()  # no control shows a focus ring until the keyboard is used
@@ -146,16 +151,17 @@ class MainWindow(QMainWindow):
         self.composition.calculate_requested.connect(self.calculate)
         self.composition.message.connect(self.notify)
         self.composition.copy_compositions.connect(self._copy_generated)
-        # table
-        self.table.view.row_selected.connect(self.details.show_row)
-        self.table.view.row_activated.connect(self.open_details)
-        self.table.view.cell_info.connect(self.table.status.setText)
+        self.composition.set_service(self.jobs)
+        # table: double click -> embedded details; row menu -> separate details window
+        self.table.view.details_requested.connect(self.show_details)
+        self.table.view.window_requested.connect(self.open_details)
+        self.table.view.rows_removed.connect(self._check_details)
         self.table.delete_requested.connect(self.delete_rows)
         self.table.filter_requested.connect(self.edit_filters)
         self.table.columns_requested.connect(self.edit_columns)
         self.table.copy_requested.connect(self.copy_table)
         self.table.export_requested.connect(self.export)
-        self.table.model.modelReset.connect(self._check_details)
+        self.table.model.page_changed.connect(self._check_details)
         # restore table preferences
         cols = self.settings.value("columns", None)
         if isinstance(cols, list) and all(c in COLUMN_BY_KEY for c in cols) and "name" in cols:
@@ -163,11 +169,10 @@ class MainWindow(QMainWindow):
         size = int(self.settings.value("page_size", 100))
         if size in PAGE_SIZES:
             self.table.pagination.size_box.setCurrentIndex(PAGE_SIZES.index(size))
+        carbonize_popups(self)       # text-field context menus and dropdown lists use the Carbon popups
         THEME.changed.connect(self.apply_theme)
         self.apply_theme()
         self._update_status()
-        # keyboard navigation in the table moves the *main* scroll area to the current row
-        self.table.view.selectionModel().currentChanged.connect(self._reveal_current_row)
 
     # ------------------------------------------------------------------ scrolling / layout
     def eventFilter(self, obj, ev):
@@ -184,20 +189,6 @@ class MainWindow(QMainWindow):
     def _place_sticky(self):
         self.sticky.place(self.scroll.viewport())
 
-    def _reveal_current_row(self, current, _previous=None):
-        if not current.isValid():
-            return
-        view = self.table.view
-        rect = view.visualRect(current)
-        top = view.viewport().mapTo(self.content, rect.topLeft()).y()
-        vbar = self.scroll.verticalScrollBar()
-        vp_h = self.scroll.viewport().height()
-        # rows hidden under the pinned header count as hidden
-        if top - TABLE_HEADER_HEIGHT < vbar.value():
-            vbar.setValue(max(0, top - TABLE_HEADER_HEIGHT))
-        elif top + rect.height() > vbar.value() + vp_h:
-            vbar.setValue(top + rect.height() - vp_h)
-
     def layout_report(self) -> dict:
         """Live layout facts for tools/dpi_diagnostics.py and the DPI tests."""
         vbar = self.table.view.verticalScrollBar()
@@ -205,6 +196,7 @@ class MainWindow(QMainWindow):
         return {
             "upperPanels": [self.elements.width(), self.composition.width(), self.details.width()],
             "upperRowWidth": self.top_row.width(),
+            "detailsStacked": self.top_row.stacked,
             "contentWidth": self.content.width(), "viewportWidth": self.scroll.viewport().width(),
             "viewportHeight": self.scroll.viewport().height(), "contentHeight": self.content.height(),
             "horizontalOverflow": self.content.width() > self.scroll.viewport().width(),
@@ -224,29 +216,25 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ menus
     def _build_menus(self):
-        self.file_menu = QMenu(self)
-        a = self.file_menu.addAction("Import compositions…", self.import_compositions)
-        a.setShortcut(QKeySequence("Ctrl+O"))
-        exp = self.file_menu.addMenu("Export results")
-        exp.addAction("Excel workbook (.xlsx)…", lambda: self.export("xlsx"))
-        exp.addAction("CSV (.csv)…", lambda: self.export("csv"))
-        c = self.file_menu.addAction("Copy table", self.copy_table)
-        c.setShortcut(QKeySequence("Ctrl+Shift+C"))
+        # Every opening menu is the shared Carbon menu (widgets/menu.py).
+        self.file_menu = CarbonMenu(parent=self)
+        a = self.file_menu.add_action("Import compositions…", self.import_compositions, shortcut="Ctrl+O")
+        exp = self.file_menu.add_submenu("Export results")
+        exp.add_action("Excel workbook (.xlsx)…", lambda: self.export("xlsx"))
+        exp.add_action("CSV (.csv)…", lambda: self.export("csv"))
+        c = self.file_menu.add_action("Copy table", self.copy_table, shortcut="Ctrl+Shift+C")
         self.file_menu.addSeparator()
-        self.file_menu.addAction("Calculation settings…", self.edit_settings)
+        self.file_menu.add_action("Calculation settings…", self.edit_settings)
         self.file_menu.addSeparator()
-        q = self.file_menu.addAction("Exit", self.close)
-        q.setShortcut(QKeySequence("Ctrl+Q"))
+        q = self.file_menu.add_action("Exit", self.close, shortcut="Ctrl+Q")
         for act in (a, c, q):
             self.addAction(act)
-        self.theme_menu = QMenu(self)
+        self.theme_menu = CarbonMenu(parent=self)
         group = QActionGroup(self)
         for name, label in (("dark", "Dark (Gray 100)"), ("light", "Light (Gray 10)")):
-            act = QAction(label, self, checkable=True)
-            act.setChecked(THEME.name == name)
-            act.triggered.connect(lambda _c=False, n=name: self.set_theme(n))
+            act = self.theme_menu.add_action(label, lambda n=name: self.set_theme(n), checkable=True,
+                                             checked=THEME.name == name)
             group.addAction(act)
-            self.theme_menu.addAction(act)
         self.theme_actions = group
 
     def set_theme(self, name: str):
@@ -284,8 +272,7 @@ class MainWindow(QMainWindow):
 
     def _update_status(self):
         m = self.table.model
-        n = len(m.rows)
-        flt = f" · filter active ({len(m.view_rows)} shown)" if m.filters else ""
+        flt = f" · filter active ({m.view_count():,} shown)" if m.filters else ""
         # The reference toolbar carries no standing label - the paginator already reports the
         # range - so this slot is reserved for filter state and for cell info on hover.
         self.table.status.setText(flt.strip() if flt else "")
@@ -301,76 +288,110 @@ class MainWindow(QMainWindow):
     def options(self) -> dict:
         return {"annealing_temperature": self.annealing, "tcrit_fraction": self.fraction}
 
-    def calculate(self, source, names: list, comps: list, envs: list):
-        if self.worker is not None:
+    @property
+    def worker(self):
+        """The running calculation job (None when idle)."""
+        return self.runner.job
+
+    def calculate(self, source, names=None, comps=None, envs=None):
+        """Calculate compositions.  ``comps`` is a list, or a callable returning
+        ``(sources, names, compositions, variables)`` that runs off the GUI thread."""
+        if self.runner.running:
             self.notify("warning", "A calculation is already running.")
             return
         self.notification.dismiss()
-        if len(comps) == 1:
+        if not callable(comps) and len(comps) == 1:
             res = self.engine.calculate(comps[0], **self.options())
             src = source[0] if isinstance(source, list) else source
             row = ResultRow(names[0], comps[0], res, src, envs[0] if envs else {})
-            self._add_rows([row], select_first=True)
+            rng = self.table.model.append_rows([row], self.options())
+            self._update_status()
+            self._jump_to(rng.start)
             if not res.ok:
                 self.notify("error", res.error)
             return
-        self._first_new = len(self.table.model.rows)
-        self.worker = CalculationWorker(self.engine, source, names, comps, envs, self.options(), self)
-        self.worker.batch.connect(lambda rows: self._add_rows(rows, select_first=False))
-        self.worker.progress.connect(self._progress)
-        self.worker.done.connect(self._done)
-        self.progress.bar.setRange(0, len(comps))
-        self.progress.bar.setValue(0)
-        self.progress.label.setText(f"Calculating {len(comps):,} compositions…")
+        if callable(comps):
+            data = JobInput(source, (), comps, (), self.options())
+            label = "Generating compositions…"
+        else:
+            data = JobInput(source, names, comps, envs, self.options())
+            label = f"Calculating {len(comps):,} compositions…"
+        self._first_new = len(self.table.model.store)
+        self.progress.bar.setRange(0, 0)
+        self.progress.label.setText(label)
+        self.progress.cancel.setEnabled(True)
         self.progress.show()
-        self.composition.calc_btn.setEnabled(False)
-        self.worker.start()
+        self.composition.set_calculating(True)
+        self.runner.start(CalculationJob(data, self.engine))
 
     def _progress(self, done: int, total: int, eta: float):
+        if self.progress.bar.maximum() != total:
+            self.progress.bar.setRange(0, total)
         self.progress.bar.setValue(done)
-        self.progress.label.setText(f"Calculating {done:,} / {total:,} — about {eta:,.0f} s left")
+        left = f" — about {eta:,.0f} s left" if done else ""
+        if self.progress.cancel.isEnabled():
+            self.progress.label.setText(f"Calculating {done:,} / {total:,}{left}")
 
-    def _done(self, cancelled: bool):
-        added = len(self.table.model.rows) - self._first_new
-        self.worker.deleteLater()
-        self.worker = None
+    def _done(self, job):
+        added = self.runner.added
         self.progress.hide()
-        self.composition.calc_btn.setEnabled(True)
-        self._jump_to(self._first_new)
-        failed = sum(1 for r in self.table.model.rows[self._first_new:] if not r.result.ok)
+        self.composition.set_calculating(False)
+        if job.state == "error":
+            self.notify("error", job.error or "The calculation failed.")
+            return
+        cancelled = job.state == "cancelled"
+        if self.runner.first_id is not None:
+            self._jump_to(self.runner.first_id)
+        st = self.table.model.store
+        failed = sum(1 for e in st.errors[self._first_new:] if e)
         msg = f"{added:,} composition(s) calculated" + (" (cancelled)" if cancelled else "")
         if failed:
-            msg += f"; {failed} could not be evaluated (see tooltips)"
+            msg += f"; {failed:,} could not be evaluated (see Calculation details)"
         self.notify("warning" if cancelled or failed else "success", msg + ".")
 
     def cancel_calculation(self):
-        if self.worker:
-            self.worker.cancel()
+        if self.runner.running:
+            self.progress.cancel.setEnabled(False)
+            self.progress.label.setText("Cancelling…")
+            self.runner.cancel()
 
     def _add_rows(self, rows: list[ResultRow], select_first: bool):
-        m = self.table.model
-        start = len(m.rows)
-        m.append_rows(rows)
+        rng = self.table.model.append_rows(rows, self.options())
         self._update_status()
-        if select_first:
-            self._jump_to(start)
+        if select_first and len(rng):
+            self._jump_to(rng.start)
 
-    def _jump_to(self, index_in_rows: int):
+    def _jump_to(self, row_id: int):
+        """Show the page holding store row ``row_id`` and load it into Calculation details."""
         m = self.table.model
-        if not (0 <= index_in_rows < len(m.rows)):
+        if not m.store.is_alive(row_id):
             return
-        target = m.rows[index_in_rows]
-        try:
-            pos = m.view_rows.index(target)
-        except ValueError:
+        pos = m.position_of(row_id)
+        if pos < 0:
             return
         m.set_page(pos // m.page_size)
-        self.table.view.selectRow(pos % m.page_size)
-        self.details.show_row(target)
+        self.show_details(StoredRow(m.store, row_id))
+
+    def show_details(self, row):
+        """Embedded Calculation details for a result row (double click)."""
+        if row is None:
+            self.details.show_row(None, has_results=bool(self.table.model.store.n_alive))
+            return
+        if isinstance(row, StoredRow):
+            self._details_version = row.store.version
+            row = row.materialize()
+        self.details.show_row(row)
 
     def _check_details(self):
-        if self.details.row is not None and self.details.row not in self.table.model.rows:
-            self.details.show_row(None, has_results=bool(self.table.model.rows))
+        row = self.details.row
+        st = self.table.model.store
+        if row is not None:
+            rid = getattr(row, "row_id", None)
+            if rid is not None and (not st.is_alive(rid) or getattr(self, "_details_version", st.version) != st.version):
+                self.details.show_row(None, has_results=bool(st.n_alive))
+        elif self.details.has_results != bool(st.n_alive):
+            # empty state follows the table: "No alloy to show yet" <-> "No alloy selected"
+            self.details.show_row(None, has_results=bool(st.n_alive))
         self._update_status()
 
     # ------------------------------------------------------------------ table actions
@@ -382,9 +403,9 @@ class MainWindow(QMainWindow):
         immediately - no confirmation dialog.  The composition panel is left untouched: only the
         table's rows go, which also resets its filters, page and page size through ``set_rows``.
         """
-        if not self.table.model.rows:
+        if not self.table.model.store.n_alive:
             return
-        self.table.model.set_rows([])
+        self.table.model.clear()
         self.details.show_row(None, has_results=False)
         self._update_status()
 
@@ -393,7 +414,7 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self.table.model.set_filters(dlg.result_filters)
             self.table.set_filter_active(bool(dlg.result_filters))
-            self.details.show_row(None, has_results=bool(self.table.model.rows))
+            self.details.show_row(None, has_results=bool(self.table.model.store.n_alive))
             self._update_status()
         dlg.deleteLater()
 
@@ -409,7 +430,7 @@ class MainWindow(QMainWindow):
         """Copy every row of the (filtered, sorted) table with the visible columns."""
         m = self.table.model
         rows = m.view_rows
-        if not rows:
+        if not len(rows):
             self.notify("info", "The table is empty.")
             return
         QGuiApplication.clipboard().setText(table_tsv(rows, m.keys))
@@ -422,7 +443,7 @@ class MainWindow(QMainWindow):
 
     def export(self, fmt: str):
         rows = self.table.model.view_rows
-        if not rows:
+        if not len(rows):
             self.notify("info", "Nothing to export.")
             return
         flt = "Excel workbook (*.xlsx)" if fmt == "xlsx" else "CSV (*.csv)"
@@ -472,7 +493,7 @@ class MainWindow(QMainWindow):
                 self.settings.setValue("annealing", self.annealing)
             self.settings.setValue("tcrit_fraction", self.fraction)
             rows = self.table.model.rows
-            if rows and self.worker is None and QMessageBox.question(
+            if len(rows) and self.worker is None and QMessageBox.question(
                     self, "Recalculate results",
                     f"Recalculate the {len(rows):,} existing result(s) with the new temperature setting?")                     == QMessageBox.StandardButton.Yes:
                 self.recalculate_all()
@@ -485,13 +506,17 @@ class MainWindow(QMainWindow):
         rows = list(self.table.model.rows)
         if not rows:
             return
-        self.table.model.set_rows([])
+        sources, names = [r.source for r in rows], [r.name for r in rows]
+        comps, envs = [r.input_amounts for r in rows], [r.variables for r in rows]
+        self.table.model.clear()
         self.details.show_row(None)
-        self.calculate([r.source for r in rows], [r.name for r in rows], [r.input_amounts for r in rows],
-                       [r.variables for r in rows])
+        self.calculate(sources, names, comps, envs)
 
     def open_details(self, row):
+        """Calculation details in a separate window (row context menu)."""
         if row is not None:
+            if isinstance(row, StoredRow):
+                row = row.materialize()
             dlg = AlloyDetailsDialog(row, self)
             dlg.exec()
             dlg.deleteLater()
@@ -503,9 +528,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e):
         self.settings.setValue("page_size", self.table.model.page_size)
-        if self.worker:
-            self.worker.cancel()
-            self.worker.wait(2000)
+        if self.runner.job is not None:
+            self.runner.job.cancel()
+            self.runner.job.wait(2.0)
+        self.jobs.shutdown()          # no worker process outlives the window
         super().closeEvent(e)
 
 

@@ -429,19 +429,29 @@ def test_tooltip_hover_focus_and_escape(app, win):
     ctl.hide()
 
 
-def test_table_cell_tooltip_uses_the_carbon_bubble(app, win):
+def test_result_cells_have_no_tooltip_but_headers_use_the_carbon_bubble(app, win):
+    """Product decision: no body-cell tooltips (full data lives in Calculation details); column
+    headers explain name / unit / meaning through the Carbon tooltip, anchored to the section."""
     from PySide6.QtGui import QHelpEvent
     from hea_calc.ui.widgets.tooltip import install_tooltips
     ctl = install_tooltips(app)
     add_rows(win, 3)
     view = win.table.view
-    col = win.table.model.keys.index("M1")
-    rect = view.visualRect(win.table.model.index(0, col))
+    m = win.table.model
+    for c in range(m.columnCount()):
+        assert m.data(m.index(0, c), Qt.ItemDataRole.ToolTipRole) is None
+    col = m.keys.index("M1")
+    rect = view.visualRect(m.index(0, col))
     ev = QHelpEvent(QEvent.Type.ToolTip, rect.center(), view.viewport().mapToGlobal(rect.center()))
-    assert ctl.eventFilter(view.viewport(), ev) is True
-    assert ctl.visible() and "Result:" in ctl.tip.text
-    g = view.viewport().mapToGlobal(rect.topLeft())
-    assert ctl.tip.anchor == QRect(g, rect.size()), "anchored to the cell"
+    assert ctl.eventFilter(view.viewport(), ev) is True     # swallowed: no native tooltip either
+    assert not ctl.visible()
+    hdr = view.header
+    x = hdr.sectionViewportPosition(col) + 5
+    ev = QHelpEvent(QEvent.Type.ToolTip, QPoint(x, 10), hdr.viewport().mapToGlobal(QPoint(x, 10)))
+    assert ctl.eventFilter(hdr.viewport(), ev) is True
+    assert ctl.visible() and "M1" in ctl.tip.text
+    g = hdr.viewport().mapToGlobal(QPoint(hdr.sectionViewportPosition(col), 0))
+    assert ctl.tip.anchor.topLeft() == g, "anchored to the header section"
     ctl.hide()
 
 

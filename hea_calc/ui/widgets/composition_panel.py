@@ -22,10 +22,14 @@ from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QComboBox, QFrame,
 
 from ...core import composition as C
 from ...core.data import Datasets
-from ...core.expression import (ExpressionError, VariableRange, block_variables, generate_blocks,
-                                 parse_blocks)
-from ...core.generation import RangeError, SweepSpec, generate_space, summarize_space
+from ...core.expression import (MAX_COMBINATIONS, ExpressionError, GenerationCancelled, VariableRange,
+                                 block_variables, count_combinations, generate_blocks, parse_blocks)
+from ...core.generation import RangeError, SweepSpec, summarize_space
+from ...core.recipes import (ExpressionRecipe, SweepRecipe, compositions_tsv, expression_count, recipe_preview,
+                             recipe_tsv)
 from .. import crisp
+from ..worker import BackgroundTask
+from .menu import carbon_context_menu
 from ..theme import COMPOSITION_PANEL_MIN, FOCUS_WIDTH, HAIRLINE, t
 from .scroll import own_wheel, thin_scrollbars
 from .common import (Divider, EmptyState, IconButton, IconContentSwitcher, InfoButton, Panel, button,
@@ -40,6 +44,8 @@ ROW_GAP = 1
 REP_KEYS = ("ratio", "at", "wt", "mass")
 DECIMALS = {"ratio": 4, "at": 4, "wt": 4, "mass": 5}
 SWEEP_LIMIT = 200_000
+COUNT_DEBOUNCE_MS = 200      # pre-flight counts wait for a pause in typing
+HEAVY_THRESHOLD = 5_000      # combinations above which a pre-flight runs in a worker process
 
 
 class ColumnGrid:
@@ -121,6 +127,7 @@ class Field(QLineEdit):
         self.setProperty("cell", cell)
         self.setProperty("crisp", True)
         col_role(self, "element" if width == COL_ELEMENT else "value")
+        carbon_context_menu(self)        # Cut / Copy / Paste through the shared Carbon menu
         self.set_padding(4 if width == COL_ELEMENT else ColumnGrid.PAD)
         install_wheel_guard(self)
 
@@ -742,10 +749,15 @@ class SweepView(QWidget):
         self.stack.addWidget(self.empty)
         self.stack.addWidget(self.page)
         root.addWidget(self.stack, 1)
+        # Pre-flight count: debounced, computed on a background thread (count_space never
+        # materialises a composition; at.% is an exact DP, ratio a bounded walk), latest-wins.
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
-        self._timer.setInterval(250)
+        self._timer.setInterval(COUNT_DEBOUNCE_MS)
         self._timer.timeout.connect(self._update_summary)
+        self._counter = BackgroundTask(self)
+        self._counter.done.connect(self._show_summary)
+        self._counter.failed.connect(self._summary_failed)
         self.summary_data = None
         self._refresh_sizes()
 
@@ -864,18 +876,37 @@ class SweepView(QWidget):
         return {k} if k else None
 
     def _update_summary(self):
-        n = len(self.rows)
-        if n == 0:
+        if not self.rows:
+            self._counter.cancel()
             self.summary.setText("")
-            return
-        sep = f"<span style='color:{t('text-helper')}'> | </span>"
-        try:
-            s = summarize_space(self.specs(), self.unit, self.sizes(), limit=SWEEP_LIMIT)
-        except RangeError as exc:
-            self.summary.setText(f"<span style='color:{t('text-error')}'>{exc}</span>")
             self.summary_data = None
             return
+        try:
+            specs, sizes = self.specs(), self.sizes()
+        except RangeError as exc:
+            self._counter.cancel()
+            self._summary_failed(exc)
+            return
+        if self.unit == "at":
+            # exact bounded-knapsack DP: microseconds to milliseconds
+            self._counter.run(lambda cancelled=None: summarize_space(specs, "at", sizes, limit=SWEEP_LIMIT,
+                                                                     cancelled=cancelled))
+        else:
+            # ratio spaces may need a duplicate-removing walk of up to ~10^6 tuples: worker process
+            recipe = SweepRecipe(tuple(specs), "ratio", frozenset(sizes) if sizes else None, SWEEP_LIMIT)
+            if recipe.estimate() <= HEAVY_THRESHOLD:
+                self._counter.run(lambda cancelled=None: summarize_space(specs, "ratio", sizes, limit=SWEEP_LIMIT,
+                                                                         cancelled=cancelled))
+            else:
+                self._counter.run_heavy(summarize_space, specs, "ratio", sizes, SWEEP_LIMIT)
+
+    def _summary_failed(self, exc):
+        self.summary.setText(f"<span style='color:{t('text-error')}'>{exc}</span>")
+        self.summary_data = None
+
+    def _show_summary(self, s):
         self.summary_data = s
+        sep = f"<span style='color:{t('text-helper')}'> | </span>"
         line1 = f"{s.selected} selected{sep}{s.required} required{sep}{s.optional} optional"
         comp = f"more than {SWEEP_LIMIT:,}" if s.truncated else f"{s.compositions:,}"
         color = t("text-error") if s.truncated or s.compositions == 0 else t("text-primary")
@@ -887,12 +918,18 @@ class SweepView(QWidget):
         return len(self.rows) >= 2
 
     def compositions(self):
-        comps = generate_space(self.specs(), self.unit, self.sizes(), limit=SWEEP_LIMIT)
-        if not comps:
-            raise RangeError("No valid compositions for these ranges"
-                             + (" (at.% values must sum to 100 %)." if self.unit == "at" else "."))
-        names = [C.percent_name(c) if self.unit == "at" else C.alloy_name(c) for c in comps]
+        names, comps = self.recipe()()[1:3]
         return names, comps
+
+    def recipe(self):
+        """A callable generating ``(source, names, compositions, variables)`` - run by the calculation
+        job off the GUI thread.  The pre-flight count rejects an oversized space before anything is
+        generated."""
+        specs, sizes, unit = self.specs(), self.sizes(), self.unit
+        s = self.summary_data
+        if s is not None and s.truncated and self._counter.busy is False and not self._timer.isActive():
+            raise RangeError(f"More than {SWEEP_LIMIT:,} compositions; increase the steps or narrow the ranges.")
+        return SweepRecipe(tuple(specs), unit, frozenset(sizes) if sizes else None, SWEEP_LIMIT)
 
     def clear(self):
         for row in self.rows.values():
@@ -973,6 +1010,7 @@ class ExpressionView(QWidget):
         self.edit.setPlaceholderText("e.g. (Fe1.6CoCr0.4Mn)0.9Al0.1")
         self.edit.setFixedHeight(142)
         self.edit.setAccessibleName("Composition expression")
+        carbon_context_menu(self.edit)
         self.edit.textChanged.connect(self._dirty)
         self.preview_btn = IconButton("data_table", "Preview generated compositions", self.edit)
         self.preview_btn.clicked.connect(self.preview_requested.emit)
@@ -1015,8 +1053,13 @@ class ExpressionView(QWidget):
         self._parse_timer.timeout.connect(self.parse)
         self._count_timer = QTimer(self)
         self._count_timer.setSingleShot(True)
-        self._count_timer.setInterval(250)
+        self._count_timer.setInterval(COUNT_DEBOUNCE_MS)
         self._count_timer.timeout.connect(self._preview)
+        # the valid-composition count needs every combination evaluated (skips, duplicates), so it
+        # runs on a background thread; the combination bound is checked first, instantly
+        self._counter = BackgroundTask(self)
+        self._counter.done.connect(self._show_preview)
+        self._counter.failed.connect(self._preview_failed)
         self._set_variables([])
 
     def eventFilter(self, obj, ev):
@@ -1124,14 +1167,30 @@ class ExpressionView(QWidget):
 
     def _preview(self):
         if not self.expressions:
+            self._counter.cancel()
             self.summary.setText("")
             return
         try:
-            b = self.batch()
+            exprs, ranges = list(self.expressions), self.ranges()
+            n = count_combinations(exprs, ranges)
+            if n > MAX_COMBINATIONS:
+                raise RangeError(f"{n:,} combinations exceed the limit of {MAX_COMBINATIONS:,}; increase the steps.")
         except (RangeError, ExpressionError) as exc:
-            self.summary.setText(f"<span style='color:{t('text-error')}'>{exc}</span>")
+            self._counter.cancel()
+            self._preview_failed(exc)
             return
-        n = len(b.compositions)
+        if n <= HEAVY_THRESHOLD:
+            self._counter.run(lambda cancelled=None: generate_blocks(exprs, ranges, cancelled=cancelled))
+        else:
+            self._counter.run_heavy(expression_count, tuple(exprs), tuple(ranges.items()))
+
+    def _preview_failed(self, exc):
+        if isinstance(exc, GenerationCancelled):
+            return
+        self.summary.setText(f"<span style='color:{t('text-error')}'>{exc}</span>")
+
+    def _show_preview(self, b):
+        n = len(b.compositions) if hasattr(b, "compositions") else b.count
         extra = []
         if b.skipped:
             extra.append(f"{b.skipped:,} skipped")
@@ -1150,11 +1209,18 @@ class ExpressionView(QWidget):
         return bool(self.text().strip())
 
     def compositions(self):
+        return self.recipe()()[1:]
+
+    def recipe(self):
+        """Parse and validate on the GUI thread (cheap); generate in the calculation job."""
         self.parse()
-        b = self.batch()
-        if not b.compositions:
-            raise RangeError("No valid compositions for these ranges.")
-        return b.names, b.compositions, b.variables
+        if not self.expressions:
+            raise ExpressionError("Enter a valid expression first.")
+        exprs, ranges = list(self.expressions), self.ranges()
+        n = count_combinations(exprs, ranges)
+        if n > MAX_COMBINATIONS:
+            raise RangeError(f"{n:,} combinations exceed the limit of {MAX_COMBINATIONS:,}; increase the steps.")
+        return ExpressionRecipe(tuple(exprs), tuple(ranges.items()))
 
     # periodic-table interaction: append / remove element tokens in the last block
     def add_element(self, el: str):
@@ -1192,6 +1258,7 @@ class CompositionPanel(Panel):
     elements_changed = Signal(list)                       # elements chosen inside the panel
     message = Signal(str, str)
     copy_compositions = Signal(str)                       # TSV of generated compositions
+    mode_changed = Signal(str)                            # "single" | "sweep" | "expression"
 
     MODES = ("single", "sweep", "expression")
 
@@ -1263,6 +1330,7 @@ class CompositionPanel(Panel):
         for v in (self.single, self.sweep, self.expr):
             v.grid = self.grid
         self._elements: list[str] = []
+        self.service = None
         self.set_mode(0)
 
     CALC_WIDTH = 141
@@ -1290,6 +1358,7 @@ class CompositionPanel(Panel):
         self.stack.setCurrentIndex(i)
         self.switcher.set_index(i)
         self.unit_box.setVisible(self.mode == "sweep")
+        self.mode_changed.emit(self.mode)
         if self.mode != "expression":
             self.elements_changed.emit(self._elements)
         elif self.expr.expressions:
@@ -1327,6 +1396,18 @@ class CompositionPanel(Panel):
         self.sweep.set_elements(order)
         self.elements_changed.emit(order)
 
+    def set_service(self, service) -> None:
+        """The calculation service whose worker processes run heavy pre-flight work."""
+        self.service = service
+        self.sweep._counter.service = service
+        self.expr._counter.service = service
+
+    def set_calculating(self, running: bool):
+        """While a batch job runs, Calculate shows the busy state (Cancel lives in the progress bar)."""
+        self._calculating = running
+        self.calc_btn.setText("Calculating…" if running else "Calculate")
+        self._update_actions()
+
     def _update_actions(self):
         m = self.mode
         self.normalize_btn.setVisible(m == "single")
@@ -1346,6 +1427,8 @@ class CompositionPanel(Panel):
             self.clear_btn.setEnabled(has)
             self.copy_btn.setEnabled(has)
             self.calc_btn.setEnabled(has)
+        if getattr(self, "_calculating", False):
+            self.calc_btn.setEnabled(False)
 
     def _normalize(self):
         if self.mode == "single":
@@ -1355,40 +1438,43 @@ class CompositionPanel(Panel):
         if self.mode == "single":
             self.single.set_equal()
 
-    def _generated_tsv(self) -> str:
-        names, comps, _envs = self.expr.compositions()
-        elements: list[str] = []
-        for c in comps:
-            for el in c:
-                if el not in elements:
-                    elements.append(el)
-        lines = ["Alloy\t" + "\t".join(f"{el} (at.%)" for el in elements)]
-        for n, c in zip(names, comps):
-            tot = sum(c.values())
-            lines.append(n + "\t" + "\t".join(f"{100 * c.get(el, 0.0) / tot:.4f}" for el in elements))
-        return "\r\n".join(lines) + "\r\n"
+    def _generated_tsv(self, generated=None) -> str:
+        names, comps, _envs = generated or self.expr.compositions()
+        return compositions_tsv(names, comps)
 
-    def _copy_compositions(self):
+    def _generate_then(self, fn, action):
+        """``action(fn(recipe))`` with the expression recipe evaluated off the GUI thread (in a worker
+        process for large batches - only the small result comes back)."""
         try:
-            self.copy_compositions.emit(self._generated_tsv())
-        except (ValueError, RangeError, ExpressionError) as exc:
-            self.message.emit("error", str(exc))
-
-    def preview_expression(self):
-        try:
-            names, comps, _ = self.expr.compositions()
+            recipe = self.expr.recipe()
         except (ValueError, RangeError, ExpressionError) as exc:
             self.message.emit("error", str(exc))
             return
+        task = getattr(self, "_gen_task", None)
+        if task is None:
+            task = self._gen_task = BackgroundTask(self, self.service)
+            task.failed.connect(lambda exc: self.message.emit("error", str(exc)))
+            task.done.connect(lambda out: self._gen_action(out))
+        self._gen_action = action
+        if recipe.estimate() <= HEAVY_THRESHOLD:
+            task.run(lambda cancelled=None: fn(recipe))
+        else:
+            task.run_heavy(fn, recipe)
+
+    def _copy_compositions(self):
+        self._generate_then(recipe_tsv, self.copy_compositions.emit)
+
+    def preview_expression(self):
+        self._generate_then(recipe_preview, lambda out: self._show_generated(*out))
+
+    def _show_generated(self, total: int, lines: list[str], tsv: str):
         from PySide6.QtWidgets import QListWidget
         from .dialogs import Modal
-        dlg = Modal("Generated compositions", f"{len(comps):,} valid", self, width=560)
+        dlg = Modal("Generated compositions", f"{total:,} valid", self, width=560)
         lst = QListWidget()
-        for n, c in list(zip(names, comps))[:2000]:
-            tot = sum(c.values())
-            lst.addItem(f"{n}    ({', '.join(f'{el} {100 * v / tot:.2f}' for el, v in c.items())})")
+        lst.addItems(lines)
         dlg.body.addWidget(lst, 1)
-        dlg.add_footer_button("Copy table", "secondary", self._copy_compositions)
+        dlg.add_footer_button("Copy table", "secondary", lambda: self.copy_compositions.emit(tsv))
         dlg.add_footer_button("Close", "primary", dlg.accept)
         dlg.exec()
         dlg.deleteLater()
@@ -1410,10 +1496,9 @@ class CompositionPanel(Panel):
                 name, ratios = self.single.composition()
                 self.calculate_requested.emit("single", [name], [ratios], [{}])
             elif m == "sweep":
-                names, comps = self.sweep.compositions()
-                self.calculate_requested.emit("sweep", names, comps, [{} for _ in comps])
+                # generation happens in the calculation job, not here (it can be 200 000 rows)
+                self.calculate_requested.emit("sweep", None, self.sweep.recipe(), None)
             else:
-                names, comps, envs = self.expr.compositions()
-                self.calculate_requested.emit("expression", names, comps, envs)
+                self.calculate_requested.emit("expression", None, self.expr.recipe(), None)
         except (ValueError, RangeError, ExpressionError) as exc:
             self.message.emit("error", str(exc))

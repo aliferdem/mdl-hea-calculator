@@ -35,7 +35,7 @@ class HeaderMenuItem(QPushButton):
 
     def _open(self):
         self._set_open(True)
-        self.menu_.setMinimumWidth(max(self.width(), 200))
+        self.menu_.trigger_width = max(self.width(), 200)
         self.menu_.exec(self.mapToGlobal(QPoint(0, self.height())))
 
     def paintEvent(self, e):

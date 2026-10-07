@@ -163,14 +163,14 @@ def read_compositions(path: str | Path, datasets: Datasets | None = None) -> Imp
 
 
 # ---------------------------------------------------------------------- export
-def export_rows(rows: list[ResultRow], path: str | Path, *, visible_keys: list[str] | None = None,
+def export_rows(rows, path: str | Path, *, visible_keys: list[str] | None = None,
                 notes: dict | None = None) -> Path:
     """Write results to .xlsx (full precision) or .csv."""
     path = Path(path)
     keys = [c.key for c in COLUMNS if c.key not in ("composition",)]
     elements: list[str] = []
     for r in rows:
-        for el in r.result.composition:
+        for el in r.composition:
             if el not in elements:
                 elements.append(el)
     headers = ["Alloy", "Source"] + [f"{el} (at.%)" for el in elements] + \
@@ -179,7 +179,8 @@ def export_rows(rows: list[ResultRow], path: str | Path, *, visible_keys: list[s
 
     def row_values(r: ResultRow) -> list:
         vals: list = [r.name, r.source]
-        vals += [100.0 * r.result.composition.get(el, 0.0) if r.result.composition else None for el in elements]
+        comp = r.composition
+        vals += [100.0 * comp.get(el, 0.0) if comp else None for el in elements]
         for k in keys:
             if k == "name":
                 continue
@@ -188,10 +189,9 @@ def export_rows(rows: list[ResultRow], path: str | Path, *, visible_keys: list[s
                 v = "inf" if v > 0 else ("-inf" if v < 0 else "nan")
             vals.append(v)
         for k in MODEL_KEYS:
-            o = r.result.models.get(k)
-            vals.append((o.reason or o.caution or "") if o else "")
-        vals.append(" ".join(r.result.warnings))
-        vals.append(r.result.error or "")
+            vals.append(r.model_note(k))
+        vals.append(" ".join(r.warnings))
+        vals.append(r.error or "")
         return vals
 
     if path.suffix.lower() == ".csv":

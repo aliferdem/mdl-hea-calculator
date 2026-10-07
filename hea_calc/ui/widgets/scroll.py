@@ -35,7 +35,10 @@ class ThinScrollBar(QScrollBar):
         self.setAutoFillBackground(False)
         self._hover = False
         self._drag: tuple[int, int] | None = None   # (press position along the bar, value at press)
-        THEME.changed.connect(lambda *_: self.update())
+        THEME.changed.connect(self._theme_changed)   # bound: auto-disconnected on deletion
+
+    def _theme_changed(self, *_):
+        self.update()
 
     # ---------------------------------------------------------------- geometry
     def _vertical(self) -> bool:

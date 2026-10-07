@@ -57,6 +57,17 @@ def wait_worker(win, app, timeout=60.0):
     assert win.worker is None
 
 
+def wait_task(task, app, timeout=30.0):
+    """Wait for a BackgroundTask (pre-flight count / generation) to deliver."""
+    import time
+    t0 = time.time()
+    while task.busy and time.time() - t0 < timeout:
+        app.processEvents()
+        time.sleep(0.005)
+    app.processEvents()
+    assert not task.busy
+
+
 def test_selection_order_and_rows(win):
     click_elements(win, "Cr", "Mn", "Fe")
     single = win.composition.single
@@ -134,7 +145,7 @@ def test_single_calculation_and_details(win):
     assert len(m.rows) == 1
     row = m.rows[0]
     assert row.name == "CoCrFeNi"
-    assert win.details.row is row
+    assert win.details.row.row_id == row.id        # stable store identity, reproduced result
     assert row.result.descriptors["dhmix"] == pytest.approx(-3.75)
 
 
@@ -150,6 +161,7 @@ def test_sweep_and_pagination(win, app):
     sw.all_lock.click()  # unlock all -> optional elements: binaries and the ternary
     assert not any(r.lock.isChecked() for r in sw.rows.values())
     sw._update_summary()
+    wait_task(sw._counter, app)
     assert sw.summary_data.systems == 4 and sw.summary_data.compositions == 63  # 3 x 9 binaries + 36 ternaries
     win.composition.calc_btn.click()
     wait_worker(win, app)
@@ -163,7 +175,7 @@ def test_sweep_and_pagination(win, app):
     assert len(m.page_rows()) == 3
 
 
-def test_sweep_ratio_space_figma_example(win):
+def test_sweep_ratio_space_figma_example(win, app):
     click_elements(win, "Cr", "Mn", "Fe", "Co", "Ni")
     win.composition.set_mode(1)
     sw = win.composition.sweep
@@ -176,6 +188,7 @@ def test_sweep_ratio_space_figma_example(win):
     assert sw.all_min.placeholderText() == "Mixed" and sw.all_step.placeholderText() == "0.1"
     assert sw.all_step.text() == ""  # common value shown as placeholder; typing applies to all rows
     sw._update_summary()
+    wait_task(sw._counter, app)
     s = sw.summary_data
     assert (s.selected, s.required, s.optional, s.systems, s.compositions) == (5, 5, 0, 1, 6655)
     assert "6,655 valid compositions" in sw.summary.text()
@@ -201,7 +214,9 @@ def test_expression_mode(win, app):
     names = [r.name for r in win.table.model.rows]
     assert names[0] == "FeCoNi" and "(FeCoNi)0.9Al0.1" in names and len(names) == 6
     assert win.table.model.rows[1].variables == {"x": 0.1}
+    QApplication.clipboard().setText("")
     win.composition.copy_btn.click()
+    wait_task(win.composition._gen_task, app)
     text = QApplication.clipboard().text()
     assert text.startswith("Alloy\tFe (at.%)") and len(text.strip().split("\r\n")) == 7
 
@@ -298,7 +313,7 @@ def test_element_order_survives_signals_and_overview(win):
     assert list(row.input_amounts) == ["Cr", "Mn", "Fe", "Co", "Ni"]
     assert list(row.result.composition) == ["Cr", "Mn", "Fe", "Co", "Ni"]
     from PySide6.QtWidgets import QLabel
-    page = win.details.pages[0].widget()
+    page = win.details.page_widget(0)
     texts = [lab.text() for lab in page.findChildren(QLabel)]
     assert "20.0000" in texts and "1.0000" in texts and "0.2000" not in texts  # at.% and ratio columns
 
@@ -348,7 +363,7 @@ def test_empty_states_use_the_exported_illustrations(win, app):
         found = view.empty.findChildren(Illustration)
         assert [i.name for i in found] == [art], view
     # details: two variants of one artwork, driven by whether results exist
-    page = win.details.pages[0].widget()
+    page = win.details.page_widget(0)
     names = [i.name for i in page.findChildren(Illustration)]
     assert names == ["document"], names
     texts = [lab.text() for lab in page.findChildren(QLabel)]
@@ -363,9 +378,9 @@ def test_empty_states_use_the_exported_illustrations(win, app):
     assert win.details.row is not None
     win.details.show_row(None, has_results=True)   # as delete_rows / edit_filters call it
     app.processEvents()
-    texts = [lab.text() for lab in win.details.pages[0].widget().findChildren(QLabel)]
+    texts = [lab.text() for lab in win.details.page_widget(0).findChildren(QLabel)]
     assert "No alloy selected" in texts, texts
-    assert [i.name for i in win.details.pages[0].widget().findChildren(Illustration)] == ["document"]
+    assert [i.name for i in win.details.page_widget(0).findChildren(Illustration)] == ["document"]
 
 
 def test_data_table_row_and_header_colours(win, app):
@@ -635,7 +650,7 @@ def test_carbon_tooltip_matches_the_component_reference(win, app):
     Reference 21 ("Composition space"): body 155 x 24, caret 12 px wide at the base and 6 px tall
     (Carbon popover-caret), tip 4 px above the trigger ($spacing-02).
     """
-    from hea_calc.ui.theme import CORNER_RADIUS
+    from hea_calc.ui.theme import TOOLTIP_RADIUS
     from hea_calc.ui.widgets.common import CarbonToolTip
 
     tip = CarbonToolTip()
@@ -644,7 +659,7 @@ def test_carbon_tooltip_matches_the_component_reference(win, app):
     tip.show_for(anchor, "Clear table", screen)
     app.processEvents()
     assert (tip.width(), tip.height()) == (102, 24 + 6), (tip.width(), tip.height())
-    assert tip.RADIUS == CORNER_RADIUS == 7
+    assert tip.RADIUS == TOOLTIP_RADIUS == 2      # tooltip/toggletip exception to the 7 px radius
     img = tip.grab().toImage().convertToFormat(QImage.Format_RGB32)
     assert img.pixelColor(20, 12).name().lstrip("#").upper() == "F4F4F4"
     ink = [img.pixelColor(x, y).red() for y in range(3, 20) for x in range(3, 90)]

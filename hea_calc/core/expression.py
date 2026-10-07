@@ -431,8 +431,8 @@ class ExpressionBatch:
     duplicates: int
 
 
-def generate(expression: Expression, ranges: dict[str, VariableRange], limit: int = MAX_COMBINATIONS
-             ) -> ExpressionBatch:
+def generate(expression: Expression, ranges: dict[str, VariableRange], limit: int = MAX_COMBINATIONS,
+             cancelled=None) -> ExpressionBatch:
     missing = [v for v in expression.variables if v not in ranges]
     if missing:
         raise RangeError("Set Min / Max / Step for: " + ", ".join(missing))
@@ -444,7 +444,9 @@ def generate(expression: Expression, ranges: dict[str, VariableRange], limit: in
     comps, labels, envs = [], [], []
     seen = set()
     skipped = dups = 0
-    for combo in itertools.product(*value_lists) if value_lists else [()]:
+    for i, combo in enumerate(itertools.product(*value_lists) if value_lists else [()]):
+        if cancelled is not None and not i & 0x3FF and cancelled():
+            raise GenerationCancelled()
         env = dict(zip(names, combo))
         try:
             amounts = expression.evaluate(env)
@@ -504,15 +506,30 @@ def block_variables(expressions: list[Expression]) -> list[str]:
     return names
 
 
+class GenerationCancelled(Exception):
+    """A superseded background generation (pre-flight count) stopped early."""
+
+
+def count_combinations(expressions: list[Expression], ranges: dict[str, VariableRange]) -> int:
+    """Variable combinations the blocks evaluate (before skips and duplicates) - a cheap upper bound."""
+    total = 0
+    for ex in expressions:
+        missing = [v for v in ex.variables if v not in ranges]
+        if missing:
+            raise RangeError("Set Min / Max / Step for: " + ", ".join(missing))
+        total += math.prod(len(ranges[v].values()) for v in ex.variables) if ex.variables else 1
+    return total
+
+
 def generate_blocks(expressions: list[Expression], ranges: dict[str, VariableRange],
-                    limit: int = MAX_COMBINATIONS) -> ExpressionBatch:
+                    limit: int = MAX_COMBINATIONS, cancelled=None) -> ExpressionBatch:
     """Generate every block with the shared variable ranges; duplicates across blocks are removed."""
     comps, names, envs = [], [], []
     skipped = dups = 0
     seen = set()
     for ex in expressions:
         sub = {k: v for k, v in ranges.items() if k in ex.variables}
-        batch = generate(ex, sub, limit)
+        batch = generate(ex, sub, limit, cancelled)
         skipped += batch.skipped
         dups += batch.duplicates
         for c, n, e in zip(batch.compositions, batch.names, batch.variables):

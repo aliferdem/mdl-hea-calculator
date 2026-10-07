@@ -3,9 +3,89 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRect, QSize
-from PySide6.QtWidgets import QLayout, QWidgetItem
+from PySide6.QtWidgets import QLayout, QSizePolicy, QWidget, QWidgetItem
 
 from ..responsive import distribute
+
+
+class UpperPanels(QWidget):
+    """The upper content area: Element selection, Composition setup, Calculation details.
+
+    * **wide** - one row, the design's 596 / 457 / 787 px reference widths distributed by
+      ``responsive.distribute`` (only Details grows), exactly as before;
+    * **stacked** - when the three panels no longer fit at their minimum widths, Details moves to a
+      second row spanning the full width; Element + Composition share the first row (Composition
+      grows).
+
+    The breakpoint is not a screen size: it is the width the wide row needs, ``Σ minimums + gaps``
+    (``wide_minimum``), with ``HYSTERESIS`` px extra before returning to wide so a resize near the
+    boundary cannot oscillate.  The panels are only repositioned - never re-created - so their state
+    survives every switch; the main scroll area simply receives the taller content.
+    """
+
+    HYSTERESIS = 24
+
+    def __init__(self, panels: list[tuple[QWidget, int, int, int | None]], row_height: int, gap: int,
+                 parent=None):
+        super().__init__(parent)
+        self.panels = panels                        # (widget, reference, minimum, maximum)
+        self.row_height = row_height
+        self.gap = gap
+        self.stacked = False
+        for w, _ref, mn, _mx in panels:
+            w.setParent(self)
+            w.setMinimumWidth(mn)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(row_height)
+
+    def wide_minimum(self) -> int:
+        return sum(mn for _w, _r, mn, _x in self.panels) + self.gap * (len(self.panels) - 1)
+
+    def stacked_minimum(self) -> int:
+        first = self.panels[:-1]
+        return max(sum(mn for _w, _r, mn, _x in first) + self.gap * (len(first) - 1), self.panels[-1][2])
+
+    def mode_for(self, width: int) -> bool:
+        """True = stacked, for ``width`` given the current mode (hysteresis)."""
+        need = self.wide_minimum() + (self.HYSTERESIS if self.stacked else 0)
+        return width < need
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(self.stacked_minimum(), self.height())
+
+    def sizeHint(self) -> QSize:
+        return QSize(sum(r for _w, r, _m, _x in self.panels) + self.gap * (len(self.panels) - 1), self.height())
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.relayout()
+
+    def relayout(self):
+        width = self.width()
+        stacked = self.mode_for(width)
+        if stacked != self.stacked:
+            self.stacked = stacked
+            h = 2 * self.row_height + self.gap if stacked else self.row_height
+            self.setFixedHeight(h)
+        h = self.row_height
+        if self.stacked:
+            first = self.panels[:-1]
+            avail = width - self.gap * (len(first) - 1)
+            widths = distribute(avail, [r for _w, r, _m, _x in first], [m for _w, _r, m, _x in first],
+                                [x for _w, _r, _m, x in first[:-1]] + [None])
+            x = 0
+            for (w, *_), wd in zip(first, widths):
+                w.setGeometry(QRect(x, 0, wd, h))
+                x += wd + self.gap
+            self.panels[-1][0].setGeometry(QRect(0, h + self.gap, width, h))
+        else:
+            avail = width - self.gap * (len(self.panels) - 1)
+            widths = distribute(avail, [r for _w, r, _m, _x in self.panels], [m for _w, _r, m, _x in self.panels],
+                                [x for _w, _r, _m, x in self.panels])
+            x = 0
+            for (w, *_), wd in zip(self.panels, widths):
+                w.setGeometry(QRect(x, 0, wd, h))
+                x += wd + self.gap
 
 
 class ProportionalRowLayout(QLayout):

@@ -81,13 +81,38 @@ class ResultRow:
     result: AlloyResult
     source: str = "single"          # single | sweep | expression | import
     variables: dict = field(default_factory=dict)
+    row_id: int | None = None       # id in the ResultStore it was reproduced from, if any
 
+    # Row protocol shared with store.StoredRow (formatting, filters, clipboard, export).
     def raw(self, key: str):
         if key == "name":
             return self.name
         if key == "composition":
             return composition_text(self.result.composition)
         return self.result.value(key)
+
+    @property
+    def ok(self) -> bool:
+        return self.result.ok
+
+    @property
+    def error(self) -> str | None:
+        return self.result.error
+
+    @property
+    def composition(self) -> dict[str, float]:
+        return self.result.composition
+
+    @property
+    def warnings(self) -> list[str]:
+        return list(self.result.warnings)
+
+    def model_label(self, key: str) -> str:
+        return self.result.label(key)
+
+    def model_note(self, key: str) -> str:
+        o = self.result.models.get(key)
+        return (o.reason or o.caution or "") if o else ""
 
 
 def composition_text(fractions: dict[str, float], decimals: int = 2) -> str:
@@ -113,7 +138,7 @@ def format_number(value, decimals: int = 2) -> str:
 
 def format_cell(row: ResultRow, key: str) -> str:
     col = COLUMN_BY_KEY[key]
-    if not row.result.ok and key not in ("name", "composition"):
+    if not row.ok and key not in ("name", "composition"):
         return "N/A"
     value = row.raw(key)
     if col.kind == "model":
@@ -171,7 +196,7 @@ class ModelFilter:
     labels: set[str]
 
     def accepts(self, row: ResultRow) -> bool:
-        return row.result.label(self.key) in self.labels
+        return row.model_label(self.key) in self.labels
 
 
 def apply_filters(rows: list[ResultRow], filters: list) -> list[ResultRow]:

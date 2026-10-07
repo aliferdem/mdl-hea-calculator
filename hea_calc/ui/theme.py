@@ -48,6 +48,16 @@ DETAILS_PANEL_MIN = 454      # the five line tabs at compact padding, plus 2 × 
 # a rounded control).  Components the design draws square - panels, tiles, buttons, fields, table
 # cells - stay square; pills (tags, toggle track) are fully rounded by construction.
 CORNER_RADIUS = 7
+# Tooltip / toggletip bubbles are the one intentional exception to CORNER_RADIUS: the HEA reference
+# (design/components/Group 241.png, 308 px wide at 3x) has 2 px corners.
+TOOLTIP_RADIUS = 2
+# Carbon v11 Menu, size "sm" (the React default): 32 px items, 4 px block padding, 16 px inline
+# padding, 1 px divider with 4 px margins; min 10 rem / max 18 rem.
+MENU_ITEM_HEIGHT = 32
+MENU_PADDING_Y = 4
+MENU_PADDING_X = 16
+MENU_MIN_WIDTH = 160
+MENU_MAX_WIDTH = 288
 # Scroll bars: 4 px visible track/thumb inside a wider invisible hit target.
 SCROLLBAR_VISIBLE = 4
 SCROLLBAR_HIT = 12
@@ -80,10 +90,10 @@ DARK = {
     "button-primary": "#0f62fe", "button-primary-hover": "#0050e6", "button-primary-active": "#002d9c",
     "button-secondary": "#6f6f6f", "button-secondary-hover": "#606060", "button-secondary-active": "#393939",
     "button-ghost-hover": "#333333", "button-ghost-active": "#525252",
-    "button-danger-secondary": "#ff8389", "button-danger-hover": "#b81922",
+    "button-danger-primary": "#da1e28", "button-danger-secondary": "#ff8389", "button-danger-hover": "#b81922",
     "button-disabled": "#6f6f6f", "button-disabled-bg": "#6f6f6f", "text-on-color-disabled": "#a8a8a8",
     "focus": "#ffffff", "focus-inset": "#161616",
-    "background-inverse": "#f4f4f4",
+    "background-inverse": "#f4f4f4", "highlight": "#002d9c",
     "support-error": "#fa4d56", "support-success": "#42be65", "support-warning": "#f1c21b",
     "support-info": "#4589ff",
     "status-green": "#24a148", "status-yellow": "#f1c21b", "status-red": "#fa4d56", "status-gray": "#8d8d8d",
@@ -115,10 +125,10 @@ LIGHT = {
     "button-primary": "#0f62fe", "button-primary-hover": "#0050e6", "button-primary-active": "#002d9c",
     "button-secondary": "#393939", "button-secondary-hover": "#474747", "button-secondary-active": "#6f6f6f",
     "button-ghost-hover": "#e8e8e8", "button-ghost-active": "#c6c6c6",
-    "button-danger-secondary": "#da1e28", "button-danger-hover": "#b81922",
+    "button-danger-primary": "#da1e28", "button-danger-secondary": "#da1e28", "button-danger-hover": "#b81922",
     "button-disabled": "#a8a8a8", "button-disabled-bg": "#c6c6c6", "text-on-color-disabled": "#8d8d8d",
     "focus": "#0f62fe", "focus-inset": "#ffffff",
-    "background-inverse": "#393939",
+    "background-inverse": "#393939", "highlight": "#d0e2ff",
     "support-error": "#da1e28", "support-success": "#24a148", "support-warning": "#f1c21b",
     "support-info": "#0043ce",
     "status-green": "#24a148", "status-yellow": "#f1c21b", "status-red": "#da1e28", "status-gray": "#8d8d8d",
@@ -243,12 +253,13 @@ QMainWindow, #AppBody, #ContentScroll {{ background: {k['background']}; }}
 #HeaderMenuItem:hover, #HeaderMenuItem[open="true"] {{ background: {k['layer-hover-01']};
                    color: {k['text-primary']}; }}
 #HeaderMenuItem:focus {{ border: 2px solid {k['focus']}; }}
-QMenu {{ background: {k['layer-01']}; border: none; padding: 0px; }}
+/* Menus are widgets/menu.CarbonMenu (painted from tokens); these rules only give it Carbon geometry:
+   4 px block padding, 32 px items, 9 px dividers (1 px rule + 4 px margins). */
+QMenu {{ background: {k['layer-01']}; border: none; padding: 4px 0px; }}
 QMenu::item {{ padding: 0px 16px; min-height: 32px; height: 32px; color: {k['text-secondary']}; }}
 QMenu::item:selected {{ background: {k['layer-hover-01']}; color: {k['text-primary']}; }}
 QMenu::item:disabled {{ color: {k['text-disabled']}; }}
-QMenu::item:checked {{ color: {k['text-primary']}; }}
-QMenu::separator {{ height: 1px; background: {k['border-subtle-01']}; margin: 0px; }}
+QMenu::separator {{ height: 1px; background: {k['border-subtle-01']}; margin: 4px 0px; }}
 QMenu::indicator {{ width: 16px; height: 16px; padding-left: 8px; }}
 
 /* ---------------- buttons */
@@ -346,6 +357,9 @@ QComboBox::drop-down {{ border: none; width: 24px; }}
 QComboBox::down-arrow {{ image: url({icon_url('chevron_down', 'icon-primary')}); width: 16px; height: 16px; }}
 QComboBox QAbstractItemView {{ background: {k['layer-01']}; color: {k['text-primary']}; border: none;
              selection-background-color: {k['layer-hover-01']}; outline: none; }}
+QComboBox QAbstractItemView::item {{ min-height: 32px; padding: 0px 16px; color: {k['text-secondary']}; }}
+QComboBox QAbstractItemView::item:hover {{ background: {k['layer-hover-01']}; color: {k['text-primary']}; }}
+QComboBox QAbstractItemView::item:selected {{ background: {k['layer-selected-01']}; color: {k['text-primary']}; }}
 QComboBox[field="true"] {{ background: {k['field-02']}; border-bottom: 1px solid {k['border-strong-02']};
              padding: 0px 16px; }}
 
