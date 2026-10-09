@@ -1,24 +1,26 @@
 """Results data table (Figma 278:20578): toolbar, sortable header, prediction tags in cells, pagination.
 
-Architecture (measured; see ``tools/perf_harness.py``):
+Architecture (measured; see ``tools/perf_harness.py`` and ``design/implementation/performance.md``):
 
-* the rows live in a :class:`~hea_calc.core.store.ResultStore` (columnar, no Qt objects);
+* the results live in the SQLite :class:`~hea_calc.core.repository.ResultRepository`; the table
+  is a *view* of that dataset (:class:`~hea_calc.core.repository.ResultView`), never the dataset;
 * :class:`ResultsModel` is a ``QAbstractTableModel`` that exposes **only the current page**
-  (10/20/50/100 rows); filtering and sorting permute an array of row ids in the store, and changing
-  page swaps the small page slice;
+  (10/20/50/100 rows) fetched from the view; filtering and sorting are materialised by the
+  repository over the complete dataset (synchronously when that takes < 0.1 s, otherwise in the
+  background while the previous page stays on screen - ``pending``);
 * cells are painted by one delegate - no item, editor or widget per cell or row;
 * there is no Qt selection: ``NoSelection``, no current cell, no focus rectangle.  Rows highlight on
   hover only; a drag inside a text cell selects its *characters* (``CellTextSelection``, one
   transient overlay that paints with the delegate's own text layout) and ``Ctrl+C`` copies them;
 * double-click a row → Calculation details; right-click → :class:`~.menu.CarbonMenu` with
-  "Open details in new window" and copy/remove actions.  Rows are identified by store row id,
-  never by visual position.
+  "Open details in new window" and copy/remove actions.  Rows are identified by their stable
+  ``result_id``, never by visual position.
 """
 
 from __future__ import annotations
 
 import math
-from array import array
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -29,8 +31,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFram
                                QStyledItemDelegate, QStyleOptionViewItem, QTableView, QVBoxLayout, QWidget)
 
 from ...core import composition as C
+from ...core.repository import ResultRecord, ResultRepository, ResultView
 from ...core.results import COLUMN_BY_KEY, DEFAULT_COLUMNS, ResultRow, format_cell, full_precision, table_tsv
-from ...core.store import ResultStore, StoredRow
 from .. import crisp, icons
 from ..responsive import distribute
 from ..theme import BODY_COMPACT_01, HAIRLINE, HEADING_COMPACT_01, THEME, font, t
@@ -46,140 +48,167 @@ TEXT_PAD_LEFT = 16
 TEXT_PAD_RIGHT = 8
 
 
-# ====================================================================== row sequences (compatibility)
+# ====================================================================== row sequences (lazy, streamed)
 class RowSequence(Sequence):
-    """Read-only sequence of :class:`StoredRow` proxies over store ids (created on access)."""
+    """Read-only sequence over the dataset: the whole workspace in id order (``natural``) or the
+    table's filtered/sorted view.  Records are fetched on access; iteration streams in chunks."""
 
-    def __init__(self, store: ResultStore, ids: Sequence[int] | None):
-        self.store = store
-        self._ids = ids
-
-    def _id(self, i: int) -> int:
-        if self._ids is None:
-            n = len(self.store)
-            if i < 0:
-                i += n
-            if not 0 <= i < n:
-                raise IndexError(i)
-            return i
-        return self._ids[i]
+    def __init__(self, view: ResultView, natural: bool):
+        self.view = view
+        self.natural = natural
 
     def __len__(self):
-        return len(self.store) if self._ids is None else len(self._ids)
+        return self.view.total() if self.natural else self.view.count()
 
     def __getitem__(self, i):
         if isinstance(i, slice):
             return [self[j] for j in range(*i.indices(len(self)))]
-        return StoredRow(self.store, self._id(i))
+        rec = self.view.at(i, self.natural)
+        if rec is None:
+            raise IndexError(i)
+        return rec
 
     def __iter__(self):
-        ids = range(len(self.store)) if self._ids is None else self._ids
-        return (StoredRow(self.store, i) for i in ids)
+        return self.view.iterate(self.natural)
 
     def __eq__(self, other):
         return list(self) == list(other)
 
-    def ids(self) -> Sequence[int]:
-        return range(len(self.store)) if self._ids is None else self._ids
-
 
 # ====================================================================== model
 class ResultsModel(QAbstractTableModel):
-    """Page model over a :class:`ResultStore` (see module docstring).
+    """Page model over a :class:`ResultView` (see module docstring).
 
     ``page_changed`` fires when the visible page's rows or the view's counts change (pagination,
-    natural height, empty state); ``columns_changed`` when the column set changes.
+    natural height, empty state); ``columns_changed`` when the column set changes;
+    ``state_changed`` when a background sort/filter starts or finishes.
     """
 
     page_changed = Signal()
     columns_changed = Signal()
+    state_changed = Signal()
+    _task_done = Signal(object)          # builder thread -> GUI thread (queued)
 
-    def __init__(self, parent=None, engine=None):
+    def __init__(self, parent=None, engine=None, repo: ResultRepository | None = None):
         super().__init__(parent)
-        self.store = ResultStore(engine)
-        self._view: array | None = None       # None = every row in insertion order (no filter/sort/deletion)
+        self._own_repo = repo is None
+        self.repo = repo if repo is not None else ResultRepository(engine)
+        self.repo.set_notify(self._task_done.emit)
+        self._task_done.connect(self._on_task)
+        self.view = ResultView(self.repo)
         self.keys: list[str] = list(DEFAULT_COLUMNS)
-        self.filters: list = []
         self.page = 0
         self.page_size = 100
-        self.sort_key: str | None = None
-        self.sort_desc = False
-        self.sort_dirty = False
-        self._page_ids: list[int] = []
+        self._page: list[ResultRecord] = []
         self._cells: dict[int, list[str]] = {}
+        self.last_error: str | None = None
+        self._user_request = False           # the pending build was asked for by the user (sort/filter)
 
-    # ------------------------------------------------------------------ view / sequences
+    def close(self) -> None:
+        """Release the repository if this model created it."""
+        self.repo.set_notify(None)
+        if self._own_repo:
+            self.repo.close()
+
+    # ------------------------------------------------------------------ state
+    @property
+    def filters(self) -> list:
+        return self.view.filters
+
+    @property
+    def sort_key(self) -> str | None:
+        return self.view.sort_key
+
+    @property
+    def sort_desc(self) -> bool:
+        return self.view.sort_desc
+
+    @property
+    def pending(self) -> bool:
+        """A sort/filter the user asked for is being materialised in the background (large data)."""
+        return self.view.pending is not None and self._user_request
+
     def view_count(self) -> int:
-        return len(self.store) if self._view is None else len(self._view)
+        return self.view.count()
+
+    def total_count(self) -> int:
+        return self.view.total()
 
     @property
     def rows(self) -> RowSequence:
-        """Every row (insertion order)."""
-        if self.store.n_alive == len(self.store):
-            return RowSequence(self.store, None)
-        return RowSequence(self.store, self.store.ids())
+        """Every result of the table's dataset (id order) - streamed, never materialised."""
+        return RowSequence(self.view, True)
 
     @property
     def view_rows(self) -> RowSequence:
-        """Filtered + sorted rows (the table's order)."""
-        return RowSequence(self.store, self._view)
-
-    def view_ids(self) -> Sequence[int]:
-        return range(len(self.store)) if self._view is None else self._view
+        """Filtered + sorted rows (the table's order) - streamed."""
+        return RowSequence(self.view, False)
 
     def position_of(self, rid: int) -> int:
-        if self._view is None:
-            return rid if 0 <= rid < len(self.store) else -1
-        try:
-            return self._view.index(rid)
-        except ValueError:
-            return -1
+        return self.view.position_of(rid)
 
     def page_count(self) -> int:
         return max(1, math.ceil(self.view_count() / self.page_size))
 
-    def page_rows(self) -> list[StoredRow]:
-        return [StoredRow(self.store, i) for i in self._page_ids]
+    def page_rows(self) -> list[ResultRecord]:
+        return list(self._page)
 
-    def row_at(self, r: int) -> StoredRow | None:
-        return StoredRow(self.store, self._page_ids[r]) if 0 <= r < len(self._page_ids) else None
+    def row_at(self, r: int) -> ResultRecord | None:
+        return self._page[r] if 0 <= r < len(self._page) else None
 
     def id_at(self, r: int) -> int | None:
-        return self._page_ids[r] if 0 <= r < len(self._page_ids) else None
+        return self._page[r].id if 0 <= r < len(self._page) else None
 
     # ------------------------------------------------------------------ data management
-    def set_rows(self, rows: list[ResultRow]):
-        self.store.clear()
-        self.store.append_results(rows)
-        self._rebuild()
-        self._refresh_page()
-
-    def append_rows(self, rows: list[ResultRow], options: dict | None = None) -> range:
-        rng = self.store.append_results(rows, options)
-        self.rows_appended(rng)
+    def append_rows(self, rows: list[ResultRow], options: dict | None = None, mode: str = "single",
+                    source: dict | None = None) -> range:
+        """Store already-calculated rows as one run (single compositions, tools) - synchronous."""
+        rows = list(rows)
+        elements: list[str] = []
+        for r in rows:
+            for el in r.input_amounts:
+                if el not in elements:
+                    elements.append(el)
+        run = self.repo.create_run(mode, settings=dict(options or {}), source=source or {}, elements=elements,
+                                   expected=len(rows))
+        try:
+            rng = self.repo.append_results(run, rows)
+        finally:
+            self.repo.finalize_run(run, "complete")
+        self.refresh_committed()
         return rng
 
-    def rows_appended(self, rng: range):
-        """New store rows ``rng`` arrived (streaming): extend the view without rebuilding it."""
-        if self._view is not None:
-            ids = array("I", rng)
-            if self.filters:
-                ids = self.store.filter_ids(ids, self.filters)
-            if self.sort_key and len(ids):
-                self.sort_dirty = True
-            self._view.extend(ids)
-        self._refresh_page()
+    def refresh_committed(self, resort: bool = True) -> bool:
+        """Pick up rows the writer has committed (cheap: no query unless the page changes).  A sorted
+        view built before them is re-sorted (``resort``; a running job re-sorts with back-off instead)."""
+        if self.view.refresh():
+            if resort and self.view.wants_resort(running=False):
+                self.resort()
+            else:
+                self._refresh_page()
+            return True
+        return False
 
     def remove_rows(self, rows):
-        self.store.remove(r.id if isinstance(r, StoredRow) else r for r in rows)
-        self._rebuild()
-        self._refresh_page()
+        self.view.remove([r for r in rows if isinstance(r, ResultRecord)])
+        ids = [int(r) for r in rows if isinstance(r, int)]
+        if ids:
+            self.view.remove_ids(ids)
+        self._refresh_page(force=True)
 
     def clear(self):
-        self.store.clear()
-        self._view = None
+        """Delete every result of the table (in the background); filters and sort stay."""
+        self.view.clear()
         self.page = 0
-        self._refresh_page()
+        self._refresh_page(force=True)
+        self.state_changed.emit()
+
+    def hide_all(self) -> tuple[int, int]:
+        old = self.view.hide_all()
+        self.page = 0
+        self._refresh_page(force=True)
+        self.state_changed.emit()
+        return old
 
     def set_keys(self, keys: list[str]):
         self.beginResetModel()
@@ -190,10 +219,9 @@ class ResultsModel(QAbstractTableModel):
         self.page_changed.emit()
 
     def set_filters(self, filters: list):
-        self.filters = list(filters)
         self.page = 0
-        self._rebuild()
-        self._refresh_page()
+        self._user_request = True
+        self._apply(self.view.request(filters=list(filters)))
 
     def set_page(self, page: int):
         page = max(0, min(page, self.page_count() - 1))
@@ -210,59 +238,69 @@ class ResultsModel(QAbstractTableModel):
     def sort_by(self, key: str):
         if self.sort_key == key:
             if self.sort_desc:
-                self.sort_key, self.sort_desc = None, False  # third click: original order (Carbon)
+                key, desc = None, False                  # third click: original order (Carbon)
             else:
-                self.sort_desc = True
+                desc = True
         else:
-            self.sort_key, self.sort_desc = key, False
-        self._rebuild()
-        self._refresh_page(force=True)
+            desc = False
+        self._user_request = True
+        self._apply(self.view.request(sort=(key, desc)))
         self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, max(0, len(self.keys) - 1))
 
-    def resort(self):
-        if self.sort_key and self._view is not None:
-            self._view = self.store.sort_ids(self._view, self.sort_key, self.sort_desc)
-        self.sort_dirty = False
-        self._refresh_page(force=True)
+    def resort(self, wait: float | None = None):
+        """Re-materialise the current sort/filter (new rows while a sort is active)."""
+        if self.view.pending is None:
+            self._user_request = False
+        self._apply(self.view.rebuild() if wait is None else self.view.rebuild(wait))
 
-    def _rebuild(self):
-        st = self.store
-        if not self.filters and not self.sort_key and st.n_alive == len(st):
-            self._view = None
-        else:
-            ids = st.ids()
-            if self.filters:
-                ids = st.filter_ids(ids, self.filters)
-            if self.sort_key:
-                ids = st.sort_ids(ids, self.sort_key, self.sort_desc)
-            self._view = ids
-        self.sort_dirty = False
+    def wait(self, timeout: float = 60.0) -> None:
+        """Block until a background sort/filter is applied (tools and tests)."""
+        if self.view.pending is not None or self.view._extending is not None:
+            self.view.wait(timeout)
+            self._refresh_page(force=True)
+            self.state_changed.emit()
+
+    def _apply(self, applied: bool):
+        self._refresh_page(force=True)
+        self.state_changed.emit()
+
+    def _on_task(self, task):
+        try:
+            changed = self.view.apply_task(task)
+        except Exception as exc:                     # noqa: BLE001 - a failed build: keep the old view
+            self.last_error = str(exc)
+            changed = True
+        if changed:
+            self._refresh_page(force=True)
+            self.state_changed.emit()
 
     def _refresh_page(self, force: bool = False):
         self.page = max(0, min(self.page, self.page_count() - 1))
-        a = self.page * self.page_size
-        b = min(a + self.page_size, self.view_count())
-        ids = list(range(a, b)) if self._view is None else list(self._view[a:b])
-        if ids != self._page_ids or force:
-            if len(ids) == len(self._page_ids) and ids:
-                self._page_ids = ids
+        recs = self.view.page(self.page * self.page_size, self.page_size)
+        ids = [r.id for r in recs]
+        old = [r.id for r in self._page]
+        if ids != old or force:
+            if len(ids) == len(old) and ids:
+                self._page = recs
                 self._cells.clear()
                 self.dataChanged.emit(self.index(0, 0), self.index(len(ids) - 1, max(0, len(self.keys) - 1)))
-            elif len(ids) > len(self._page_ids) and ids[:len(self._page_ids)] == self._page_ids:
-                first = len(self._page_ids)
+            elif len(ids) > len(old) and ids[:len(old)] == old:
+                first = len(old)
                 self.beginInsertRows(QModelIndex(), first, len(ids) - 1)
-                self._page_ids = ids
+                self._page = recs
                 self.endInsertRows()
             else:
                 self.beginResetModel()
-                self._page_ids = ids
+                self._page = recs
                 self._cells.clear()
                 self.endResetModel()
+        else:
+            self._page = recs                            # same rows: fresh records (positions)
         self.page_changed.emit()
 
     # ------------------------------------------------------------------ Qt model
     def rowCount(self, parent=QModelIndex()):
-        return 0 if parent.isValid() else len(self._page_ids)
+        return 0 if parent.isValid() else len(self._page)
 
     def columnCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self.keys)
@@ -270,7 +308,7 @@ class ResultsModel(QAbstractTableModel):
     def cell_text(self, r: int, c: int) -> str:
         cells = self._cells.get(r)
         if cells is None:
-            row = StoredRow(self.store, self._page_ids[r])
+            row = self._page[r]
             cells = self._cells[r] = [format_cell(row, k) for k in self.keys]
         return cells[c]
 
@@ -301,6 +339,9 @@ class ResultsModel(QAbstractTableModel):
 
     def flags(self, index):
         return Qt.ItemFlag.ItemIsEnabled            # never selectable, never editable
+
+
+_ = time
 
 
 # ====================================================================== cell text layout
@@ -699,7 +740,7 @@ class ResultsView(QTableView):
         menu.exec(e.globalPos())
         menu.deleteLater()
 
-    def row_menu(self, row: StoredRow, key: str) -> CarbonMenu:
+    def row_menu(self, row: ResultRecord, key: str) -> CarbonMenu:
         menu = CarbonMenu(parent=self)
         sel = self.selection.clipboard_text()
         if sel:
@@ -711,16 +752,16 @@ class ResultsView(QTableView):
             self._copy_value(row, key)))
         menu.add_action("Copy row", lambda: QGuiApplication.clipboard().setText(table_tsv([row], self.m.keys)))
         menu.addSeparator()
-        menu.add_action("Remove row", lambda: self._remove(row), danger=True)
+        menu.add_action("Remove result", lambda: self._remove(row), danger=True)
         return menu
 
     @staticmethod
-    def _copy_value(row: StoredRow, key: str) -> str:
+    def _copy_value(row: ResultRecord, key: str) -> str:
         if COLUMN_BY_KEY[key].kind == "model":
             return row.model_label(key)
         return full_precision(row, key)
 
-    def _remove(self, row: StoredRow):
+    def _remove(self, row: ResultRecord):
         self.m.remove_rows([row])
         self.rows_removed.emit()
 
@@ -868,26 +909,57 @@ class StickyHeader(Header):
 
 # ====================================================================== pagination
 class PageListModel(QAbstractListModel):
-    """Virtual page-number list for the page select: 10 000 pages cost no item objects."""
+    """Page-number list for the page select: a sliding window of at most ``WINDOW`` pages.
+
+    Measured on the native Windows platform: ``QComboBox.setCurrentIndex`` reads *every* item of
+    its model (the UI Automation bridge), 0.49 s for 100 000 pages - and 5 M results at 10 per page
+    are 500 000 pages.  The select therefore lists the pages around the current one (all of them
+    up to ``WINDOW``) and re-centres as the page changes, so its cost no longer grows with the
+    dataset.  ``n`` is the true page count."""
+
+    WINDOW = 1000
+    MARGIN = 50
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.n = 1
+        self.offset = 0
 
-    def set_count(self, n: int) -> bool:
-        if n == self.n:
+    def set_count(self, n: int, current: int = 0) -> bool:
+        offset = self.offset
+        size = min(n, self.WINDOW)
+        if n <= self.WINDOW:
+            offset = 0
+        elif not (offset + self.MARGIN <= current < offset + size - self.MARGIN) or offset + size > n:
+            offset = max(0, min(current - size // 2, n - size))
+        if (n, offset) == (self.n, self.offset):
             return False
+        old_rows, new_rows = min(self.n, self.WINDOW), size
+        if offset == self.offset and new_rows == old_rows:
+            self.n = n                      # more pages beyond the window: the list itself is unchanged
+            return False
+        if offset == self.offset and new_rows > old_rows:
+            self.beginInsertRows(QModelIndex(), old_rows, new_rows - 1)     # pages appended while results stream in
+            self.n = n
+            self.endInsertRows()
+            return True
         self.beginResetModel()
-        self.n = n
+        self.n, self.offset = n, offset
         self.endResetModel()
         return True
 
+    def row_of(self, page: int) -> int:
+        return page - self.offset
+
+    def page_of(self, row: int) -> int:
+        return self.offset + row
+
     def rowCount(self, parent=QModelIndex()):
-        return 0 if parent.isValid() else self.n
+        return 0 if parent.isValid() else min(self.n, self.WINDOW)
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if index.isValid() and role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
-            return str(index.row() + 1)
+            return str(self.offset + index.row() + 1)
         return None
 
 
@@ -940,7 +1012,7 @@ class PaginationBar(QFrame):
         lay.addWidget(self._vdiv())
         lay.addWidget(self.next_btn)
         self.size_box.currentIndexChanged.connect(lambda i: self.m.set_page_size(PAGE_SIZES[i]))
-        self.page_box.activated.connect(lambda i: self.m.set_page(i))
+        self.page_box.activated.connect(lambda i: self.m.set_page(self.pages.page_of(i)))
         self.prev_btn.clicked.connect(lambda: self.m.set_page(self.m.page - 1))
         self.next_btn.clicked.connect(lambda: self.m.set_page(self.m.page + 1))
         self.m.page_changed.connect(self.refresh)
@@ -954,19 +1026,26 @@ class PaginationBar(QFrame):
 
     def refresh(self):
         n = self.m.view_count()
-        total = self.m.store.n_alive
-        state = (n, total, self.m.page, self.m.page_size)
+        total = self.m.total_count()
+        state = (n, total, self.m.page, self.m.page_size, bool(self.m.filters))
         if state == self._state:
             return
         self._state = state
         a = self.m.page * self.m.page_size
         b = min(a + self.m.page_size, n)
-        suffix = f" (filtered from {total:,})" if n != total else ""
+        if n == total:
+            suffix = ""
+        elif self.m.filters:
+            suffix = f" (filtered from {total:,})"
+        else:                                  # sorted view built before the latest rows arrived
+            suffix = f" (+{total - n:,} not yet sorted)"
         self.range_lbl.setText(f"{a + 1 if n else 0:,}–{b:,} of {n:,} item{'s' if n != 1 else ''}{suffix}")
         pc = self.m.page_count()
         self.page_box.blockSignals(True)
-        self.pages.set_count(pc)
-        self.page_box.setCurrentIndex(self.m.page)
+        self.pages.set_count(pc, self.m.page)
+        row = self.pages.row_of(self.m.page)
+        if self.page_box.currentIndex() != row:
+            self.page_box.setCurrentIndex(row)
         self.page_box.blockSignals(False)
         self.of_lbl.setText(f"of {pc:,} page{'s' if pc != 1 else ''}")
         self.prev_btn.setEnabled(self.m.page > 0)
@@ -1018,6 +1097,27 @@ class TableEmptyState(QWidget):
         self.update()
 
 
+def build_export_menu(menu: CarbonMenu, export, copy_all, copy_page) -> None:
+    """Export the dataset (all results, or the filtered results), never just the visible page;
+    clipboard copies are view operations."""
+    menu.add_action("Excel workbook (.xlsx)…", lambda: export("xlsx", "all"))
+    menu.add_action("CSV (.csv)…", lambda: export("csv", "all"))
+    menu.addSeparator()
+    a = menu.add_action("Filtered results (.xlsx)…", lambda: export("xlsx", "filtered"))
+    b = menu.add_action("Filtered results (.csv)…", lambda: export("csv", "filtered"))
+    a.setProperty("filtered_only", True)
+    b.setProperty("filtered_only", True)
+    menu.addSeparator()
+    menu.add_action("Copy table to clipboard", copy_all)
+    menu.add_action("Copy visible rows", copy_page)
+
+
+def update_export_menu(menu: CarbonMenu, filtered: bool) -> None:
+    for act in menu.actions():
+        if act.property("filtered_only"):
+            act.setEnabled(filtered)
+
+
 class ResultsTable(QFrame):
     """Toolbar + table + pagination."""
 
@@ -1025,13 +1125,14 @@ class ResultsTable(QFrame):
     filter_requested = Signal()
     columns_requested = Signal()
     copy_requested = Signal()
-    export_requested = Signal(str)  # "xlsx" | "csv"
+    copy_page_requested = Signal()
+    export_requested = Signal(str, str)  # "xlsx" | "csv", "all" | "filtered"
 
-    def __init__(self, parent=None, engine=None):
+    def __init__(self, parent=None, engine=None, repo: ResultRepository | None = None):
         super().__init__(parent)
         self.setObjectName("DataTable")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.model = ResultsModel(self, engine)
+        self.model = ResultsModel(self, engine, repo)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -1054,10 +1155,8 @@ class ResultsTable(QFrame):
         self.export_btn.setProperty("btnsize", "sm")
         self.export_btn.setFixedWidth(123)
         menu = CarbonMenu(parent=self.export_btn)
-        menu.add_action("Excel workbook (.xlsx)…", lambda: self.export_requested.emit("xlsx"))
-        menu.add_action("CSV (.csv)…", lambda: self.export_requested.emit("csv"))
-        menu.addSeparator()
-        menu.add_action("Copy table to clipboard", self.copy_requested.emit)
+        build_export_menu(menu, self.export_requested.emit, self.copy_requested.emit, self.copy_page_requested.emit)
+        menu.aboutToShow.connect(lambda: update_export_menu(menu, bool(self.model.filters)))
         self.export_menu = menu
         self.export_btn.setMenu(menu)
         bl.addWidget(self.export_btn)
@@ -1116,7 +1215,7 @@ class ResultsTable(QFrame):
 
     def _update_empty(self):
         m = self.model
-        if not m.store.n_alive:
+        if not m.total_count():
             self.empty.set_text("No results yet", "Click Calculate to add alloys to this table.")
         elif not m.view_count():
             self.empty.set_text("No matching results", "Change or clear the filters in the toolbar.")

@@ -164,70 +164,21 @@ def read_compositions(path: str | Path, datasets: Datasets | None = None) -> Imp
 
 # ---------------------------------------------------------------------- export
 def export_rows(rows, path: str | Path, *, visible_keys: list[str] | None = None,
-                notes: dict | None = None) -> Path:
-    """Write results to .xlsx (full precision) or .csv."""
+                notes: dict | None = None, elements: list[str] | None = None) -> Path:
+    """Write results (any row-protocol iterable) to .xlsx (full precision) or .csv.
+
+    ``elements`` fixes the at.% columns up front (the repository knows them per run); without it
+    the rows are scanned once for their elements, so only pass a re-iterable sequence then."""
+    from .export import write_records
     path = Path(path)
-    keys = [c.key for c in COLUMNS if c.key not in ("composition",)]
-    elements: list[str] = []
-    for r in rows:
-        for el in r.composition:
-            if el not in elements:
-                elements.append(el)
-    headers = ["Alloy", "Source"] + [f"{el} (at.%)" for el in elements] + \
-        [COLUMN_BY_KEY[k].header for k in keys if k != "name"] + \
-        [f"{k} note" for k in MODEL_KEYS] + ["Warnings", "Error"]
-
-    def row_values(r: ResultRow) -> list:
-        vals: list = [r.name, r.source]
-        comp = r.composition
-        vals += [100.0 * comp.get(el, 0.0) if comp else None for el in elements]
-        for k in keys:
-            if k == "name":
-                continue
-            v = r.raw(k)
-            if isinstance(v, float) and (math.isinf(v) or math.isnan(v)):
-                v = "inf" if v > 0 else ("-inf" if v < 0 else "nan")
-            vals.append(v)
-        for k in MODEL_KEYS:
-            vals.append(r.model_note(k))
-        vals.append(" ".join(r.warnings))
-        vals.append(r.error or "")
-        return vals
-
-    if path.suffix.lower() == ".csv":
-        with path.open("w", newline="", encoding="utf-8-sig") as fh:
-            w = csv.writer(fh)
-            w.writerow(headers)
-            for r in rows:
-                w.writerow(["" if v is None else v for v in row_values(r)])
-        return path
-
-    import xlsxwriter
-    wb = xlsxwriter.Workbook(str(path), {"nan_inf_to_errors": True})
-    ws = wb.add_worksheet("Results")
-    bold = wb.add_format({"bold": True})
-    for j, h in enumerate(headers):
-        ws.write(0, j, h, bold)
-    for i, r in enumerate(rows, start=1):
-        for j, v in enumerate(row_values(r)):
-            if v is None:
-                ws.write_blank(i, j, None)
-            elif isinstance(v, (int, float)):
-                ws.write_number(i, j, v)
-            else:
-                ws.write_string(i, j, str(v))
-    ws.freeze_panes(1, 1)
-    meta = wb.add_worksheet("About")
-    lines = [
-        ("Generated", _dt.datetime.now().isoformat(timespec="seconds")),
-        ("Rows", len(rows)),
-    ]
-    for k in MODEL_KEYS:
-        lines.append((k, f"{MODELS[k].title}: {MODELS[k].criterion}"))
-    for k, v in (notes or {}).items():
-        lines.append((k, v))
-    for i, (a, b) in enumerate(lines):
-        meta.write(i, 0, a, bold)
-        meta.write(i, 1, str(b))
-    wb.close()
+    if elements is None:
+        elements = []
+        for r in rows:
+            for el in r.composition:
+                if el not in elements:
+                    elements.append(el)
+    write_records(rows, path, elements, notes=notes)
     return path
+
+
+_ = (csv, _dt, math, MODEL_KEYS, MODELS, COLUMN_BY_KEY, COLUMNS, ResultRow)

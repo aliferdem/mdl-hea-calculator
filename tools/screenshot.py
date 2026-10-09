@@ -74,7 +74,7 @@ def demo(win, mode: str):
     ]
     for name, c in rows:
         win.calculate("single", [name], [c], [{}])
-    win._jump_to(0)
+    win._jump_to(win.table.model.view.lo)          # the first result of the table
     if mode == "sweep":
         comp.set_mode(1)
     elif mode == "expression":

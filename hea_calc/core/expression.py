@@ -29,7 +29,10 @@ from dataclasses import dataclass, field
 from .data import Datasets, default_datasets
 from .generation import RangeError, _decimals
 
-MAX_COMBINATIONS = 200_000
+# Variable combinations per batch.  Duplicate removal keeps ~98 bytes per kept composition in one
+# worker and walks ~70 000 combinations/s (measured): 5 M stays under ~0.5 GB / ~75 s, faster than
+# the calculation it feeds (~19 000 alloys/s).  Formerly 200 000 (the in-memory result store).
+MAX_COMBINATIONS = 5_000_000
 
 
 class ExpressionError(ValueError):
@@ -429,6 +432,24 @@ class ExpressionBatch:
     variables: list[dict[str, float]]
     skipped: int  # combinations rejected (negative amounts, fewer than two elements, …)
     duplicates: int
+    blocks: list[int] = field(default_factory=list)   # index of the expression block of each composition
+
+
+def composition_key(positive: dict[str, float]) -> tuple:
+    """Identity of a composition for duplicate removal: normalised fractions rounded to 1e-10."""
+    tot = sum(positive.values())
+    return tuple(sorted((el, round(v / tot, 10)) for el, v in positive.items()))
+
+
+def evaluate_positive(expression: "Expression", env: dict[str, float]) -> dict[str, float] | None:
+    """Amounts > 1e-12 for ``env``; ``None`` when the combination is skipped (invalid amounts or
+    fewer than two elements) - the rule of :func:`generate`."""
+    try:
+        amounts = expression.evaluate(env)
+    except ExpressionError:
+        return None
+    positive = {el: v for el, v in amounts.items() if v > 1e-12}
+    return positive if len(positive) >= 2 else None
 
 
 def generate(expression: Expression, ranges: dict[str, VariableRange], limit: int = MAX_COMBINATIONS,
@@ -448,17 +469,11 @@ def generate(expression: Expression, ranges: dict[str, VariableRange], limit: in
         if cancelled is not None and not i & 0x3FF and cancelled():
             raise GenerationCancelled()
         env = dict(zip(names, combo))
-        try:
-            amounts = expression.evaluate(env)
-        except ExpressionError:
+        positive = evaluate_positive(expression, env)
+        if positive is None:
             skipped += 1
             continue
-        positive = {el: v for el, v in amounts.items() if v > 1e-12}
-        if len(positive) < 2:
-            skipped += 1
-            continue
-        tot = sum(positive.values())
-        key = tuple(sorted((el, round(v / tot, 10)) for el, v in positive.items()))
+        key = composition_key(positive)
         if key in seen:
             dups += 1
             continue
@@ -524,17 +539,16 @@ def count_combinations(expressions: list[Expression], ranges: dict[str, Variable
 def generate_blocks(expressions: list[Expression], ranges: dict[str, VariableRange],
                     limit: int = MAX_COMBINATIONS, cancelled=None) -> ExpressionBatch:
     """Generate every block with the shared variable ranges; duplicates across blocks are removed."""
-    comps, names, envs = [], [], []
+    comps, names, envs, blocks = [], [], [], []
     skipped = dups = 0
     seen = set()
-    for ex in expressions:
+    for b, ex in enumerate(expressions):
         sub = {k: v for k, v in ranges.items() if k in ex.variables}
         batch = generate(ex, sub, limit, cancelled)
         skipped += batch.skipped
         dups += batch.duplicates
         for c, n, e in zip(batch.compositions, batch.names, batch.variables):
-            tot = sum(c.values())
-            key = tuple(sorted((el, round(v / tot, 10)) for el, v in c.items()))
+            key = composition_key(c)
             if key in seen:
                 dups += 1
                 continue
@@ -542,6 +556,91 @@ def generate_blocks(expressions: list[Expression], ranges: dict[str, VariableRan
             comps.append(c)
             names.append(n)
             envs.append(e)
+            blocks.append(b)
             if len(comps) > limit:
                 raise RangeError(f"More than {limit:,} compositions; increase the steps.")
-    return ExpressionBatch(comps, names, envs, skipped, dups)
+    return ExpressionBatch(comps, names, envs, skipped, dups, blocks)
+
+
+def expression_elements(expressions: list[Expression]) -> list[str]:
+    """Element symbols of the blocks in order of first appearance."""
+    out: list[str] = []
+
+    def walk(items):
+        for it in items:
+            if isinstance(it, ElementItem):
+                if it.symbol not in out:
+                    out.append(it.symbol)
+            else:
+                walk(it.items)
+    for ex in expressions:
+        walk(ex.items)
+    return out
+
+
+class ExpressionSpace:
+    """Random access to the combinations of expression blocks.
+
+    Global combination index ``g``: blocks in order, inside a block the ``itertools.product`` order
+    of the block's variables (the order :func:`generate_blocks` walks).  Used by calculation workers
+    to evaluate any slice without generating what precedes it, and by the duplicate plan.
+    """
+
+    def __init__(self, expressions: list[Expression], ranges: dict[str, VariableRange]):
+        self.expressions = list(expressions)
+        self.value_lists: list[list[list[float]]] = []
+        self.sizes: list[int] = []
+        for ex in self.expressions:
+            missing = [v for v in ex.variables if v not in ranges]
+            if missing:
+                raise RangeError("Set Min / Max / Step for: " + ", ".join(missing))
+            vl = [ranges[v].values() for v in ex.variables]
+            self.value_lists.append(vl)
+            self.sizes.append(math.prod(len(v) for v in vl) if vl else 1)
+        self.offsets = list(itertools.accumulate([0] + self.sizes[:-1]))
+        self.total = sum(self.sizes)
+
+    def locate(self, g: int) -> tuple[int, dict[str, float]]:
+        """(block index, variable values) of combination ``g``."""
+        import bisect
+        b = bisect.bisect_right(self.offsets, g) - 1
+        i = g - self.offsets[b]
+        vl = self.value_lists[b]
+        vals = [0.0] * len(vl)
+        for j in range(len(vl) - 1, -1, -1):      # product order: the last variable varies fastest
+            i, d = divmod(i, len(vl[j]))
+            vals[j] = vl[j][d]
+        return b, dict(zip(self.expressions[b].variables, vals))
+
+    def evaluate(self, g: int) -> tuple[int, dict[str, float], dict[str, float] | None]:
+        b, env = self.locate(g)
+        return b, env, evaluate_positive(self.expressions[b], env)
+
+    def name(self, block: int, env: dict[str, float]) -> str:
+        return self.expressions[block].name(env)
+
+
+def count_blocks(expressions: list[Expression], ranges: dict[str, VariableRange],
+                 cancelled=None) -> tuple[int, int, int]:
+    """(valid, skipped, duplicates) of :func:`generate_blocks` without building its lists.
+
+    Duplicate detection keeps a 16-byte digest per distinct composition (~0.1 KiB each instead of a
+    tuple of tuples), so a multi-million-combination count stays within a few hundred MiB."""
+    import hashlib
+    space = ExpressionSpace(expressions, ranges)
+    seen: set[bytes] = set()
+    valid = skipped = dups = 0
+    for g in range(space.total):
+        if cancelled is not None and not g & 0x3FF and cancelled():
+            raise GenerationCancelled()
+        _b, _env, positive = space.evaluate(g)
+        if positive is None:
+            skipped += 1
+            continue
+        key = hashlib.blake2b(repr(composition_key(positive)).encode(), digest_size=16).digest()
+        if key in seen:
+            dups += 1
+            continue
+        seen.add(key)
+        valid += 1
+    return valid, skipped, dups

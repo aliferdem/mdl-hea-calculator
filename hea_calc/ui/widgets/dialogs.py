@@ -361,3 +361,25 @@ class AboutDialog(Modal):
         v.addStretch(1)
         self.body.addWidget(scroll(inner), 1)
         self.add_footer_button("Close", "primary", self.accept)
+
+
+class ChoiceDialog(Modal):
+    """Carbon modal with a message and one footer button per choice; ``choice`` is the chosen key
+    (None when closed).  The last choice is the primary button."""
+
+    def __init__(self, title: str, label: str, message: str, choices: list[tuple[str, str]], parent=None):
+        super().__init__(title, label, parent, width=560)
+        self.resize(560, 280)
+        lab = QLabel(message)
+        lab.setTextFormat(Qt.TextFormat.RichText)
+        lab.setWordWrap(True)
+        self.body.addWidget(lab)
+        self.body.addStretch(1)
+        self.choice: str | None = None
+        for i, (key, text) in enumerate(choices):
+            kind = "primary" if i == len(choices) - 1 else ("ghost" if i == 0 else "secondary")
+            self.add_footer_button(text, kind, lambda _=False, k=key: self._choose(k))
+
+    def _choose(self, key: str):
+        self.choice = key
+        self.accept() if key != "cancel" else self.reject()

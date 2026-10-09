@@ -10,10 +10,13 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel, Q
                                QProgressBar, QVBoxLayout, QWidget)
 
 from ..core.engine import DEFAULT_TCRIT_FRACTION, Engine, default_engine
+from ..core.export import CLIPBOARD_MAX_ROWS, XLSX_MAX_ROWS, write_records, write_tsv
 from ..core.jobs import CalculationJob, CalculationService, JobInput
+from ..core.limits import HARD_LIMIT, capacity_problem
+from ..core.recipes import RecalcRecipe
+from ..core.repository import RepositoryError, ResultRecord, ResultRepository, user_message
 from ..core.results import DEFAULT_COLUMNS, COLUMN_BY_KEY, ResultRow, table_tsv
-from ..core.spreadsheet import SpreadsheetError, export_rows, read_compositions
-from ..core.store import StoredRow
+from ..core.spreadsheet import SpreadsheetError, read_compositions
 from . import icons
 from .theme import (COMPOSITION_PANEL_MIN, COMPOSITION_PANEL_WIDTH, CONTENT_MARGIN_BOTTOM, CONTENT_MARGIN_TOP,
                     CONTENT_MARGIN_X, DETAILS_PANEL_MIN, DETAILS_PANEL_WIDTH, ELEMENT_PANEL_MIN, ELEMENT_PANEL_WIDTH,
@@ -21,15 +24,15 @@ from .theme import (COMPOSITION_PANEL_MIN, COMPOSITION_PANEL_WIDTH, CONTENT_MARG
 from .widgets.common import InlineNotification, button
 from .widgets.composition_panel import CompositionPanel
 from .widgets.details_panel import DetailsPanel
-from .widgets.dialogs import (AboutDialog, AlloyDetailsDialog, ColumnsDialog, FilterDialog, ImportReportDialog,
-                              SettingsDialog)
+from .widgets.dialogs import (AboutDialog, AlloyDetailsDialog, ChoiceDialog, ColumnsDialog, FilterDialog,
+                              ImportReportDialog, SettingsDialog)
 from .widgets.element_panel import ElementPanel
 from .widgets.header import AppHeader
 from .widgets.layouts import UpperPanels
 from .widgets.menu import CarbonMenu, carbonize_popups
-from .widgets.results_table import PAGE_SIZES, ResultsTable, StickyHeader
+from .widgets.results_table import PAGE_SIZES, ResultsTable, StickyHeader, build_export_menu, update_export_menu
 from .widgets.scroll import MainScrollArea
-from .worker import JobRunner
+from .worker import ExportTask, JobRunner
 
 APP_ICON = Path(__file__).resolve().parent / "icons" / "logo_icon.ico"
 
@@ -68,10 +71,21 @@ class MainWindow(QMainWindow):
         self.annealing: float | None = self.settings.value("annealing", None, float) if self.settings.contains(
             "annealing") else None
         self.fraction = float(self.settings.value("tcrit_fraction", DEFAULT_TCRIT_FRACTION))
-        # CPU-bound batches run in worker processes (core/jobs.py); the runner feeds the table at 10 Hz
-        self.jobs = CalculationService()
-        QApplication.instance().aboutToQuit.connect(self.jobs.shutdown)   # also when quit without a close
-        self._first_new = 0
+        # The calculation dataset lives in a session SQLite database (core/repository.py); the table
+        # is a page-sized view of it.  CPU-bound batches run in worker processes (core/jobs.py) whose
+        # results go to the repository's single writer; the runner refreshes the view at 10 Hz.
+        self.repo = ResultRepository(self.engine)
+        self.jobs = CalculationService(channel=self.repo.writer.inbox)   # workers deliver to the writer
+        self.jobs.scratch_dir = str(self.repo.session_dir)
+        QApplication.instance().aboutToQuit.connect(self.shutdown)   # also when quit without a close
+        self._job_queue: list = []          # recalculation: one job per stored run, run in sequence
+        self._pending_delete: tuple[int, int] | None = None
+        self._batch_added = 0
+        self._batch_failed = 0
+        self._batch_first: int | None = None
+        self._details_id: int | None = None
+        self._export_job: dict | None = None
+        self._closed = False
         self.setWindowTitle("HEA Calculator")
         if APP_ICON.exists():
             self.setWindowIcon(QIcon(str(APP_ICON)))
@@ -111,8 +125,11 @@ class MainWindow(QMainWindow):
         self.notification = InlineNotification()
         self.progress = ProgressBanner()
         self.progress.cancel.clicked.connect(self.cancel_calculation)
-        self.table = ResultsTable(engine=self.engine)
+        self.table = ResultsTable(engine=self.engine, repo=self.repo)
         self.runner = JobRunner(self.jobs, self.table.model, self)
+        self.exporter = ExportTask(self)
+        self.exporter.progress.connect(self._export_progress)
+        self.exporter.finished.connect(self._export_done)
         self.runner.progress.connect(self._progress)
         self.runner.finished.connect(self._done)
         table_col.addWidget(self.notification)
@@ -152,6 +169,11 @@ class MainWindow(QMainWindow):
         self.composition.message.connect(self.notify)
         self.composition.copy_compositions.connect(self._copy_generated)
         self.composition.set_service(self.jobs)
+        # Batch modes calculate in the worker pool: start it in the background as soon as one is chosen
+        # (measured: a cold pool start overlapping the first batch raised its longest event-loop gap
+        # from ~80 ms to ~140 ms); single compositions never need it.
+        self.composition.mode_changed.connect(
+            lambda mode: self.jobs.warm_up() if mode in ("sweep", "expression") and not self._closed else None)
         # table: double click -> embedded details; row menu -> separate details window
         self.table.view.details_requested.connect(self.show_details)
         self.table.view.window_requested.connect(self.open_details)
@@ -160,8 +182,10 @@ class MainWindow(QMainWindow):
         self.table.filter_requested.connect(self.edit_filters)
         self.table.columns_requested.connect(self.edit_columns)
         self.table.copy_requested.connect(self.copy_table)
+        self.table.copy_page_requested.connect(self.copy_visible_rows)
         self.table.export_requested.connect(self.export)
         self.table.model.page_changed.connect(self._check_details)
+        self.table.model.state_changed.connect(self._update_status)
         # restore table preferences
         cols = self.settings.value("columns", None)
         if isinstance(cols, list) and all(c in COLUMN_BY_KEY for c in cols) and "name" in cols:
@@ -220,8 +244,8 @@ class MainWindow(QMainWindow):
         self.file_menu = CarbonMenu(parent=self)
         a = self.file_menu.add_action("Import compositions…", self.import_compositions, shortcut="Ctrl+O")
         exp = self.file_menu.add_submenu("Export results")
-        exp.add_action("Excel workbook (.xlsx)…", lambda: self.export("xlsx"))
-        exp.add_action("CSV (.csv)…", lambda: self.export("csv"))
+        build_export_menu(exp, self.export, self.copy_table, self.copy_visible_rows)
+        exp.aboutToShow.connect(lambda: update_export_menu(exp, bool(self.table.model.filters)))
         c = self.file_menu.add_action("Copy table", self.copy_table, shortcut="Ctrl+Shift+C")
         self.file_menu.addSeparator()
         self.file_menu.add_action("Calculation settings…", self.edit_settings)
@@ -272,10 +296,18 @@ class MainWindow(QMainWindow):
 
     def _update_status(self):
         m = self.table.model
-        flt = f" · filter active ({m.view_count():,} shown)" if m.filters else ""
         # The reference toolbar carries no standing label - the paginator already reports the
-        # range - so this slot is reserved for filter state and for cell info on hover.
-        self.table.status.setText(flt.strip() if flt else "")
+        # range - so this slot is reserved for filter / background sort state and cell info on hover.
+        if m.pending:
+            what = "Sorting" if m.sort_key and not m.filters else "Filtering" if not m.sort_key else \
+                "Filtering and sorting"
+            text = f"{what} {m.total_count():,} results…"
+        elif m.filters:
+            text = f"· filter active ({m.view_count():,} shown)"
+        else:
+            text = ""
+        if self.table.status.text() != text:
+            self.table.status.setText(text)
 
     # ------------------------------------------------------------------ selection sync
     def _composition_elements(self, elements: list[str]):
@@ -293,64 +325,129 @@ class MainWindow(QMainWindow):
         """The running calculation job (None when idle)."""
         return self.runner.job
 
-    def calculate(self, source, names=None, comps=None, envs=None):
-        """Calculate compositions.  ``comps`` is a list, or a callable returning
-        ``(sources, names, compositions, variables)`` that runs off the GUI thread."""
+    def calculate(self, source, names=None, comps=None, envs=None, meta: dict | None = None):
+        """Calculate compositions into a new run of the result repository.  ``comps`` is a list, or a
+        recipe (``core/recipes.py``) generated and calculated in the worker processes."""
         if self.runner.running:
             self.notify("warning", "A calculation is already running.")
             return
         self.notification.dismiss()
+        self._job_queue = []
+        self._batch_added = self._batch_failed = 0
+        self._batch_first = None
         if not callable(comps) and len(comps) == 1:
             res = self.engine.calculate(comps[0], **self.options())
             src = source[0] if isinstance(source, list) else source
             row = ResultRow(names[0], comps[0], res, src, envs[0] if envs else {})
-            rng = self.table.model.append_rows([row], self.options())
+            try:
+                rng = self.table.model.append_rows([row], self.options(), mode=src, source=meta)
+            except (RepositoryError, OSError) as exc:
+                self.notify("error", str(exc) if isinstance(exc, RepositoryError) else user_message(exc))
+                return
             self._update_status()
             self._jump_to(rng.start)
             if not res.ok:
                 self.notify("error", res.error)
             return
         if callable(comps):
+            rm = comps.run_meta()
             data = JobInput(source, (), comps, (), self.options())
-            label = "Generating compositions…"
+            label, expected = "Generating compositions…", comps.estimate()
         else:
+            elements: list[str] = []
+            for c in comps:
+                for el in c:
+                    if el not in elements:
+                        elements.append(el)
+            mode = source if isinstance(source, str) else (source[0] if source else "single")
+            rm = {"mode": mode, "elements": elements, "axes": [], "source": {}}
             data = JobInput(source, names, comps, envs, self.options())
-            label = f"Calculating {len(comps):,} compositions…"
-        self._first_new = len(self.table.model.store)
+            label, expected = f"Calculating {len(comps):,} compositions…", len(comps)
+        if meta:
+            rm["source"] = {**rm.get("source", {}), **meta}
+        self._start_job(data, rm, expected, label)
+
+    def _start_job(self, data: JobInput, rm: dict, expected: int | None, label: str) -> bool:
+        recipe = data.compositions if callable(data.compositions) else None
+        exact = recipe is None or getattr(recipe, "unit", None) == "at"     # ratio / expression: upper bounds
+        n = expected or 0
+        problem = capacity_problem(n if exact else min(n, HARD_LIMIT), self.repo.session_dir)
+        if problem:
+            self.notify("error", problem)
+            self._finish_batch(cancelled=True)
+            return False
+        try:
+            run_id = self.repo.create_run(rm["mode"], settings=self.options(), source=rm.get("source"),
+                                          axes=rm.get("axes"), elements=rm.get("elements"), expected=expected)
+        except Exception as exc:                      # noqa: BLE001 - storage unavailable
+            self.notify("error", user_message(exc))
+            self._finish_batch(cancelled=True)
+            return False
         self.progress.bar.setRange(0, 0)
         self.progress.label.setText(label)
         self.progress.cancel.setEnabled(True)
         self.progress.show()
         self.composition.set_calculating(True)
-        self.runner.start(CalculationJob(data, self.engine))
+        self.runner.start(CalculationJob(data, self.engine), run_id)
+        return True
 
     def _progress(self, done: int, total: int, eta: float):
         if self.progress.bar.maximum() != total:
             self.progress.bar.setRange(0, total)
-        self.progress.bar.setValue(done)
+        self.progress.bar.setValue(min(done, total))
         left = f" — about {eta:,.0f} s left" if done else ""
         if self.progress.cancel.isEnabled():
-            self.progress.label.setText(f"Calculating {done:,} / {total:,}{left}")
+            verb = "Recalculating" if self._pending_delete else "Calculating"
+            self.progress.label.setText(f"{verb} {done:,} / {total:,}{left}")
 
     def _done(self, job):
-        added = self.runner.added
-        self.progress.hide()
-        self.composition.set_calculating(False)
+        r = self.runner
+        info = self.repo.get_run(r.run_id) if r.run_id is not None else None
+        self._batch_added += r.added
+        self._batch_failed += info.errors if info else 0
+        if self._batch_first is None and r.first_id is not None:
+            self._batch_first = r.first_id
+        cancelled = job.state == "cancelled"
+        if r.storage_error:
+            self._finish_batch(cancelled=True)
+            self.notify("error", f"{r.storage_error} The calculation was stopped; {self._batch_added:,} "
+                                 "calculated result(s) were kept.")
+            return
         if job.state == "error":
+            self._finish_batch(cancelled=True)
             self.notify("error", job.error or "The calculation failed.")
             return
-        cancelled = job.state == "cancelled"
-        if self.runner.first_id is not None:
-            self._jump_to(self.runner.first_id)
-        st = self.table.model.store
-        failed = sum(1 for e in st.errors[self._first_new:] if e)
-        msg = f"{added:,} composition(s) calculated" + (" (cancelled)" if cancelled else "")
-        if failed:
-            msg += f"; {failed:,} could not be evaluated (see Calculation details)"
-        self.notify("warning" if cancelled or failed else "success", msg + ".")
+        if self._job_queue and not cancelled:
+            if self._next_job():
+                return
+        self._finish_batch(cancelled)
+        if self._batch_first is not None:
+            self._jump_to(self._batch_first)
+        msg = f"{self._batch_added:,} composition(s) calculated" + (" (cancelled)" if cancelled else "")
+        if self._batch_failed:
+            msg += f"; {self._batch_failed:,} could not be evaluated (see Calculation details)"
+        self.notify("warning" if cancelled or self._batch_failed else "success", msg + ".")
+
+    def _finish_batch(self, cancelled: bool):
+        self._job_queue = []
+        self.progress.hide()
+        self.composition.set_calculating(False)
+        if self._pending_delete is not None:
+            lo, hi = self._pending_delete           # recalculation: the superseded rows go now
+            self._pending_delete = None
+            try:
+                self.repo.clear_range(lo, hi)
+            except Exception:                         # noqa: BLE001 - hidden rows; the session file goes anyway
+                pass
 
     def cancel_calculation(self):
+        if self.exporter.running:
+            self.progress.cancel.setEnabled(False)
+            self.progress.label.setText("Cancelling…")
+            self.exporter.cancel()
+            return
         if self.runner.running:
+            self._job_queue = []
             self.progress.cancel.setEnabled(False)
             self.progress.label.setText("Cancelling…")
             self.runner.cancel()
@@ -362,50 +459,55 @@ class MainWindow(QMainWindow):
             self._jump_to(rng.start)
 
     def _jump_to(self, row_id: int):
-        """Show the page holding store row ``row_id`` and load it into Calculation details."""
+        """Show the page holding result ``row_id`` and load it into Calculation details."""
         m = self.table.model
-        if not m.store.is_alive(row_id):
+        if not m.view.is_alive(row_id):
             return
         pos = m.position_of(row_id)
         if pos < 0:
             return
         m.set_page(pos // m.page_size)
-        self.show_details(StoredRow(m.store, row_id))
+        rec = self.repo.get_result(row_id)
+        if rec is not None:
+            self.show_details(rec)
 
     def show_details(self, row):
-        """Embedded Calculation details for a result row (double click)."""
+        """Embedded Calculation details for a result (double click).  A stored record is reproduced
+        into a full result once, by its stable id - never by its row on screen."""
         if row is None:
-            self.details.show_row(None, has_results=bool(self.table.model.store.n_alive))
+            self._details_id = None
+            self.details.show_row(None, has_results=bool(self.table.model.total_count()))
             return
-        if isinstance(row, StoredRow):
-            self._details_version = row.store.version
+        if isinstance(row, ResultRecord):
+            self._details_id = row.id
             row = row.materialize()
         self.details.show_row(row)
 
     def _check_details(self):
         row = self.details.row
-        st = self.table.model.store
+        m = self.table.model
+        total = m.total_count()
         if row is not None:
             rid = getattr(row, "row_id", None)
-            if rid is not None and (not st.is_alive(rid) or getattr(self, "_details_version", st.version) != st.version):
-                self.details.show_row(None, has_results=bool(st.n_alive))
-        elif self.details.has_results != bool(st.n_alive):
+            if rid is not None and not m.view.is_alive(rid):
+                self.details.show_row(None, has_results=bool(total))
+        elif self.details.has_results != bool(total):
             # empty state follows the table: "No alloy to show yet" <-> "No alloy selected"
-            self.details.show_row(None, has_results=bool(st.n_alive))
+            self.details.show_row(None, has_results=bool(total))
         self._update_status()
 
     # ------------------------------------------------------------------ table actions
     def delete_rows(self):
         """Clear the results table.
 
-        The toolbar's trash button is "Clear table" (tooltip in 21_dark_mode_fullscreen_tooltips),
-        so it empties the table outright rather than acting on the selection, and it does so
-        immediately - no confirmation dialog.  The composition panel is left untouched: only the
-        table's rows go, which also resets its filters, page and page size through ``set_rows``.
+        The toolbar's trash button is "Clear table" (tooltip in 21_dark_mode_fullscreen_tooltips): it
+        deletes every result of the table from the dataset (in the background), immediately - no
+        confirmation dialog.  The composition panel is left untouched, and so are filters and sort.
         """
-        if not self.table.model.store.n_alive:
+        m = self.table.model
+        if not m.total_count():
             return
-        self.table.model.clear()
+        m.clear()
         self.details.show_row(None, has_results=False)
         self._update_status()
 
@@ -414,7 +516,7 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self.table.model.set_filters(dlg.result_filters)
             self.table.set_filter_active(bool(dlg.result_filters))
-            self.details.show_row(None, has_results=bool(self.table.model.store.n_alive))
+            self.details.show_row(None, has_results=bool(self.table.model.total_count()))
             self._update_status()
         dlg.deleteLater()
 
@@ -426,36 +528,140 @@ class MainWindow(QMainWindow):
             self.settings.setValue("columns", keys)
         dlg.deleteLater()
 
+    INLINE_ROWS = 2000          # exports / copies up to this size run at once (≈ 0.1 s); larger in a process
+
+    def _busy(self) -> bool:
+        if self.runner.running or self.exporter.running:
+            self.notify("warning", "Wait for the running calculation or export to finish.")
+            return True
+        return False
+
     def copy_table(self):
         """Copy every row of the (filtered, sorted) table with the visible columns."""
         m = self.table.model
-        rows = m.view_rows
-        if not len(rows):
+        n = m.view_count()
+        if not n:
+            self.notify("info", "The table is empty.")
+            return
+        if n > CLIPBOARD_MAX_ROWS:
+            self.notify("warning", f"The table has {n:,} rows; the clipboard takes at most {CLIPBOARD_MAX_ROWS:,} "
+                                   "(one Excel worksheet). Export the results instead.")
+            return
+        if n <= self.INLINE_ROWS:
+            QGuiApplication.clipboard().setText(table_tsv(list(m.view_rows), m.keys))
+            self.notify("success", f"Copied {n:,} row(s) × {len(m.keys)} columns (paste into Excel).", 4000)
+            return
+        if self._busy():
+            return
+        path = str(self.repo.session_dir / f"clipboard-{id(self)}.tsv")
+        self._start_export(m.view.export_spec(), path, "tsv", {"keys": list(m.keys)}, n,
+                           f"Copying {n:,} rows…", {"kind": "copy", "rows": n, "cols": len(m.keys)})
+
+    def copy_visible_rows(self):
+        """Copy the rows of the current page only (what is on screen)."""
+        m = self.table.model
+        rows = m.page_rows()
+        if not rows:
             self.notify("info", "The table is empty.")
             return
         QGuiApplication.clipboard().setText(table_tsv(rows, m.keys))
-        self.notify("success", f"Copied {len(rows):,} row(s) × {len(m.keys)} columns (paste into Excel).", 4000)
+        self.notify("success", f"Copied {len(rows):,} visible row(s) × {len(m.keys)} columns.", 4000)
 
     def _copy_generated(self, tsv: str):
         QGuiApplication.clipboard().setText(tsv)
         n = max(len(tsv.strip().splitlines()) - 1, 0)
         self.notify("success", f"Copied {n:,} generated composition(s) (paste into Excel).", 4000)
 
-    def export(self, fmt: str):
-        rows = self.table.model.view_rows
-        if not len(rows):
+    def export(self, fmt: str, scope: str = "all"):
+        """Export the dataset: ``all`` results (in the table's sort order unless a filter is active)
+        or the ``filtered`` view.  Never just the visible page."""
+        m = self.table.model
+        if m.pending:
+            self.notify("info", "The table is still being sorted or filtered; export when it has finished.")
+            return
+        filtered = scope == "filtered" and bool(m.filters)
+        natural = not filtered and bool(m.filters)
+        n = m.view_count() if not natural else m.total_count()
+        if not n:
             self.notify("info", "Nothing to export.")
             return
+        if fmt == "xlsx" and n > XLSX_MAX_ROWS:
+            sheets = -(-n // XLSX_MAX_ROWS)
+            dlg = ChoiceDialog("Export results", "Excel row limit",
+                               f"<b>{n:,}</b> results exceed one Excel worksheet ({XLSX_MAX_ROWS:,} rows).<br>"
+                               f"Export them as CSV, or split them over {sheets} worksheets of one workbook.",
+                               [("cancel", "Cancel"), ("sheets", f"Split into {sheets} worksheets"),
+                                ("csv", "Export as CSV")], self)
+            dlg.exec()
+            choice = dlg.choice
+            dlg.deleteLater()
+            if choice in (None, "cancel"):
+                return
+            if choice == "csv":
+                fmt = "csv"
         flt = "Excel workbook (*.xlsx)" if fmt == "xlsx" else "CSV (*.csv)"
-        path, _ = QFileDialog.getSaveFileName(self, "Export results", f"hea_results.{fmt}", flt)
+        default = f"hea_results{'_filtered' if filtered else ''}.{fmt}"
+        path, _ = QFileDialog.getSaveFileName(self, "Export results", default, flt)
         if not path:
             return
-        try:
-            export_rows(rows, path, notes={"M6/M7 temperature": self._temperature_note()})
-        except Exception as exc:  # noqa: BLE001 - report any I/O problem to the user
-            self.notify("error", f"Export failed: {exc}")
+        view = m.view
+        elements = self.repo.elements_of(self.repo.run_ids_in(view.lo, view.hi))
+        notes = {"M6/M7 temperature": self._temperature_note(),
+                 "Scope": "filtered results" if filtered else "all results"}
+        if filtered:
+            notes["Filters"] = "; ".join(repr(f) for f in m.filters)
+        if n <= self.INLINE_ROWS:
+            try:
+                write_records(view.iterate(natural), path, elements, notes=notes)
+            except Exception as exc:  # noqa: BLE001 - report any I/O problem to the user
+                self.notify("error", f"Export failed: {exc}")
+                return
+            self.notify("success", f"Exported {n:,} rows to {Path(path).name}.")
             return
-        self.notify("success", f"Exported {len(rows):,} rows to {Path(path).name}.")
+        if self._busy():
+            return
+        self._start_export(view.export_spec(natural), path, "file", {"elements": elements, "notes": notes}, n,
+                           f"Exporting {n:,} results…", {"kind": "export", "rows": n, "path": path})
+
+    def _start_export(self, spec: dict, path: str, kind: str, payload: dict, total: int, label: str, job: dict):
+        self._export_job = {**job, "path": path, "total": total}
+        self.progress.bar.setRange(0, max(1, total))
+        self.progress.bar.setValue(0)
+        self.progress.label.setText(label)
+        self.progress.cancel.setEnabled(True)
+        self.progress.show()
+        self.exporter.start(spec, path, kind, payload)
+
+    def _export_progress(self, n: int):
+        job = self._export_job
+        if job is None or not self.progress.cancel.isEnabled():
+            return
+        self.progress.bar.setValue(min(n, job["total"]))
+        verb = "Copying" if job["kind"] == "copy" else "Exporting"
+        self.progress.label.setText(f"{verb} {n:,} / {job['total']:,} rows…")
+
+    def _export_done(self, status: str, value):
+        job, self._export_job = self._export_job, None
+        if not self.runner.running:
+            self.progress.hide()
+        if job is None:
+            return
+        path = Path(job["path"])
+        if status == "ok" and job["kind"] == "copy":
+            try:
+                with path.open(encoding="utf-8", newline="") as fh:      # keep the CR LF row breaks
+                    QGuiApplication.clipboard().setText(fh.read())
+            finally:
+                path.unlink(missing_ok=True)
+            self.notify("success", f"Copied {value:,} row(s) × {job['cols']} columns (paste into Excel).", 4000)
+        elif status == "ok":
+            self.notify("success", f"Exported {value:,} rows to {path.name}.")
+        else:
+            path.unlink(missing_ok=True)
+            if status == "cancelled":
+                self.notify("warning", "Export cancelled; no file was written.")
+            else:
+                self.notify("error", f"Export failed: {value}")
 
     def _temperature_note(self) -> str:
         return f"{self.annealing:g} K (user)" if self.annealing else f"{self.fraction:g}·Tm (estimated)"
@@ -481,7 +687,8 @@ class MainWindow(QMainWindow):
         comps = [c for _, c in res.entries]
         from ..core.composition import alloy_name
         names = [n if n else alloy_name(c) for n, c in zip(names, comps)]
-        self.calculate("import", names, comps, [{} for _ in comps])
+        self.calculate("import", names, comps, [{} for _ in comps],
+                       meta={"file": Path(path).name, "layout": res.layout, "skipped_rows": len(res.errors)})
 
     def edit_settings(self):
         dlg = SettingsDialog(self.annealing, self.fraction, self)
@@ -492,30 +699,58 @@ class MainWindow(QMainWindow):
             else:
                 self.settings.setValue("annealing", self.annealing)
             self.settings.setValue("tcrit_fraction", self.fraction)
-            rows = self.table.model.rows
-            if len(rows) and self.worker is None and QMessageBox.question(
+            n = self.table.model.total_count()
+            if n and self.worker is None and QMessageBox.question(
                     self, "Recalculate results",
-                    f"Recalculate the {len(rows):,} existing result(s) with the new temperature setting?")                     == QMessageBox.StandardButton.Yes:
+                    f"Recalculate the {n:,} existing result(s) with the new temperature setting?") \
+                    == QMessageBox.StandardButton.Yes:
                 self.recalculate_all()
             else:
                 self.notify("info", f"M6/M7 temperature: {self._temperature_note()}. New calculations use it.")
         dlg.deleteLater()
 
     def recalculate_all(self):
-        """Re-run every existing row through the engine with the current settings (same inputs)."""
-        rows = list(self.table.model.rows)
-        if not rows:
+        """Re-run every result of the table through the engine with the current settings: one job
+        per stored run, reading the stored inputs (names, sources, design coordinates) from the
+        database in the workers.  The superseded rows are hidden at once and deleted afterwards."""
+        m = self.table.model
+        if not m.total_count() or self.runner.running:
             return
-        sources, names = [r.source for r in rows], [r.name for r in rows]
-        comps, envs = [r.input_amounts for r in rows], [r.variables for r in rows]
-        self.table.model.clear()
+        view = m.view
+        runs = [self.repo.get_run(rid) for rid in self.repo.run_ids_in(view.lo, view.hi)]
+        lo, hi = m.hide_all()
         self.details.show_row(None)
-        self.calculate(sources, names, comps, envs)
+        queue = []
+        for info in runs:
+            if info is None or info.first_id is None:
+                continue
+            first, last = max(info.first_id, lo), min(info.last_id, hi)
+            cols = tuple(a["col"] for a in info.axes if a.get("col"))
+            recipe = RecalcRecipe(str(self.repo.db_path), info.run_id, first, last, cols)
+            rm = {"mode": info.mode, "elements": info.elements, "axes": info.axes,
+                  "source": {**info.source, "recalculated_from": info.run_id}}
+            queue.append((recipe, rm))
+        self.notification.dismiss()
+        self._batch_added = self._batch_failed = 0
+        self._batch_first = None
+        self._pending_delete = (lo, hi)
+        self._job_queue = queue
+        if not self._next_job():
+            self._finish_batch(cancelled=True)
+
+    def _next_job(self) -> bool:
+        while self._job_queue:
+            recipe, rm = self._job_queue.pop(0)
+            data = JobInput("recalc", (), recipe, (), self.options())
+            if self._start_job(data, rm, recipe.estimate(), "Recalculating…"):
+                return True
+        return False
 
     def open_details(self, row):
-        """Calculation details in a separate window (row context menu)."""
+        """Calculation details in a separate window (row context menu).  The window holds a snapshot
+        of the result, so it stays valid if the stored row is removed later."""
         if row is not None:
-            if isinstance(row, StoredRow):
+            if isinstance(row, ResultRecord):
                 row = row.materialize()
             dlg = AlloyDetailsDialog(row, self)
             dlg.exec()
@@ -526,13 +761,28 @@ class MainWindow(QMainWindow):
         dlg.exec()
         dlg.deleteLater()
 
-    def closeEvent(self, e):
-        self.settings.setValue("page_size", self.table.model.page_size)
+    def shutdown(self):
+        """Stop the calculation, the export process, every worker process and the session database
+        (deleted).  Idempotent: called on close and on application quit."""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self.settings.setValue("page_size", self.table.model.page_size)
+        except RuntimeError:
+            pass
+        self.runner._timer.stop()
         if self.runner.job is not None:
             self.runner.job.cancel()
             self.runner.job.wait(2.0)
+        self.exporter.shutdown()
         self.jobs.shutdown()          # no worker process outlives the window
+        self.table.model.close()
+        self.repo.close()
+
+    def closeEvent(self, e):
+        self.shutdown()
         super().closeEvent(e)
 
 
-_ = DEFAULT_COLUMNS
+_ = (DEFAULT_COLUMNS, write_tsv)

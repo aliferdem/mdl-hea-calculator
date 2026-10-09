@@ -218,22 +218,47 @@ def _on_grid(g: list[int], v: int) -> bool:
     return (v - g[0]) % (g[1] - g[0]) == 0
 
 
+def _ray_first(combo: tuple[int, ...], grids: list[list[int]]) -> bool:
+    """True when ``combo`` is the first tuple of its ray (its proportional class) in product order.
+
+    The tuples proportional to ``combo`` are ``k·p`` with ``p = combo / gcd(combo)``; product order
+    is lexicographic with a strictly positive first component, so the class members appear in
+    increasing ``k``.  ``combo = g·p`` is therefore the first iff no ``k < g`` puts every ``k·pᵢ`` on
+    its grid - decided without remembering any earlier tuple (constant memory for any space size;
+    the former ``seen`` set held every distinct direction)."""
+    from math import gcd
+    g = gcd(*combo)
+    if g <= 1:
+        return True
+    p = [v // g for v in combo]
+    k0 = max(1, max(-(-gr[0] // pi) for gr, pi in zip(grids, p)))
+    for k in range(k0, g):
+        if all(_on_grid_range(gr, k * pi) for gr, pi in zip(grids, p)):
+            return False
+    return True
+
+
+def _on_grid_range(g: list[int], v: int) -> bool:
+    return g[0] <= v <= g[-1] and _on_grid(g, v)
+
+
 def iter_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | None = None,
                total: float = 100.0):
     """Yield compositions of the space.
 
     ``unit="ratio"``: every element of a system takes each positive value of its grid independently
-    (cartesian product); proportional duplicates are removed. ``unit="at"``: as above but only
-    combinations summing to ``total`` at.% are valid.
+    (cartesian product); proportional duplicates are removed (the first of each ray is kept,
+    :func:`_ray_first`). ``unit="at"``: as above but only combinations summing to ``total`` at.%
+    are valid.
 
     Duplicates can only occur inside one system: every value is positive, so two systems never
     share an element set.  In at.% every combination of a system has the same sum, so two
     proportional combinations are equal - at.% therefore has no duplicates at all and its valid
     combinations are enumerated directly (``_sum_combos``) instead of filtering the product.
+    The generator holds no per-composition state: it can enumerate millions in constant memory.
     """
     scale, target = _space_grids(specs, total)
     from itertools import product
-    from math import gcd
     for system in systems(specs, sizes):
         grids = [_positive_grid(s, scale) for s in system]
         if any(not g for g in grids):
@@ -243,19 +268,9 @@ def iter_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | No
             for combo in _sum_combos(grids, target):
                 yield {el: v / scale for el, v in zip(names, combo)}
             continue
-        seen: set[tuple] = set()
         for combo in product(*grids):
-            g = gcd(*combo)
-            if g > 1:
-                key = tuple(v // g for v in combo)
-                if key in seen:
-                    continue
-                seen.add(key)
-            else:
-                if combo in seen:
-                    continue
-                seen.add(combo)
-            yield {el: v / scale for el, v in zip(names, combo)}
+            if _ray_first(combo, grids):
+                yield {el: v / scale for el, v in zip(names, combo)}
 
 
 # ---------------------------------------------------------------------- pre-flight counting
@@ -328,7 +343,7 @@ def count_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | N
     syst = systems(specs, sizes)
     cap = stop_after + 1
     n = 0
-    from math import gcd, prod
+    from math import prod
     from itertools import product
     for system in syst:
         grids = [_positive_grid(s, scale) for s in system]
@@ -340,15 +355,11 @@ def count_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | N
             sizes_ = [len(g) for g in grids]
             if prod(sizes_) // min(sizes_) >= cap - n:
                 return SpaceCount(cap, True, len(syst))
-            seen: set[tuple] = set()
             for i, combo in enumerate(product(*grids)):
                 if cancelled is not None and not i & 0xFFF and cancelled():
                     return SpaceCount(n, False, len(syst))
-                g = gcd(*combo)
-                key = tuple(v // g for v in combo) if g > 1 else combo
-                if key in seen:
+                if not _ray_first(combo, grids):
                     continue
-                seen.add(key)
                 n += 1
                 if n >= cap:
                     break

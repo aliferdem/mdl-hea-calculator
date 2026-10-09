@@ -25,6 +25,7 @@ from ...core.data import Datasets
 from ...core.expression import (MAX_COMBINATIONS, ExpressionError, GenerationCancelled, VariableRange,
                                  block_variables, count_combinations, generate_blocks, parse_blocks)
 from ...core.generation import RangeError, SweepSpec, summarize_space
+from ...core.limits import HARD_LIMIT, capacity_problem, describe, estimate
 from ...core.recipes import (ExpressionRecipe, SweepRecipe, compositions_tsv, expression_count, recipe_preview,
                              recipe_tsv)
 from .. import crisp
@@ -43,9 +44,18 @@ ROW_H = 32
 ROW_GAP = 1
 REP_KEYS = ("ratio", "at", "wt", "mass")
 DECIMALS = {"ratio": 4, "at": 4, "wt": 4, "mass": 5}
-SWEEP_LIMIT = 200_000
+SWEEP_LIMIT = HARD_LIMIT     # largest measured batch (core/limits.py); was 200 000 (in-memory result store)
 COUNT_DEBOUNCE_MS = 200      # pre-flight counts wait for a pause in typing
 HEAVY_THRESHOLD = 5_000      # combinations above which a pre-flight runs in a worker process
+
+
+def size_note(n: int, workers: int) -> tuple[str, str]:
+    """Tier label (Large set / Very large set) and the tooltip text: the tier message for large sets
+    and the measured estimates of calculation time and temporary storage."""
+    if not n:
+        return "", ""
+    tier, tip = describe(estimate(n, workers))
+    return tier, tip
 
 
 class ColumnGrid:
@@ -912,7 +922,15 @@ class SweepView(QWidget):
         color = t("text-error") if s.truncated or s.compositions == 0 else t("text-primary")
         line2 = (f"{s.systems} combination{'s' if s.systems != 1 else ''}{sep}"
                  f"<span style='color:{color}'>{comp} valid composition{'s' if s.compositions != 1 else ''}</span>")
+        # The tier and the measured estimates live in the tooltip: the summary row has no room for
+        # another phrase (the System size select shares it), and Composition setup is not redesigned here.
+        _tier, tip = size_note(s.compositions if not s.truncated else SWEEP_LIMIT + 1, self.workers())
+        self.summary.setToolTip(tip if s.compositions else "")
         self.summary.setText(f"{line1}<br>{line2}")
+
+    def workers(self) -> int:
+        svc = getattr(self.window(), "jobs", None)
+        return getattr(svc, "workers", 1)
 
     def can_calculate(self) -> bool:
         return len(self.rows) >= 2
@@ -927,9 +945,14 @@ class SweepView(QWidget):
         generated."""
         specs, sizes, unit = self.specs(), self.sizes(), self.unit
         s = self.summary_data
-        if s is not None and s.truncated and self._counter.busy is False and not self._timer.isActive():
-            raise RangeError(f"More than {SWEEP_LIMIT:,} compositions; increase the steps or narrow the ranges.")
-        return SweepRecipe(tuple(specs), unit, frozenset(sizes) if sizes else None, SWEEP_LIMIT)
+        recipe = SweepRecipe(tuple(specs), unit, frozenset(sizes) if sizes else None, SWEEP_LIMIT)
+        if unit == "at":
+            n = recipe.estimate()                    # exact (DP, < 1 ms), whatever the summary shows
+            if n > SWEEP_LIMIT:
+                raise RangeError(capacity_problem(n, None))
+        elif s is not None and s.truncated and self._counter.busy is False and not self._timer.isActive():
+            raise RangeError(capacity_problem(SWEEP_LIMIT + 1, None))
+        return recipe
 
     def clear(self):
         for row in self.rows.values():
@@ -1198,12 +1221,14 @@ class ExpressionView(QWidget):
             extra.append(f"{b.duplicates:,} duplicate{'s' if b.duplicates != 1 else ''}")
         blocks, els, names = self.detected
         sep = f"<span style='color:{t('text-helper')}'> | </span>"
+        svc = getattr(self.window(), "jobs", None)
+        _tier, tip = size_note(n, getattr(svc, "workers", 1))
         self.summary.setText(f"{blocks} block{'s' if blocks != 1 else ''}{sep}{len(els)} elements{sep}"
                              f"{len(names)} variable{'s' if len(names) != 1 else ''}<br>"
                              f"<b>{n:,}</b> valid composition{'s' if n != 1 else ''}"
                              + (sep + ", ".join(extra) if extra else ""))
-        self.summary.setToolTip("Skipped: variable values giving negative amounts or fewer than two elements."
-                                if b.skipped else "")
+        skipped = "Skipped: variable values giving negative amounts or fewer than two elements. " if b.skipped else ""
+        self.summary.setToolTip((skipped + tip) if n else skipped.strip())
 
     def can_calculate(self) -> bool:
         return bool(self.text().strip())

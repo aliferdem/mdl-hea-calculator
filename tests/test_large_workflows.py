@@ -3,6 +3,7 @@ table and its interaction model, responsive reflow, Pending status, tooltip/togg
 the shared Carbon menu.  (Timings of the real 30k / 100k runs: tools/perf_harness.py.)"""
 
 import os
+import sys
 import tempfile
 import time
 from array import array
@@ -20,7 +21,11 @@ from hea_calc.core import generation  # noqa: E402
 from hea_calc.core.generation import SweepSpec, count_space  # noqa: E402
 from hea_calc.core.jobs import CalculationJob, CalculationService, JobInput  # noqa: E402
 from hea_calc.core.recipes import SweepRecipe  # noqa: E402
-from hea_calc.core.store import ResultStore, pack_results  # noqa: E402
+from hea_calc.core.chunks import pack_results  # noqa: E402
+from hea_calc.core.repository import ResultRepository, ResultView  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from synthetic import fill  # noqa: E402
 
 FIVE = ["Fe", "Co", "Ni", "Cr", "Mn"]
 
@@ -120,29 +125,21 @@ def test_small_jobs_stay_in_process_when_no_pool_runs(engine):
     assert job.state == "done" and job.mode == "inprocess" and not svc.warm
 
 
-# =========================================================================== store / model
-def synthetic_store(engine, n_rows: int) -> ResultStore:
-    comps = [{"Fe": 1 + i % 7, "Co": 1, "Ni": 1 + i % 3, "Cr": 0.5 + i % 5} for i in range(50)]
-    chunk = pack_results(comps, [engine.calculate(c) for c in comps])
-    reps = n_rows // 50
-    big = dict(chunk)
-    big["n"] = 50 * reps
-    for k in ("el_idx", "in_vals", "fr_vals", "warnings", "errors", "temps"):
-        big[k] = chunk[k] * reps
-    for group in ("num", "text", "labels", "notes"):
-        big[group] = {k: v * reps for k, v in chunk[group].items()}
-    store = ResultStore(engine)
-    names = [f"A{i}" for i in range(big["n"])]
-    store.append_chunk(big, names, ["sweep"] * big["n"], [None] * big["n"], {})
-    return store
-
-
-def test_store_of_100k_rows_is_compact(engine):
-    store = synthetic_store(engine, 100_000)
-    assert len(store) == 100_000
-    assert store.nbytes() < 60 * 2**20, store.nbytes()          # the ResultRow list was 565 MiB
-    assert store.row(99_999).name == "A99999"
-    assert len(store.sort_ids(store.ids(), "dhmix", True)) == 100_000
+# =========================================================================== repository / model
+def test_repository_of_100k_rows_lives_on_disk(engine):
+    repo = ResultRepository(engine)
+    try:
+        view = ResultView(repo)
+        fill(repo, 100_000, engine)
+        view.refresh()
+        assert view.total() == 100_000
+        size = sum(repo.size_bytes().values())
+        assert size < 100_000 * 600, size                       # ~0.45 KiB/row on disk, nothing in RAM
+        assert view.at(99_999).name == "SYN99999"
+        view.request(sort=("dhmix", True), wait=60)
+        assert view.count() == 100_000
+    finally:
+        repo.close()
 
 
 # =========================================================================== UI
@@ -204,9 +201,8 @@ def wait_job(win, app, timeout=120):
 def test_model_exposes_only_the_page_and_no_qt_items(win, app, engine):
     m = win.table.model
     before = len(m.findChildren(QObject)) + len(win.table.view.viewport().findChildren(QObject))
-    big = synthetic_store(engine, 100_000)
-    m.store = big
-    m.set_filters([])
+    fill(m.repo, 100_000, engine)
+    m.refresh_committed()
     app.processEvents()
     assert m.view_count() == 100_000
     assert m.rowCount() == 100 and m.columnCount() == len(m.keys)
@@ -214,12 +210,17 @@ def test_model_exposes_only_the_page_and_no_qt_items(win, app, engine):
     assert m.rowCount() == 10
     after = len(m.findChildren(QObject)) + len(win.table.view.viewport().findChildren(QObject))
     assert after == before, "no QObject per row or cell"
-    assert win.table.pagination.pages.rowCount() == 10_000, "virtual page list"
+    pages = win.table.pagination.pages
+    assert pages.n == 10_000 and pages.rowCount() == pages.WINDOW, "a bounded window of the page list"
     assert win.table.view.indexWidget(m.index(0, 0)) is None
     t = time.perf_counter()
     m.set_page(5000)
     app.processEvents()
-    assert time.perf_counter() - t < 0.5 and m.id_at(0) == 50_000
+    assert time.perf_counter() - t < 0.5 and m.id_at(0) == m.view.lo + 50_000
+    box = win.table.pagination.page_box
+    assert box.currentText() == "5001" and pages.page_of(box.currentIndex()) == 5000
+    box.activated.emit(box.currentIndex() + 3)
+    assert m.page == 5003, "the window maps list rows back to page numbers"
 
 
 def test_table_has_no_selection_and_no_body_tooltips(win):
@@ -260,7 +261,7 @@ def test_double_click_after_sorting_opens_the_right_alloy(win, app):
     mouse(v, QEvent.Type.MouseButtonDblClick, pos)
     app.processEvents()
     assert win.details.row.name == expected
-    assert m.store.names[win.details.row.row_id] == expected
+    assert m.repo.get_result(win.details.row.row_id).name == expected
 
 
 def test_row_menu_opens_details_in_a_new_window(win, app, monkeypatch):
@@ -274,7 +275,7 @@ def test_row_menu_opens_details_in_a_new_window(win, app, monkeypatch):
     assert isinstance(menu, CarbonMenu)
     texts = [a.text() for a in menu.actions() if not a.isSeparator()]
     assert "Open details in new window" in texts
-    assert [a for a in menu.actions() if a.text() == "Remove row"][0].property("danger")
+    assert [a for a in menu.actions() if a.text() == "Remove result"][0].property("danger")
     win.details.show_row(None)
     next(a for a in menu.actions() if a.text() == "Open details in new window").trigger()
     app.processEvents()
@@ -324,7 +325,7 @@ def test_sweep_calculation_runs_as_a_process_job_with_throttled_progress(win, ap
     job = win.worker
     wait_job(win, app)
     elapsed = time.perf_counter() - t0
-    n = len(win.table.model.store)
+    n = win.table.model.total_count()
     assert n == job.total > 300 and job.mode == "process"
     assert len(progress) <= elapsed / 0.1 + 3, "progress at the 10 Hz tick, not per alloy"
     assert len(progress) < n / 20
@@ -419,7 +420,7 @@ def test_carbon_menu_paints_from_theme_tokens(win, app, theme):
     menu = CarbonMenu(parent=win)
     menu.add_action("Open details in new window")
     menu.addSeparator()
-    danger = menu.add_action("Remove row", danger=True)
+    danger = menu.add_action("Remove result", danger=True)
     menu.popup(QPoint(100, 100))
     app.processEvents()
     try:

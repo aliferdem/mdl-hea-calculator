@@ -30,9 +30,15 @@ def run(argv: list[str] | None = None) -> int:
 
     install_tooltips(app)   # the design's tooltip has a caret; Qt's own does not
 
+    from .core.repository import RepositoryError
     from .ui.main_window import MainWindow
 
-    win = MainWindow()
+    try:
+        win = MainWindow()
+    except RepositoryError as exc:          # no writable folder for the session database
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.critical(None, "HEA Calculator", str(exc))
+        return 1
     win.showMaximized()
     autoquit = os.environ.get("HEA_CALC_AUTOQUIT_MS")  # used by the entry-point smoke test
     if autoquit:
