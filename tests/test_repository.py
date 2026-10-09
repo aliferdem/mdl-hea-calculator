@@ -477,7 +477,7 @@ def test_export_process_streams_a_consistent_snapshot(repo, engine, tmp_path):
     ctx = mp.get_context("spawn")
     out = tmp_path / "f.csv"
     q, val, ev = ctx.Queue(), ctx.Value("q", 0), ctx.Event()
-    p = ctx.Process(target=export_process_main, args=(view.export_spec(), str(out), "file",
+    p = ctx.Process(target=export_process_main, args=(view.export_spec(True), str(out), "file",
                                                      {"elements": ["Fe", "Co"], "notes": {}}, val, ev, q))
     p.start()
     status, n = q.get(timeout=60)

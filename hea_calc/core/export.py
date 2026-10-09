@@ -9,6 +9,9 @@ export of millions of rows holds a few thousand rows in memory at most:
   ``XLSX_MAX_ROWS`` = 1 048 575 data rows (1 048 576 including the header): larger exports are
   split over consecutive worksheets ("Results", "Results (2)", …) - never truncated - and the
   caller is expected to offer CSV first (see the UI);
+* the rows are one query (``ResultView.export_spec``): all results (filters ignored) or the
+  filtered results, in the table's current sort order - from the dataset, so rows committed
+  after the table's sorted view was built are included;
 * large exports run in a separate process (:func:`export_process_main`) that opens the database
   read-only inside one read transaction - a consistent snapshot even while results are removed
   or the table is re-sorted.
@@ -230,8 +233,6 @@ def open_snapshot(spec: dict) -> sqlite3.Connection:
     """Read-only connection to the session database (views attached) inside one read transaction."""
     con = sqlite3.connect(f"file:{Path(spec['db']).as_posix()}?mode=ro", uri=True, isolation_level=None, timeout=10)
     con.execute("PRAGMA busy_timeout=10000")
-    if spec.get("table"):
-        con.execute("ATTACH DATABASE ? AS vw", (f"file:{Path(spec['views']).as_posix()}?mode=ro",))
     con.execute("BEGIN")
     return con
 
@@ -239,9 +240,7 @@ def open_snapshot(spec: dict) -> sqlite3.Connection:
 def iter_spec(con: sqlite3.Connection, spec: dict, engine=None):
     from .repository import Reader
     rd = Reader(con, engine)
-    if spec.get("table"):
-        return rd.iter_view(spec["table"])
-    return rd.iter_range(spec["lo"], spec["hi"])
+    return rd.iter_query(spec["lo"], spec["hi"], spec["where"], tuple(spec["params"]), spec["order"])
 
 
 def export_process_main(spec: dict, path: str, kind: str, payload: dict, progress, cancel, results) -> None:

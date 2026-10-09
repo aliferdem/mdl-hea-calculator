@@ -554,7 +554,7 @@ class MainWindow(QMainWindow):
         if self._busy():
             return
         path = str(self.repo.session_dir / f"clipboard-{id(self)}.tsv")
-        self._start_export(m.view.export_spec(), path, "tsv", {"keys": list(m.keys)}, n,
+        self._start_export(m.view.export_spec(filtered=True), path, "tsv", {"keys": list(m.keys)}, n,
                            f"Copying {n:,} rows…", {"kind": "copy", "rows": n, "cols": len(m.keys)})
 
     def copy_visible_rows(self):
@@ -573,15 +573,15 @@ class MainWindow(QMainWindow):
         self.notify("success", f"Copied {n:,} generated composition(s) (paste into Excel).", 4000)
 
     def export(self, fmt: str, scope: str = "all"):
-        """Export the dataset: ``all`` results (in the table's sort order unless a filter is active)
-        or the ``filtered`` view.  Never just the visible page."""
+        """Export the dataset: ``all`` results (filters ignored) or the ``filtered`` results, both in
+        the table's current sort order.  Never just the visible page."""
         m = self.table.model
         if m.pending:
             self.notify("info", "The table is still being sorted or filtered; export when it has finished.")
             return
         filtered = scope == "filtered" and bool(m.filters)
-        natural = not filtered and bool(m.filters)
-        n = m.view_count() if not natural else m.total_count()
+        spec = m.view.export_spec(filtered)
+        n = spec["count"]
         if not n:
             self.notify("info", "Nothing to export.")
             return
@@ -612,7 +612,7 @@ class MainWindow(QMainWindow):
             notes["Filters"] = "; ".join(repr(f) for f in m.filters)
         if n <= self.INLINE_ROWS:
             try:
-                write_records(view.iterate(natural), path, elements, notes=notes)
+                n = write_records(view.export_rows(filtered), path, elements, notes=notes)
             except Exception as exc:  # noqa: BLE001 - report any I/O problem to the user
                 self.notify("error", f"Export failed: {exc}")
                 return
@@ -620,7 +620,7 @@ class MainWindow(QMainWindow):
             return
         if self._busy():
             return
-        self._start_export(view.export_spec(natural), path, "file", {"elements": elements, "notes": notes}, n,
+        self._start_export(spec, path, "file", {"elements": elements, "notes": notes}, n,
                            f"Exporting {n:,} results…", {"kind": "export", "rows": n, "path": path})
 
     def _start_export(self, spec: dict, path: str, kind: str, payload: dict, total: int, label: str, job: dict):

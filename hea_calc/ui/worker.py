@@ -68,6 +68,7 @@ class JobRunner(QObject):
         w = self.repo.writer
         job.delivery = Delivery(run_id, lambda i, ch: w.put_chunk(run_id, i, ch), lambda: w.stored_chunks(run_id),
                                 lambda: bool(w.error), w.inbox)
+        self.model.view.streaming = True
         self.service.start(job)
         self._timer.start()
         return job
@@ -106,9 +107,7 @@ class JobRunner(QObject):
         if self._finalizing is not None and self._finalizing.done():
             self._timer.stop()
             self._timer.setInterval(TICK_MS)
-            self.model.refresh_committed()
-            if self.model.view.stale:
-                self.model.resort()
+            self.model.finish_streaming()
             info = repo.get_run(self.run_id)
             self.added = info.calculated if info else self.added
             self.first_id = info.first_id if info else None

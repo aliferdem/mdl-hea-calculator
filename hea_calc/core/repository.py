@@ -1154,6 +1154,21 @@ class Reader:
             yield from self.records(rows)
             last = rows[-1][0]
 
+    def iter_query(self, lo: int, hi: int, where: str = "", params: tuple = (), order: str = "result_id",
+                   chunk: int = 2000) -> Iterator[ResultRecord]:
+        """Results ``lo..hi`` passing ``where`` in ``order`` - one statement streamed ``chunk`` rows at a
+        time (SQLite's sorter holds the order, spilling to temporary files; Python never holds the set)."""
+        cur = self.con.execute(f"SELECT {_SELECT} FROM results WHERE result_id BETWEEN ? AND ?{where} "
+                               f"ORDER BY {order}", (lo, hi, *params))
+        try:
+            while True:
+                rows = cur.fetchmany(chunk)
+                if not rows:
+                    return
+                yield from self.records(rows)
+        finally:
+            cur.close()
+
     def iter_view(self, table: str, chunk: int = 2000, schema: str = "vw") -> Iterator[ResultRecord]:
         """Results in the order of a materialised view (removed rows are skipped by the join)."""
         last = 0
@@ -1578,6 +1593,7 @@ class ResultView:
         self.last_build_seconds = 0.0
         self.last_build_end = 0.0
         self._cache = LRU(4)
+        self.streaming = False                 # a calculation is storing rows (re-sorts are paced then)
 
     # -------------------------------------------------------------- state
     @property
@@ -1699,6 +1715,10 @@ class ResultView:
                 self._extending = None
             m = self.mat
             if m is None or task.token != m.token or task.error is not None or task.cancelled:
+                # an extend of a replaced view: ignored, but the current view may have been waiting
+                # for it to finish before extending itself over the rows committed meanwhile
+                if self.pending is None:
+                    self._catch_up()
                 return False
             m.n += task.result
             m.upto = task.hi
@@ -1714,6 +1734,14 @@ class ResultView:
             where, params = filter_sql(self.filters)
             self._extending = self.repo.builder.submit(
                 ViewTask("extend", m.token, m.table, where, params, lo=m.upto + 1, hi=self.hi))
+
+    def needs_final_rebuild(self) -> bool:
+        """A sorted order (applied or still building) that misses committed rows - checked when rows
+        stop arriving, so the final view holds every eligible result."""
+        t = self.pending
+        if t is not None:
+            return t.sorted and t.hi < self.hi
+        return self.stale
 
     def wants_resort(self, running: bool) -> bool:
         """Sorted view and new rows: rebuild with back-off (≥ 1.5 s and ≥ 4 × the last build)."""
@@ -1787,12 +1815,21 @@ class ResultView:
     def __iter__(self) -> Iterator[ResultRecord]:
         return self.iterate()
 
-    def export_spec(self, natural: bool = False) -> dict:
-        """What a worker process needs to stream this view from the database files."""
-        mat = None if natural else self.mat
-        return {"db": str(self.repo.db_path), "views": str(self.repo.views_path),
-                "table": mat.table if mat else None, "lo": self.lo, "hi": self.hi,
-                "count": self.total() if natural or mat is None else self.count()}
+    def export_spec(self, filtered: bool) -> dict:
+        """The export of this table as one query: every committed result of the workspace (``filtered``
+        False: filters ignored) or the rows passing the current filters, both in the current sort
+        order (ties by id).  Built from the dataset, not from the materialised view, so an export
+        during a calculation includes rows the (lagging) view does not show yet."""
+        hi = max(self.hi, self.repo.committed_last)          # everything committed, not just what is shown
+        where, params = filter_sql(self.filters) if filtered else ("", ())
+        return {"db": str(self.repo.db_path), "lo": self.lo, "hi": hi, "where": where, "params": params,
+                "order": order_sql(self.sort_key, self.sort_desc),
+                "count": self.count() if filtered and self.filters else self.total()}
+
+    def export_rows(self, filtered: bool) -> Iterator[ResultRecord]:
+        """:meth:`export_spec` streamed through this process's connection (small exports)."""
+        sp = self.export_spec(filtered)
+        return self.repo.reader.iter_query(sp["lo"], sp["hi"], sp["where"], sp["params"], sp["order"])
 
     def position_of(self, rid: int) -> int:
         """Logical index of result ``rid`` in the view, or -1 (not shown / not found quickly)."""
@@ -1833,7 +1870,7 @@ class ResultView:
     # -------------------------------------------------------------- removal / clear
     def remove(self, records: Sequence[ResultRecord]) -> int:
         """Delete these results from the dataset and from the view (positions known from the page)."""
-        records = [r for r in records if self.is_alive(r.id)]
+        records = list({r.id: r for r in records if self.is_alive(r.id)}.values())    # each result once
         if not records:
             return 0
         positions = [self._verified_position(r) for r in records] if self.mat is not None else []

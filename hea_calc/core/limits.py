@@ -5,9 +5,11 @@ The former 200 000-composition guard protected the in-memory result store; with 
 Measurements (``design/implementation/performance.md``, dev box: 12 logical CPUs, 8 workers):
 
 * real engine, 5-element at.% sweeps: ≈ 2 250 alloys/s per worker (18 900/s with 8 workers;
-  1 039 776 alloys in 55 s, stored as they come), event-loop gaps < 100 ms throughout;
+  1 039 776 alloys in 55 s, stored as they come), event-loop gaps typically 80-90 ms (one 147 ms gap
+  at a scripted window resize in the final 1 M run);
 * storage: ≈ 420-480 bytes per result on disk (results + design coordinates + WAL);
-* interaction: page change, Details, row removal and memory are flat from 100 k to 10 M rows;
+* interaction (synthetic rows, real writer path): page change, Details, row removal and memory are
+  flat from 100 k to 10 M rows;
   a full-dataset sort or filter is materialised in the background at ≈ 1 s per million rows
   (0.17 s at 100 k, 1.3 s at 1 M, 9.8 s at 10 M).
 
@@ -18,11 +20,14 @@ Tiers:
 * ``very_large`` - from ``VERY_LARGE``: more than one Excel worksheet (1 048 575 rows), ≈ 1 min of
   calculation, ≈ 0.4 GB, sorts ≥ 1 s - results are stored and processed in the background.
 
-Hard limit: ``HARD_LIMIT`` = 10 000 000, the largest dataset measured end to end (4.0 GB, 9.8 s per
-full sort, 70 k rows/s ingestion, flat GUI memory).  Beyond it every sort/filter would be a
-multi-ten-second wait and nothing has been validated; it is a measured boundary, to be raised
-by re-running ``tools/perf_harness.py --scenario storage`` at a larger size.  Independently, a
-batch is refused when its estimated database does not fit on the disk holding the session.
+Hard limit: ``HARD_LIMIT`` = 10 000 000 - the largest *repository/storage* size validated, with
+SYNTHETIC rows inserted through the real writer path (4.0 GB, 9.8 s per full sort, 70 k rows/s
+ingestion, flat GUI memory).  The real engine was validated end to end up to 1 039 776 alloys;
+between ≈ 1 M and 10 M the calculation path is extrapolated (constant throughput and per-row size).
+Beyond 10 M every sort/filter would be a multi-ten-second wait and nothing has been validated; raise
+it by re-running ``tools/perf_harness.py --scenario storage`` (and a real-engine run) at a larger
+size.  Independently, a batch is refused when its estimated database does not fit on the disk
+holding the session.
 """
 
 from __future__ import annotations

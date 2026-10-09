@@ -273,6 +273,15 @@ class ResultsModel(QAbstractTableModel):
         if changed:
             self._refresh_page(force=True)
             self.state_changed.emit()
+            if not self.view.streaming and self.view.needs_final_rebuild():
+                self.resort()                       # built from fewer rows than are now committed
+
+    def finish_streaming(self) -> None:
+        """Rows stopped arriving (a calculation ended): make the view complete."""
+        self.view.streaming = False
+        self.refresh_committed(resort=False)
+        if self.view.needs_final_rebuild():
+            self.resort()
 
     def _refresh_page(self, force: bool = False):
         self.page = max(0, min(self.page, self.page_count() - 1))
