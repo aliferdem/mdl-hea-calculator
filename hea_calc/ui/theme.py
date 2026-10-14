@@ -30,8 +30,12 @@ TILE_SIZE = 29          # design tile; the periodic table shrinks it down to TIL
 TILE_SIZE_MIN = 24
 TILE_GAP = 2
 ELEMENT_PANEL_WIDTH = 596
-COMPOSITION_PANEL_WIDTH = 457
-DETAILS_PANEL_WIDTH = 787
+# Approved Analysis layout (docs/analysis-redesign/ANALYSIS_RESPONSIVE_LAYOUT.md section 1): at the 1920 px
+# reference the Analysis panel is 805 px; the 18 px come from Composition setup (457 -> 439), so the periodic
+# table keeps its 29 px tiles.
+COMPOSITION_PANEL_WIDTH = 439
+ANALYSIS_PANEL_WIDTH = 805
+DETAILS_PANEL_WIDTH = ANALYSIS_PANEL_WIDTH      # former name of the third panel's reference width
 TOP_ROW_HEIGHT = 465
 
 # Responsive upper row.  The 1920 px design frame (20 px margins and gaps) gives the reference widths

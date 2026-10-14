@@ -2,7 +2,7 @@
 
 Usage:
     .venv/Scripts/python.exe tools/screenshot.py [out.png] [--theme light] [--mode single|sweep|expression]
-           [--tab 0-4] [--size 1920x1000] [--empty] [--platform windows]
+           [--tab 0-3] [--size 1920x1000] [--empty] [--platform windows]
 """
 
 from __future__ import annotations
@@ -47,8 +47,8 @@ def main():
     app.processEvents()
     if not args.empty:
         demo(win, args.mode)
-    win.details.tabs.set_index(args.tab)
-    win.details.stack.setCurrentIndex(args.tab)
+    from hea_calc.core.analysis import state as AS
+    win.analysis_ctl.apply(AS.set_tab, AS.COMP_TABS[min(args.tab, len(AS.COMP_TABS) - 1)])
     for _ in range(5):
         app.processEvents()
     out = Path(args.out)

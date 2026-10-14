@@ -25,7 +25,7 @@ import uuid
 from dataclasses import dataclass, field, replace
 
 from ..repository import filter_sql, q
-from ..results import ModelFilter, RangeFilter
+from ..results import IdSetFilter, ModelFilter, RangeFilter
 
 FULL, FILTERED, CHECKED = "full", "filtered", "checked"
 BASES = (FULL, FILTERED, CHECKED)
@@ -40,6 +40,8 @@ def freeze_filters(filters) -> tuple:
             out.append(("range", f.key, f.minimum, f.maximum))
         elif isinstance(f, ModelFilter):
             out.append(("model", f.key, tuple(sorted(f.labels))))
+        elif isinstance(f, IdSetFilter):
+            out.append(("ids", f.table, len(f.ids)))
         elif isinstance(f, tuple):
             out.append(f)
         else:
@@ -54,6 +56,8 @@ def thaw_filters(frozen: tuple) -> list:
             out.append(RangeFilter(f[1], f[2], f[3]))
         elif f[0] == "model":
             out.append(ModelFilter(f[1], set(f[2])))
+        elif f[0] == "ids":
+            out.append(IdSetFilter(f[1]))
     return out
 
 
@@ -64,6 +68,8 @@ def filter_text(frozen: tuple) -> str:
     for f in frozen:
         if f[0] == "model":
             parts.append(f"{f[1]} = {' or '.join(f[2])}")
+        elif f[0] == "ids":
+            parts.append(f"{f[2]:,} results selected in Analysis")
         else:
             d = DESCRIPTORS.get(f[1])
             name = d.plain if d else f[1]

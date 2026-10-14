@@ -277,12 +277,12 @@ def test_upper_panels_fit_and_table_fills_width_at_each_scale(app, scale):
         assert rep["tableColumnsSum"] == rep["tableViewportWidth"], rep
         assert not rep["tableHorizontalScrollbarVisible"], rep
         assert not rep["tableVerticalScrollbarVisible"] and rep["tableVerticalScrollRange"] == 0, rep
-        # periodic table and details tabs fit inside their panels
+        # periodic table and Analysis tabs fit inside their panels
         el = w.elements
         assert el.table.x() + el.table.width() <= el.width() - 20
-        tabs = w.details.tabs
-        last = tabs.buttons[-1]
-        assert last.x() + last.width() <= tabs.width(), "all five tabs visible"
+        for tabs in (w.analysis.comp_tabs, w.analysis.coll_tabs):
+            last = tabs.buttons[-1]
+            assert last.x() + last.width() <= tabs.width(), "all four tabs visible"
         info = el.info
         right = max(g.x() + g.width() for g in info.group_wraps)
         assert right <= info.width() - 20, (right, info.width())
@@ -291,11 +291,12 @@ def test_upper_panels_fit_and_table_fills_width_at_each_scale(app, scale):
 
 
 def test_design_viewport_reproduces_reference_geometry(app):
-    """1920 px: panels at the Figma x positions (20 / 636 / 1113, right edge 1900)."""
+    """1920 px: panels at the approved positions (20 / 636 / 1095, Analysis 805 px, right edge 1900)."""
     w = make_window(app, (1920, 1000))
     try:
         xs = [p.mapTo(w, QPoint(0, 0)).x() for p in (w.elements, w.composition, w.details)]
-        assert xs == [20, 636, 1113]
+        assert xs == [20, 636, 1095]
+        assert w.details.width() == 805
         assert w.details.mapTo(w, QPoint(0, 0)).x() + w.details.width() == 1900
         assert w.elements.table.tile_size == 29
         assert not w.layout_report()["mainScrollbarVisible"], "no unnecessary main scroll bar"

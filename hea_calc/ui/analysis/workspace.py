@@ -1,0 +1,232 @@
+"""Expanded Analysis workspace (design guide section 4; frames 18-31) - an in-window page.
+
+*Expand analysis* swaps the main window's content (upper panels + results table) for this page; the native
+title bar and the 48 px HEA header stay.  It is a second view of the same
+:class:`~.controller.AnalysisController`: context, active composition, tabs, scope, plot configuration, zoom
+and selection are shared, so returning with *Back to calculation* restores everything, and focus returns to
+the embedded *Expand analysis* button (``ANALYSIS_RESPONSIVE_LAYOUT.md`` section 6).
+"""
+
+from __future__ import annotations
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QHBoxLayout, QPushButton, QStackedWidget, QVBoxLayout, QWidget
+
+from ...core import composition as CMP
+from ...core.analysis import models as MD
+from ...core.analysis import state as S
+from ...core.analysis.scope import BASE_LABELS
+from ...core.engine import MODEL_KEYS
+from .. import icons
+from ..widgets.common import IconButton, LineTabs
+from .collection_view import CollectionContent, _Region
+from .composition_view import CompositionContent, mode_name
+from .panel import overflow_menu
+from .widgets import ROW_SM, Cell, ContentSwitcher, DataTable, label, rich
+
+
+class BackButton(QPushButton):
+    """*Back to calculation*: Carbon tertiary button (sm) with the trailing ``minimize`` icon."""
+
+    def __init__(self, parent=None):
+        super().__init__("Back to calculation", parent)
+        self.setProperty("kind", "tertiary")
+        self.setProperty("btnsize", "sm")
+        self.setFixedSize(200, 32)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.setToolTip("Back to calculation (Ctrl+Shift+E)")
+        self.setAccessibleName("Back to calculation")
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        from PySide6.QtCore import QRectF
+        from PySide6.QtGui import QPainter
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        token = "text-inverse" if self.underMouse() else "icon-primary"
+        icons.paint(p, "minimize", QRectF(self.width() - 32, (self.height() - 16) / 2, 16, 16), token)
+        p.end()
+
+
+class WorkspaceTitle(QWidget):
+    """Focusable heading "Analysis" (announced on expansion; not in the Tab sequence)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.lab = label("Analysis", "title")
+        lay.addWidget(self.lab)
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.setAccessibleName("Analysis workspace")
+
+
+class AnalysisWorkspace(QWidget):
+    back_requested = Signal()
+
+    def __init__(self, controller, parent=None):
+        super().__init__(parent)
+        self.c = controller
+        self.setObjectName("AnaWorkspace")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 24, 20, 24)
+        root.setSpacing(20)
+        # ---- header (48)
+        head = QWidget()
+        head.setFixedHeight(48)
+        hl = QHBoxLayout(head)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(0)
+        self.title = WorkspaceTitle()
+        hl.addWidget(self.title)
+        hl.addSpacing(36)
+        self.switcher = ContentSwitcher(["Composition", "Collection"])
+        hl.addWidget(self.switcher)
+        hl.addSpacing(32)
+        self.tab_stack = QStackedWidget()
+        self.comp_tabs = LineTabs(list(S.COMP_TAB_LABELS))
+        self.coll_tabs = LineTabs(list(S.COLL_TAB_LABELS))
+        self.tab_stack.addWidget(self.comp_tabs)
+        self.tab_stack.addWidget(self.coll_tabs)
+        self.tab_stack.setFixedHeight(32)
+        self.tab_stack.setFixedWidth(480)
+        hl.addWidget(self.tab_stack)
+        hl.addStretch(1)
+        self.identity = label("", "secondary")
+        hl.addWidget(self.identity)
+        hl.addSpacing(8)
+        self.overflow_btn = IconButton("overflow_menu_vertical", "Options")
+        hl.addWidget(self.overflow_btn)
+        hl.addSpacing(8)
+        self.back = BackButton()
+        hl.addWidget(self.back)
+        root.addWidget(head)
+        # ---- body
+        self.body = QStackedWidget()
+        self.comp_body = QStackedWidget()          # overview / descriptors / models / model details
+        self.composition = CompositionContent("W")
+        self.composition_details = CompositionContent("W")
+        self.composition_details.setCurrentIndex(3)
+        self.model_list = DataTable([("Model", None)], [], 48, activatable=True)
+        self._build_comp_pages()
+        self.collection = CollectionContent(controller, "W")
+        self.body.addWidget(self.comp_body)
+        self.body.addWidget(self.collection)
+        root.addWidget(self.body, 1)
+        # ---- wiring
+        self.switcher.changed.connect(lambda i: self.c.apply(S.switch_context, (S.COMPOSITION, S.COLLECTION)[i]))
+        self.comp_tabs.changed.connect(lambda i: self.c.apply(S.set_tab, S.COMP_TABS[i]))
+        self.coll_tabs.changed.connect(lambda i: self.c.apply(S.set_tab, S.COLL_TABS[i]))
+        for content in (self.composition, self.composition_details):
+            content.open_tab.connect(lambda tab: self.c.apply(S.set_tab, tab))
+            content.model_selected.connect(lambda m: self.c.apply(S.select_model, m))
+        self.model_list.activated.connect(lambda i: self.c.apply(S.select_model, MODEL_KEYS[i]))
+        self.back.clicked.connect(self.back_requested.emit)
+        self.overflow_btn.clicked.connect(self.open_overflow)
+        controller.state_changed.connect(self._sync)
+        controller.composition_changed.connect(self._composition_changed)
+        controller.data_ready.connect(lambda slot: self._identity() if slot == "population" else None)
+        self.collection.set_has_results(True)
+        self._sync(None, controller.state)
+        self._composition_changed()
+
+    def _build_comp_pages(self) -> None:
+        # overview / descriptors / models share one CompositionContent (W layouts); model details adds the list
+        self.comp_body.addWidget(self.composition)
+        md = QWidget()
+        ml = QHBoxLayout(md)
+        ml.setContentsMargins(0, 0, 0, 0)
+        ml.setSpacing(20)
+        lst = _Region()
+        lst.setFixedWidth(280)
+        lst.add(label("Models", "heading02"))
+        lst.add(self.model_list)
+        lst.lay.addStretch(1)
+        ml.addWidget(lst)
+        reg = _Region()
+        reg.add(self.composition_details, 1)
+        ml.addWidget(reg, 1)
+        self.comp_body.addWidget(md)
+
+    # ------------------------------------------------------------------ state -> view
+    def _sync(self, old, new):
+        ctx = 0 if new.context == S.COMPOSITION else 1
+        self.switcher.set_index(ctx)
+        self.switcher.set_badge(0, new.composition_badge)
+        self.tab_stack.setCurrentIndex(ctx)
+        self.body.setCurrentIndex(ctx)
+        self.comp_tabs.set_index(S.COMP_TABS.index(new.comp_tab))
+        self.coll_tabs.set_index(S.COLL_TABS.index(new.coll_tab))
+        details = new.comp_tab == "model_details"
+        self.comp_body.setCurrentIndex(1 if details else 0)
+        if not details:
+            self.composition.setCurrentIndex(S.COMP_TABS.index(new.comp_tab))
+        self.composition.set_model(new.model)
+        self.composition_details.set_model(new.model)
+        self.composition.set_search(new.descriptor_search, new.full_precision)
+        self.model_list.selected = MODEL_KEYS.index(new.model)
+        self.model_list.update()
+        if ctx == 1 and (old is None or old.context != new.context):
+            self.c.ensure_scope()
+        if old is not None and (old.active != new.active or old.active_gone != new.active_gone):
+            self._composition_changed()
+        self._identity()
+
+    def _composition_changed(self):
+        row = self.c.row if self.c.state.active_gone is None else None
+        if row is None:
+            self.composition.set_empty("No composition selected",
+                                       "Double-click a row in the results table to analyse that composition here.")
+            self.composition_details.set_empty("No composition selected", "")
+            self.model_list.set_rows([])
+        else:
+            info = self.c.run_info(self.c.record.run_id) if self.c.record is not None else None
+            self.composition.set_result(row, info, self.c.record)
+            self.composition_details.set_result(row, info, self.c.record)
+            rows = []
+            for k in MODEL_KEYS:
+                o = row.result.models[k]
+                rows.append([Cell(f"<b>{k}</b> &nbsp;<span style='font-size:12px'>{MD.MODELS[k].short}</span>",
+                                  tag=None)])
+                rows[-1].append(Cell(tag=o.label))
+            self.model_list.columns = [("Model", None), ("", 96)]
+            self.model_list.show_header = False
+            self.model_list.set_rows(rows)
+        self._identity()
+
+    def _identity(self):
+        st = self.c.state
+        if st.context == S.COMPOSITION:
+            row = self.c.row if st.active_gone is None else None
+            if row is None:
+                self.identity.setText("")
+                return
+            from ...core.family import family_key
+            run = f" · Run {self.c.record.run_id}" if self.c.record is not None else ""
+            self.identity.setText(rich(f"{CMP.name_html(row.name)} · {family_key(row.result.composition)}{run}"))
+        else:
+            sc = st.scope
+            if sc is None:
+                self.identity.setText("")
+                return
+            info = self.c.run_info(sc.run_id)
+            n = st.resolved.n if st.resolved else 0
+            text = f"Run {sc.run_id} · {mode_name(info.mode if info else '')} · {BASE_LABELS[sc.base]} · " \
+                   f"{n:,} of {self.c.run_count(sc.run_id):,} results"
+            if info is not None and info.status == "running":
+                text += " (calculating)"
+            self.identity.setText(text)
+
+    def open_overflow(self):
+        menu = overflow_menu(self, self.c)
+        menu.exec(self.overflow_btn.mapToGlobal(self.overflow_btn.rect().bottomLeft()))
+        menu.deleteLater()
+
+    def focus_title(self):
+        self.title.setFocus(Qt.FocusReason.OtherFocusReason)
+
+
+_ = (QFont, ROW_SM)

@@ -312,10 +312,11 @@ def test_element_order_survives_signals_and_overview(win):
     row = win.table.model.rows[-1]
     assert list(row.input_amounts) == ["Cr", "Mn", "Fe", "Co", "Ni"]
     assert list(row.result.composition) == ["Cr", "Mn", "Fe", "Co", "Ni"]
-    from PySide6.QtWidgets import QLabel
-    page = win.details.page_widget(0)
-    texts = [lab.text() for lab in page.findChildren(QLabel)]
-    assert "20.0000" in texts and "1.0000" in texts and "0.2000" not in texts  # at.% and ratio columns
+    from hea_calc.ui.analysis.widgets import DataTable
+    page = win.analysis.composition.pages[0]
+    table = page.findChildren(DataTable)[0]                      # Composition (normalised)
+    assert [r[0].html for r in table.rows] == ["Cr", "Mn", "Fe", "Co", "Ni"]
+    assert {r[1].html for r in table.rows} == {"20.00"} and {r[2].html for r in table.rows} == {"1.000"}
 
 
 def test_overview_ratio_column(win):
@@ -338,7 +339,7 @@ def test_button_sizes_follow_the_carbon_size_property(win, app):
     """
     from hea_calc.ui.theme import BUTTON_HEIGHT, CONTROL_HEIGHT
 
-    md = [win.composition.clear_btn, win.composition.calc_btn, win.details.print_btn]
+    md = [win.composition.clear_btn, win.composition.calc_btn]
     sm = [win.table.export_btn]
     for b in md:
         assert b.property("btnsize") == "md", b
@@ -350,7 +351,11 @@ def test_button_sizes_follow_the_carbon_size_property(win, app):
     app.processEvents()
     bar = win.composition.calc_btn.parentWidget()
     assert win.composition.calc_btn.height() == BUTTON_HEIGHT == bar.height()
-    assert win.composition.calc_btn.width() == 141
+    # Composition setup is 439 px at the 1920 px reference (approved Analysis layout, 457 -> 439), so the
+    # 141 px Figma button is compressed by the panel's existing rule (1 px per px below 457)
+    from hea_calc.ui.widgets.composition_panel import ColumnGrid
+    assert win.composition.width() == 439
+    assert win.composition.calc_btn.width() == 141 - (ColumnGrid.DESIGN_PANEL - 439)
 
 
 def test_empty_states_use_the_exported_illustrations(win, app):
@@ -362,12 +367,12 @@ def test_empty_states_use_the_exported_illustrations(win, app):
     for view, art in ((win.composition.single, "magnifier"), (win.composition.sweep, "magnifier")):
         found = view.empty.findChildren(Illustration)
         assert [i.name for i in found] == [art], view
-    # details: two variants of one artwork, driven by whether results exist
-    page = win.details.page_widget(0)
+    # Analysis: two variants of one artwork, driven by whether results exist (design guide frame 1 / 1b)
+    page = win.analysis.composition.pages[0]
     names = [i.name for i in page.findChildren(Illustration)]
     assert names == ["document"], names
     texts = [lab.text() for lab in page.findChildren(QLabel)]
-    assert "No alloy to show yet" in texts, texts
+    assert "No results to analyse yet" in texts, texts
     click_elements(win, "Co", "Cr", "Fe", "Ni")
     win.composition.calc_btn.click()
     app.processEvents()
@@ -376,11 +381,12 @@ def test_empty_states_use_the_exported_illustrations(win, app):
     win._jump_to(0)
     app.processEvents()
     assert win.details.row is not None
-    win.details.show_row(None, has_results=True)   # as delete_rows / edit_filters call it
+    win.show_details(None)
     app.processEvents()
-    texts = [lab.text() for lab in win.details.page_widget(0).findChildren(QLabel)]
-    assert "No alloy selected" in texts, texts
-    assert [i.name for i in win.details.page_widget(0).findChildren(Illustration)] == ["document"]
+    page = win.analysis.composition.pages[0]
+    texts = [lab.text() for lab in page.findChildren(QLabel) if lab.isVisibleTo(page)]
+    assert "No composition selected" in texts, texts
+    assert [i.name for i in page.findChildren(Illustration) if i.isVisibleTo(page)] == ["document"]
 
 
 def test_data_table_row_and_header_colours(win, app):

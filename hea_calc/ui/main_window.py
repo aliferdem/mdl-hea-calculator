@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
-from PySide6.QtGui import QActionGroup, QGuiApplication, QIcon
+from PySide6.QtGui import QActionGroup, QGuiApplication, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-                               QProgressBar, QVBoxLayout, QWidget)
+                               QProgressBar, QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
 
 from ..core.engine import DEFAULT_TCRIT_FRACTION, Engine, default_engine
 from ..core.export import CLIPBOARD_MAX_ROWS, XLSX_MAX_ROWS, write_records, write_tsv
@@ -22,8 +22,12 @@ from .theme import (COMPOSITION_PANEL_MIN, COMPOSITION_PANEL_WIDTH, CONTENT_MARG
                     CONTENT_MARGIN_X, DETAILS_PANEL_MIN, DETAILS_PANEL_WIDTH, ELEMENT_PANEL_MIN, ELEMENT_PANEL_WIDTH,
                     PANEL_GAP, THEME, TOP_ROW_HEIGHT, stylesheet)
 from .widgets.common import InlineNotification, button
+from ..core.analysis import state as AS
+from .analysis.controller import AnalysisController
+from .analysis.panel import AnalysisPanel
+from .analysis.widgets import stylesheet_rules as analysis_rules
+from .analysis.workspace import AnalysisWorkspace
 from .widgets.composition_panel import CompositionPanel
-from .widgets.details_panel import DetailsPanel
 from .widgets.dialogs import (AboutDialog, AlloyDetailsDialog, ChoiceDialog, ColumnsDialog, FilterDialog,
                               ImportReportDialog, SettingsDialog)
 from .widgets.element_panel import ElementPanel
@@ -112,7 +116,11 @@ class MainWindow(QMainWindow):
         # their minimum widths, Details moves below the other two (widgets/layouts.UpperPanels).
         self.elements = ElementPanel(self.engine)
         self.composition = CompositionPanel(self.engine.data)
-        self.details = DetailsPanel()
+        # Analysis (replaces Calculation details): one controller shared by the embedded panel and the
+        # in-window workspace (docs/analysis-redesign/ANALYSIS_RESPONSIVE_LAYOUT.md section 5).
+        self.analysis_ctl = AnalysisController(self.repo, None, self.engine, self)
+        self.analysis = AnalysisPanel(self.analysis_ctl)
+        self.details = self.analysis                 # former name, kept for tools and tests
         top_w = UpperPanels([(self.elements, ELEMENT_PANEL_WIDTH, ELEMENT_PANEL_MIN, ELEMENT_PANEL_WIDTH),
                              (self.composition, COMPOSITION_PANEL_WIDTH, COMPOSITION_PANEL_MIN,
                               COMPOSITION_PANEL_WIDTH),
@@ -126,6 +134,8 @@ class MainWindow(QMainWindow):
         self.progress = ProgressBanner()
         self.progress.cancel.clicked.connect(self.cancel_calculation)
         self.table = ResultsTable(engine=self.engine, repo=self.repo)
+        self.analysis_ctl.model = self.table.model
+        self.analysis_ctl.checked = self.table.model.checked
         self.runner = JobRunner(self.jobs, self.table.model, self)
         self.exporter = ExportTask(self)
         self.exporter.progress.connect(self._export_progress)
@@ -143,7 +153,21 @@ class MainWindow(QMainWindow):
         self.content = content_w
         self.scroll = MainScrollArea()
         self.scroll.setWidget(content_w)
-        root.addWidget(self.scroll, 1)
+        # Calculation layout and the expanded Analysis workspace are two pages of the same window
+        # (presentation only; the app header stays).
+        self.pages = QStackedWidget()
+        self.pages.addWidget(self.scroll)
+        self.workspace = AnalysisWorkspace(self.analysis_ctl)
+        self.workspace.setMinimumSize(1200, 640)
+        self.workspace_scroll = QScrollArea()
+        self.workspace_scroll.setObjectName("ContentScroll")
+        self.workspace_scroll.setWidgetResizable(True)
+        self.workspace_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        from .widgets.scroll import thin_scrollbars
+        thin_scrollbars(self.workspace_scroll)
+        self.workspace_scroll.setWidget(self.workspace)
+        self.pages.addWidget(self.workspace_scroll)
+        root.addWidget(self.pages, 1)
         self.sticky = StickyHeader(self.table.view, self.scroll.viewport())
         # coalesced re-placement of the sticky header (owned by the window, so it dies with it)
         self._sticky_timer = QTimer(self)
@@ -174,10 +198,25 @@ class MainWindow(QMainWindow):
         # from ~80 ms to ~140 ms); single compositions never need it.
         self.composition.mode_changed.connect(
             lambda mode: self.jobs.warm_up() if mode in ("sweep", "expression") and not self._closed else None)
-        # table: double click -> embedded details; row menu -> separate details window
+        # table: double click -> the active composition of Analysis; row menu -> separate details window
         self.table.view.details_requested.connect(self.show_details)
         self.table.view.window_requested.connect(self.open_details)
         self.table.view.rows_removed.connect(self._check_details)
+        self.table.view.removed_ids.connect(self.analysis_ctl.results_removed)
+        self.table.model.checked_changed.connect(self.analysis_ctl.table_checked_changed)
+        # Analysis wiring
+        ctl = self.analysis_ctl
+        self.analysis.expand_requested.connect(lambda: self.set_expanded(True))
+        ctl.expand_requested.connect(self.set_expanded)
+        self.workspace.back_requested.connect(lambda: self.set_expanded(False))
+        ctl.show_in_table.connect(self.show_in_table)
+        ctl.check_results.connect(self._check_results)
+        ctl.report_requested.connect(self.export_report)
+        ctl.export_requested.connect(self.export_analysis)
+        ctl.help_requested.connect(self.show_help)
+        self.runner.progress.connect(lambda *_: ctl.rows_committed(self.runner.run_id))
+        self._expand_shortcut = QShortcut(QKeySequence("Ctrl+Shift+E"), self)
+        self._expand_shortcut.activated.connect(lambda: self.set_expanded(self.pages.currentIndex() == 0))
         self.table.delete_requested.connect(self.delete_rows)
         self.table.filter_requested.connect(self.edit_filters)
         self.table.columns_requested.connect(self.edit_columns)
@@ -278,7 +317,7 @@ class MainWindow(QMainWindow):
             app.setStyleSheet("")
         sheet = _SHEET_CACHE.get(THEME.name)
         if sheet is None:
-            sheet = stylesheet(lambda name, token: icons.file_url(name, token))
+            sheet = stylesheet(lambda name, token: icons.file_url(name, token)) + analysis_rules(THEME.tokens)
             _SHEET_CACHE[THEME.name] = sheet
         self.setStyleSheet(sheet)
         for act in self.theme_actions.actions():
@@ -345,7 +384,10 @@ class MainWindow(QMainWindow):
                 self.notify("error", str(exc) if isinstance(exc, RepositoryError) else user_message(exc))
                 return
             self._update_status()
+            if self.analysis_ctl.state.active is None:
+                self.analysis_ctl.apply(AS.switch_context, AS.COMPOSITION)
             self._jump_to(rng.start)
+            self.analysis_ctl.run_finished(None)
             if not res.ok:
                 self.notify("error", res.error)
             return
@@ -402,6 +444,7 @@ class MainWindow(QMainWindow):
 
     def _done(self, job):
         r = self.runner
+        self.analysis_ctl.run_finished(r.run_id)
         info = self.repo.get_run(r.run_id) if r.run_id is not None else None
         self._batch_added += r.added
         self._batch_failed += info.errors if info else 0
@@ -425,7 +468,7 @@ class MainWindow(QMainWindow):
             self._jump_to(self._batch_first)
         msg = f"{self._batch_added:,} composition(s) calculated" + (" (cancelled)" if cancelled else "")
         if self._batch_failed:
-            msg += f"; {self._batch_failed:,} could not be evaluated (see Calculation details)"
+            msg += f"; {self._batch_failed:,} could not be evaluated (open one in Analysis to see the reason)"
         self.notify("warning" if cancelled or self._batch_failed else "success", msg + ".")
 
     def _finish_batch(self, cancelled: bool):
@@ -458,8 +501,8 @@ class MainWindow(QMainWindow):
         if select_first and len(rng):
             self._jump_to(rng.start)
 
-    def _jump_to(self, row_id: int):
-        """Show the page holding result ``row_id`` and load it into Calculation details."""
+    def _jump_to(self, row_id: int, analyse: bool = True):
+        """Show the page holding result ``row_id`` (and make it the active composition of Analysis)."""
         m = self.table.model
         if not m.view.is_alive(row_id):
             return
@@ -467,33 +510,30 @@ class MainWindow(QMainWindow):
         if pos < 0:
             return
         m.set_page(pos // m.page_size)
-        rec = self.repo.get_result(row_id)
-        if rec is not None:
-            self.show_details(rec)
+        if analyse:
+            rec = self.repo.get_result(row_id)
+            if rec is not None:
+                self.show_details(rec)
 
     def show_details(self, row):
-        """Embedded Calculation details for a result (double click).  A stored record is reproduced
-        into a full result once, by its stable id - never by its row on screen."""
+        """The active composition of Analysis (double click, single calculation).  A stored record is
+        reproduced into a full engine result once, by its stable id - never by its row on screen."""
+        self.analysis.set_has_results(bool(self.table.model.total_count()))
         if row is None:
             self._details_id = None
-            self.details.show_row(None, has_results=bool(self.table.model.total_count()))
+            self.analysis_ctl.set_active(None)
             return
         if isinstance(row, ResultRecord):
             self._details_id = row.id
-            row = row.materialize()
-        self.details.show_row(row)
+            self.analysis_ctl.set_active(row.id)
 
     def _check_details(self):
-        row = self.details.row
         m = self.table.model
         total = m.total_count()
-        if row is not None:
-            rid = getattr(row, "row_id", None)
-            if rid is not None and not m.view.is_alive(rid):
-                self.details.show_row(None, has_results=bool(total))
-        elif self.details.has_results != bool(total):
-            # empty state follows the table: "No alloy to show yet" <-> "No alloy selected"
-            self.details.show_row(None, has_results=bool(total))
+        self.analysis.set_has_results(bool(total))
+        st = self.analysis_ctl.state
+        if st.active is not None and st.active_gone is None and not m.view.is_alive(st.active):
+            self.analysis_ctl.results_removed([st.active])
         self._update_status()
 
     # ------------------------------------------------------------------ table actions
@@ -507,8 +547,10 @@ class MainWindow(QMainWindow):
         m = self.table.model
         if not m.total_count():
             return
+        lo, hi = m.view.lo, m.view.hi
         m.clear()
-        self.details.show_row(None, has_results=False)
+        self.analysis_ctl.table_cleared(lo=lo, hi=hi)
+        self.analysis.set_has_results(False)
         self._update_status()
 
     def edit_filters(self):
@@ -516,7 +558,7 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self.table.model.set_filters(dlg.result_filters)
             self.table.set_filter_active(bool(dlg.result_filters))
-            self.details.show_row(None, has_results=bool(self.table.model.total_count()))
+            self.analysis_ctl.table_filter_changed()
             self._update_status()
         dlg.deleteLater()
 
@@ -719,7 +761,7 @@ class MainWindow(QMainWindow):
         view = m.view
         runs = [self.repo.get_run(rid) for rid in self.repo.run_ids_in(view.lo, view.hi)]
         lo, hi = m.hide_all()
-        self.details.show_row(None)
+        self.analysis_ctl.table_cleared(recalculated=True, lo=lo, hi=hi)
         queue = []
         for info in runs:
             if info is None or info.first_id is None:
@@ -747,14 +789,79 @@ class MainWindow(QMainWindow):
         return False
 
     def open_details(self, row):
-        """Calculation details in a separate window (row context menu).  The window holds a snapshot
-        of the result, so it stays valid if the stored row is removed later."""
+        """Composition analysis of one result in a separate window (row context menu).  The window
+        holds a snapshot of the result, so it stays valid if the stored row is removed later."""
         if row is not None:
+            info = None
             if isinstance(row, ResultRecord):
+                info = self.repo.get_run(row.run_id)
                 row = row.materialize()
-            dlg = AlloyDetailsDialog(row, self)
+            dlg = AlloyDetailsDialog(row, self, info=info)
             dlg.exec()
             dlg.deleteLater()
+
+    # ------------------------------------------------------------------ Analysis
+    def set_expanded(self, on: bool):
+        """Expand analysis / Back to calculation: a page swap, nothing else (state is shared)."""
+        if on and not self.table.model.total_count():
+            return
+        on = bool(on)
+        if (self.pages.currentIndex() == 1) == on:
+            return
+        self.analysis_ctl.apply(AS.set_expanded, on)
+        self.pages.setCurrentIndex(1 if on else 0)
+        if on:
+            self.workspace.focus_title()
+        else:
+            self.analysis.expand_btn.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def show_in_table(self, ids):
+        """Analysis -> table: jump to one result; for several, check them and say so (never filters silently)."""
+        ids = [int(i) for i in ids]
+        if not ids:
+            return
+        self.set_expanded(False)
+        if len(ids) == 1:
+            self._jump_to(ids[0], analyse=False)
+            return
+        # several: an explicit, visible id filter (removable in the Filter dialog), never a silent change
+        import uuid
+        from ..core.repository import ViewTask, q
+        from ..core.results import IdSetFilter
+        name = f"sel_{uuid.uuid4().hex[:12]}"
+        stmts = [(f"CREATE TABLE vw.{q(name)}(rid INTEGER PRIMARY KEY)", ())]
+        for k in range(0, len(ids), 500):
+            part = ids[k:k + 500]
+            stmts.append((f"INSERT OR IGNORE INTO vw.{q(name)}(rid) VALUES {','.join(['(?)'] * len(part))}", part))
+        task = self.repo.builder.submit(ViewTask("exec", statements=stmts))
+        task.done.wait(30)
+        if task.error is not None:
+            self.notify("error", user_message(task.error))
+            return
+        m = self.table.model
+        filters = [f for f in m.filters if not isinstance(f, IdSetFilter)] + [IdSetFilter(name, frozenset(ids))]
+        m.set_filters(filters)
+        self.table.set_filter_active(True)
+        self.analysis_ctl.table_filter_changed()
+        self._update_status()
+        self.notify("info", f"The table shows the {len(ids):,} results selected in Analysis. Clear the filter in "
+                            "Filter results to show all results.", 8000)
+
+    def _check_results(self, ids):
+        self.table.model.set_checked(ids, True)
+        self.analysis_ctl.table_checked_changed()
+
+    def export_report(self, kind: str):
+        from .analysis.report_ui import export_report
+        export_report(self, kind)
+
+    def export_analysis(self, kind: str):
+        from .analysis.report_ui import export_analysis_data
+        export_analysis_data(self, kind)
+
+    def show_help(self, page: str):
+        from .analysis.help import open_help
+        open_help(page, self)
 
     def show_about(self):
         dlg = AboutDialog(self)
@@ -776,6 +883,7 @@ class MainWindow(QMainWindow):
             self.runner.job.cancel()
             self.runner.job.wait(2.0)
         self.exporter.shutdown()
+        self.analysis_ctl.close()
         self.jobs.shutdown()          # no worker process outlives the window
         self.table.model.close()
         self.repo.close()

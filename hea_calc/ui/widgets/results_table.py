@@ -12,9 +12,12 @@ Architecture (measured; see ``tools/perf_harness.py`` and ``design/implementatio
 * there is no Qt selection: ``NoSelection``, no current cell, no focus rectangle.  Rows highlight on
   hover only; a drag inside a text cell selects its *characters* (``CellTextSelection``, one
   transient overlay that paints with the delegate's own text layout) and ``Ctrl+C`` copies them;
-* double-click a row → Calculation details; right-click → :class:`~.menu.CarbonMenu` with
-  "Open details in new window" and copy/remove actions.  Rows are identified by their stable
-  ``result_id``, never by visual position.
+* double-click a row → the active composition of Analysis; right-click → :class:`~.menu.CarbonMenu` with
+  "Analyse composition", check, "Open details in new window" and copy/remove actions.  Rows are
+  identified by their stable ``result_id``, never by visual position;
+* a leading checkbox column (:class:`CheckHeader`, the view's vertical header - not a model column and not
+  Qt selection) holds the explicit *Checked results* set (``core/analysis/checked.CheckedSet``, ids in
+  SQL); its corner box checks / unchecks every result passing the current filter.
 """
 
 from __future__ import annotations
@@ -46,6 +49,7 @@ ROW_HEIGHT = 32
 HEADER_HEIGHT = 32
 TEXT_PAD_LEFT = 16
 TEXT_PAD_RIGHT = 8
+CHECK_COL_WIDTH = 48
 
 
 # ====================================================================== row sequences (lazy, streamed)
@@ -87,6 +91,7 @@ class ResultsModel(QAbstractTableModel):
     page_changed = Signal()
     columns_changed = Signal()
     state_changed = Signal()
+    checked_changed = Signal()           # the Checked results set changed (any row, any page)
     _task_done = Signal(object)          # builder thread -> GUI thread (queued)
 
     def __init__(self, parent=None, engine=None, repo: ResultRepository | None = None):
@@ -103,6 +108,9 @@ class ResultsModel(QAbstractTableModel):
         self._cells: dict[int, list[str]] = {}
         self.last_error: str | None = None
         self._user_request = False           # the pending build was asked for by the user (sort/filter)
+        from ...core.analysis.checked import CheckedSet
+        self.checked = CheckedSet(self.repo)
+        self._page_checked: set[int] = set()
 
     def close(self) -> None:
         """Release the repository if this model created it."""
@@ -265,6 +273,11 @@ class ResultsModel(QAbstractTableModel):
         self.state_changed.emit()
 
     def _on_task(self, task):
+        if task.kind == "exec":
+            if self.checked.busy is False:
+                self._page_checked = self.checked.states([r.id for r in self._page])
+                self.checked_changed.emit()
+            return
         try:
             changed = self.view.apply_task(task)
         except Exception as exc:                     # noqa: BLE001 - a failed build: keep the old view
@@ -305,7 +318,41 @@ class ResultsModel(QAbstractTableModel):
                 self.endResetModel()
         else:
             self._page = recs                            # same rows: fresh records (positions)
+        self._page_checked = self.checked.states(ids) if ids else set()
         self.page_changed.emit()
+
+    # ------------------------------------------------------------------ checked results
+    def is_checked(self, r: int) -> bool:
+        rec = self.row_at(r)
+        return rec is not None and rec.id in self._page_checked
+
+    def set_checked(self, ids, on: bool) -> None:
+        self.checked.set(ids, on)
+        self._page_checked = self.checked.states([r.id for r in self._page])
+        self.checked_changed.emit()
+
+    def toggle_checked(self, r: int) -> None:
+        rec = self.row_at(r)
+        if rec is not None:
+            self.set_checked([rec.id], rec.id not in self._page_checked)
+
+    def check_state(self) -> str:
+        """Corner box: "all" right after checking every filtered result, "some" / "none" otherwise."""
+        c = self.checked
+        if c.count <= 0:
+            return "none"
+        return "all" if c.all_filtered_version == c.version else "some"
+
+    def check_all_filtered(self, on: bool) -> None:
+        sp = self.view.export_spec(filtered=bool(self.filters))
+        self.checked.set_matching(sp["where"], sp["params"], sp["lo"], sp["hi"], on)
+        self._page_checked = set()
+        self.checked_changed.emit()
+
+    def clear_checked(self) -> None:
+        self.checked.clear()
+        self._page_checked = set()
+        self.checked_changed.emit()
 
     # ------------------------------------------------------------------ Qt model
     def rowCount(self, parent=QModelIndex()):
@@ -626,11 +673,124 @@ class Header(QHeaderView):
         return QSize(s.width(), HEADER_HEIGHT)
 
 
+# ====================================================================== checkbox column
+def paint_checkbox(p: QPainter, rect: QRectF, state: str, enabled: bool = True) -> None:
+    """Carbon checkbox (16 px) centred in ``rect``: none / some (indeterminate) / all."""
+    name = {"all": "checkbox_checked", "some": "checkbox_indeterminate"}.get(state, "checkbox")
+    size = 16
+    r = QRectF(rect.center().x() - size / 2, rect.center().y() - size / 2, size, size)
+    icons.paint(p, name, r, "icon-primary" if enabled else "icon-disabled")
+
+
+class CheckHeader(QHeaderView):
+    """The checkbox column: the view's vertical header, painted per row from the model's checked states.
+    A click toggles the row's membership in *Checked results*; it never selects or activates the row."""
+
+    def __init__(self, view: "ResultsView"):
+        super().__init__(Qt.Orientation.Vertical, view)
+        self.view = view
+        self.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        self.setDefaultSectionSize(ROW_HEIGHT)
+        self.setFixedWidth(CHECK_COL_WIDTH)
+        self.setSectionsClickable(False)
+        self.setHighlightSections(False)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("")
+
+    def sizeHint(self):
+        return QSize(CHECK_COL_WIDTH, ROW_HEIGHT)
+
+    def paintSection(self, p: QPainter, rect: QRect, logical: int):
+        if not rect.isValid():
+            return
+        p.save()
+        crisp.fill_rect(p, rect, t("row-hover") if logical == self.view.hover_row else t("layer-01"))
+        crisp.hline_bottom(p, rect, t("row-border"), HAIRLINE)
+        paint_checkbox(p, QRectF(rect), "all" if self.view.m.is_checked(logical) else "none")
+        p.restore()
+
+    def mousePressEvent(self, e):
+        if e.button() != Qt.MouseButton.LeftButton:
+            return
+        r = self.logicalIndexAt(e.position().toPoint())
+        if r >= 0:
+            self.view.m.toggle_checked(r)
+            self.viewport().update()
+        e.accept()
+
+    def mouseDoubleClickEvent(self, e):
+        self.mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        r = self.logicalIndexAt(e.position().toPoint())
+        self.view._set_hover(r)
+        rec = self.view.m.row_at(r) if r >= 0 else None
+        self.setToolTip("" if rec is None else ("Uncheck result" if self.view.m.is_checked(r) else "Check result"))
+        super().mouseMoveEvent(e)
+
+    def leaveEvent(self, e):
+        self.view._set_hover(-1)
+        super().leaveEvent(e)
+
+
+class CheckAllBox(QWidget):
+    """Corner box of the checkbox column: check / uncheck every result passing the current filter."""
+
+    def __init__(self, view: "ResultsView", parent=None):
+        super().__init__(parent or view)
+        self.view = view
+        self.setFixedSize(CHECK_COL_WIDTH, HEADER_HEIGHT)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.setAccessibleName("Check all filtered results")
+        self._update_tip()
+
+    def _update_tip(self):
+        st = self.view.m.check_state()
+        filtered = bool(self.view.m.filters)
+        what = "filtered results" if filtered else "results"
+        tip = f"Uncheck all {what}" if st == "all" else f"Check all {what}"
+        if self.view.m.checked.count:
+            tip += f" ({self.view.m.checked.count:,} checked)"
+        self.setToolTip(tip)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        crisp.fill_rect(p, self.rect(), t("header-row"))
+        crisp.hline_bottom(p, self.rect(), t("row-border"), HAIRLINE)
+        enabled = self.view.m.view_count() > 0
+        paint_checkbox(p, QRectF(self.rect()), self.view.m.check_state(), enabled)
+        if self.hasFocus():
+            from ..theme import FOCUS_WIDTH
+            crisp.frame(p, self.rect(), FOCUS_WIDTH, t("focus"))
+        p.end()
+
+    def activate(self):
+        m = self.view.m
+        if not m.view_count():
+            return
+        m.check_all_filtered(m.check_state() != "all")
+        self._update_tip()
+        self.update()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.activate()
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.activate()
+            return
+        super().keyPressEvent(e)
+
+
 # ====================================================================== view
 class ResultsView(QTableView):
-    details_requested = Signal(object)   # double click anywhere on a row → embedded Calculation details
+    details_requested = Signal(object)   # double click anywhere on a row → the active composition of Analysis
     window_requested = Signal(object)    # row menu "Open details in new window"
     rows_removed = Signal()
+    removed_ids = Signal(object)         # result ids removed through the row menu
 
     def __init__(self, model: ResultsModel, parent=None):
         super().__init__(parent)
@@ -639,9 +799,10 @@ class ResultsView(QTableView):
         self.hover_row = -1
         self.header = Header(model, self)
         self.setHorizontalHeader(self.header)
-        self.verticalHeader().hide()
-        self.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
-        self.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        self.check_header = CheckHeader(self)
+        self.setVerticalHeader(self.check_header)
+        self.setCornerButtonEnabled(False)
+        self.check_all = CheckAllBox(self)
         self.setShowGrid(False)
         # Explicit product decision: no Qt cell/row selection, no current cell, no focus rectangle.
         self.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
@@ -664,6 +825,8 @@ class ResultsView(QTableView):
         self._press: tuple[int, int, QPoint] | None = None
         self._dragging = False
         model.columns_changed.connect(self.apply_widths)
+        model.checked_changed.connect(self._checked_changed)
+        model.page_changed.connect(self._checked_changed)
         model.modelReset.connect(self.selection.end)
         model.dataChanged.connect(lambda *_: self.selection.end())
         self.apply_widths()
@@ -679,6 +842,18 @@ class ResultsView(QTableView):
         for row in (old, r):
             if row >= 0:
                 self.viewport().update(self._row_rect(row))
+        self.check_header.viewport().update()
+
+    def _checked_changed(self):
+        self.check_header.viewport().update()
+        self.check_all._update_tip()
+        self.check_all.update()
+
+    def updateGeometries(self):
+        super().updateGeometries()
+        if hasattr(self, "check_all"):
+            self.check_all.setGeometry(0, 0, CHECK_COL_WIDTH, HEADER_HEIGHT)
+            self.check_all.raise_()
 
     def leaveEvent(self, e):
         self._set_hover(-1)
@@ -755,6 +930,10 @@ class ResultsView(QTableView):
         if sel:
             menu.add_action("Copy", lambda: QGuiApplication.clipboard().setText(sel), shortcut="Ctrl+C")
             menu.addSeparator()
+        menu.add_action("Analyse composition", lambda: self.details_requested.emit(row))
+        checked = row.id in self.m.checked.states([row.id])
+        menu.add_action("Uncheck result" if checked else "Check result",
+                        lambda: self.m.set_checked([row.id], not checked))
         menu.add_action("Open details in new window", lambda: self.window_requested.emit(row))
         menu.addSeparator()
         menu.add_action("Copy value", lambda: QGuiApplication.clipboard().setText(
@@ -771,7 +950,9 @@ class ResultsView(QTableView):
         return full_precision(row, key)
 
     def _remove(self, row: ResultRecord):
+        rid = row.id
         self.m.remove_rows([row])
+        self.removed_ids.emit([rid])
         self.rows_removed.emit()
 
     # -------------------------------------------------------------- column widths
@@ -871,6 +1052,9 @@ class StickyHeader(Header):
         view.m.columns_changed.connect(self.sync)
         view.m.headerDataChanged.connect(lambda *_: self.viewport().update())
         view.horizontalScrollBar().valueChanged.connect(self.setOffset)
+        self.corner = CheckAllBox(view, host)
+        self.corner.hide()
+        view.m.checked_changed.connect(self.corner.update)
         self.hide()
 
     def sync(self):
@@ -905,6 +1089,7 @@ class StickyHeader(Header):
         if not active:
             if self.isVisible():
                 self.hide()
+            self.corner.hide()
             return False
         # pushed up once only the last row is left under it, so it leaves together with the table
         y = min(0, rows_bottom - HEADER_HEIGHT - ROW_HEIGHT)
@@ -913,6 +1098,9 @@ class StickyHeader(Header):
             self.sync()
             self.show()
         self.raise_()
+        self.corner.setGeometry(top.x() - CHECK_COL_WIDTH, y, CHECK_COL_WIDTH, HEADER_HEIGHT)
+        self.corner.show()
+        self.corner.raise_()
         return True
 
 

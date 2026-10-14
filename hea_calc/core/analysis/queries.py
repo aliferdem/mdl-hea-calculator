@@ -498,16 +498,18 @@ class ScopeQuery:
                 where += f" AND ((r.result_id * {_HASH_MUL} + {int(seed) * 97}) % {_HASH_MOD}) < ?"
                 params.append(thr)
         csql = (color_metric.sql if color_metric else dim_sql(color)) if color not in (DIM_NONE, "") else "NULL"
-        cur = self._exec(f"SELECT r.result_id, {mx_.sql}, {my_.sql}, {csql} FROM {frm} WHERE {where} "
+        cur = self._exec(f"SELECT r.result_id, {mx_.sql}, {my_.sql}, {csql}, r.name FROM {frm} WHERE {where} "
                          "ORDER BY r.result_id", params)
-        ids, xs, ys, cs = array("q"), array("d"), array("d"), []
+        ids, xs, ys, cs, names = array("q"), array("d"), array("d"), [], []
         for row in self._fetchall(cur):
             ids.append(row[0])
             xs.append(row[1])
             ys.append(row[2])
             cs.append(row[3])
+            names.append(row[4])
         out = {"representation": rep, "n": n, "n_valid": valid, "n_missing": n - valid, "n_shown": len(ids),
-               "ids": ids, "x": xs, "y": ys, "color": color, "c": cs, "seed": seed if rep == "SAMPLED" else None}
+               "ids": ids, "x": xs, "y": ys, "color": color, "c": cs, "names": names,
+               "seed": seed if rep == "SAMPLED" else None}
         if color not in (DIM_NONE, "") and _is_dim(color):
             out["category_counts"] = self.category_counts(color) if rep == "SAMPLED" else None
         return out

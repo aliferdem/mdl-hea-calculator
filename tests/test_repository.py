@@ -555,7 +555,7 @@ def test_double_click_after_filtering_and_the_details_window(win, app, engine, m
     assert win.details.row.row_id == rec.id
     from hea_calc.ui.widgets import dialogs
     shown = []
-    monkeypatch.setattr(dialogs.AlloyDetailsDialog, "exec", lambda self: shown.append(self.panel.row) or 0)
+    monkeypatch.setattr(dialogs.AlloyDetailsDialog, "exec", lambda self: shown.append(self.row) or 0)
     menu = win.table.view.row_menu(m.row_at(2), "name")
     next(a for a in menu.actions() if a.text() == "Open details in new window").trigger()
     assert shown[0].row_id == m.row_at(2).id and shown[0].name == m.row_at(2).name

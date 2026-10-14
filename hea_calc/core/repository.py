@@ -70,7 +70,7 @@ from pathlib import Path
 
 from .chunks import NUM_KEYS, TEXT_KEYS, decode_amounts, pack_results, with_metadata
 from .engine import MODEL_KEYS, NA, AlloyResult
-from .results import COLUMN_BY_KEY, ModelFilter, RangeFilter, ResultRow, format_cell
+from .results import COLUMN_BY_KEY, IdSetFilter, ModelFilter, RangeFilter, ResultRow, format_cell
 
 SCHEMA_VERSION = 2
 APP_DIR_NAME = "HEA Calculator"
@@ -1347,6 +1347,8 @@ def filter_sql(filters: Sequence) -> tuple[str, tuple]:
                 s += f" AND {q(f.key)} <= ?"
                 params.append(float(f.maximum))
             parts.append(s)
+        elif isinstance(f, IdSetFilter):
+            parts.append(f"result_id IN (SELECT rid FROM vw.{q(f.table)})")
         elif isinstance(f, ModelFilter) and f.key in MODEL_KEYS:
             labels = sorted(f.labels)
             if not labels:
@@ -1941,7 +1943,8 @@ class ResultView:
         during a calculation includes rows the (lagging) view does not show yet."""
         hi = max(self.hi, self.repo.committed_last)          # everything committed, not just what is shown
         where, params = filter_sql(self.filters) if filtered else ("", ())
-        return {"db": str(self.repo.db_path), "lo": self.lo, "hi": hi, "where": where, "params": params,
+        return {"db": str(self.repo.db_path), "views": str(self.repo.views_path), "lo": self.lo, "hi": hi,
+                "where": where, "params": params,
                 "order": order_sql(self.sort_key, self.sort_desc),
                 "count": self.count() if filtered and self.filters else self.total()}
 

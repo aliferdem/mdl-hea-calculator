@@ -276,7 +276,7 @@ def test_row_menu_opens_details_in_a_new_window(win, app, monkeypatch):
     texts = [a.text() for a in menu.actions() if not a.isSeparator()]
     assert "Open details in new window" in texts
     assert [a for a in menu.actions() if a.text() == "Remove result"][0].property("danger")
-    win.details.show_row(None)
+    win.show_details(None)
     next(a for a in menu.actions() if a.text() == "Open details in new window").trigger()
     app.processEvents()
     assert len(opened) == 1

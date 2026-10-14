@@ -827,6 +827,17 @@ class Engine:
                                    values={"phi": d["phi_king"], "dg_ss": d["dg_ss"],
                                            "dg_max": d["dg_max"]})
 
+    # ================================================================== data accessors (display only)
+    def formation_pairs(self, composition: dict) -> list[tuple[str, str, float | None, bool]]:
+        """Every element pair of a composition with its Troparevsky formation enthalpy (meV/atom, None
+        when not tabulated) and whether the dataset flags the value - the inputs M6 compares with its
+        window, for Analysis display.  A dataset lookup, no calculation."""
+        suspect = self.data.formation_suspect_pairs()
+        out = []
+        for a, b in itertools.combinations(list(composition), 2):
+            out.append((a, b, self.data.formation_enthalpy(a, b), f"{a}-{b}" in suspect or f"{b}-{a}" in suspect))
+        return out
+
     # ================================================================== element support
     def model_support(self, element: str) -> dict[str, tuple[str, str]]:
         """Per-model data support for one element.

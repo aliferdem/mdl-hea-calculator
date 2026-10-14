@@ -233,6 +233,8 @@ def open_snapshot(spec: dict) -> sqlite3.Connection:
     """Read-only connection to the session database (views attached) inside one read transaction."""
     con = sqlite3.connect(f"file:{Path(spec['db']).as_posix()}?mode=ro", uri=True, isolation_level=None, timeout=10)
     con.execute("PRAGMA busy_timeout=10000")
+    if spec.get("views"):                     # id-set filters ("Show in results table") read views.sqlite
+        con.execute("ATTACH DATABASE ? AS vw", (f"file:{Path(spec['views']).as_posix()}?mode=ro",))
     con.execute("BEGIN")
     return con
 

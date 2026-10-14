@@ -173,8 +173,10 @@ DESCRIPTORS_LIST: list[Descriptor] = [
 ]
 DESCRIPTORS: dict[str, Descriptor] = {d.key: d for d in DESCRIPTORS_LIST}
 
-# Key descriptors of the Composition Overview (Frame 2), in order.
+# Key descriptors of the Composition Overview (Frame 2), in order, with the frame's short row labels.
 KEY_DESCRIPTORS = ("dhmix", "dsmix", "tm", "omega", "delta", "vec")
+KEY_LABELS = {"dhmix": "Mixing enthalpy", "dsmix": "Mixing entropy", "tm": "Melting temperature",
+              "omega": "Entropy–enthalpy ratio", "delta": "Size mismatch", "vec": "Valence electron conc."}
 
 # Numeric metrics available for collections (stored columns), in selector order.
 METRIC_KEYS: tuple[str, ...] = tuple(d.key for d in DESCRIPTORS_LIST if d.stored and d.key in NUM_KEYS)

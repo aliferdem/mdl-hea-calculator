@@ -11,10 +11,9 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFrame, QGridLayou
 from ... import __version__
 from ...core.composition import parse_number
 from ...core.engine import DEFAULT_TCRIT_FRACTION, MODEL_KEYS, MODELS
-from ...core.results import COLUMNS, COLUMN_BY_KEY, DEFAULT_COLUMNS, ModelFilter, RangeFilter
+from ...core.results import COLUMNS, COLUMN_BY_KEY, DEFAULT_COLUMNS, IdSetFilter, ModelFilter, RangeFilter
 from .scroll import inner_scroll_area
 from .common import IconButton, button, refresh_style, set_prop
-from .details_panel import DetailsPanel
 
 
 class Modal(QDialog):
@@ -183,6 +182,13 @@ class FilterDialog(Modal):
             g.addWidget(cb, r + 1 + i, 1, 1, 2)
             self.models[k] = cb
         g.setColumnStretch(0, 1)
+        self.id_filters = [f for f in filters if isinstance(f, IdSetFilter)]
+        self.keep_ids = None
+        if self.id_filters:
+            n = sum(f.count for f in self.id_filters)
+            self.keep_ids = QCheckBox(f"Only the {n:,} results selected in Analysis")
+            self.keep_ids.setChecked(True)
+            self.body.addWidget(self.keep_ids)
         self.body.addWidget(scroll(inner), 1)
         self.error = QLabel("")
         self.error.setObjectName("ErrorText")
@@ -198,6 +204,8 @@ class FilterDialog(Modal):
             mx.clear()
         for cb in self.models.values():
             cb.setCurrentIndex(0)
+        if self.keep_ids is not None:
+            self.keep_ids.setChecked(False)
 
     def _apply(self):
         out = []
@@ -226,6 +234,8 @@ class FilterDialog(Modal):
             if txt == "Any":
                 continue
             out.append(ModelFilter(k, {"SS", "SS+IM"} if txt.startswith("SS (") else {txt}))
+        if self.keep_ids is not None and self.keep_ids.isChecked():
+            out += self.id_filters
         self.result_filters = out
         self.accept()
 
@@ -282,18 +292,39 @@ class SettingsDialog(Modal):
 
 
 class AlloyDetailsDialog(Modal):
-    def __init__(self, row, parent=None):
-        super().__init__("Alloy details", "Calculation details", parent, width=900)
+    """Composition analysis of one result in its own window (row menu "Open details in new window").
+    Holds a snapshot (the materialised engine result), so it stays valid if the row is removed."""
+
+    def __init__(self, row, parent=None, info=None):
+        from ..analysis.composition_view import CompositionContent
+        from .common import LineTabs
+        super().__init__("Alloy details", "Composition analysis", parent, width=900)
         self.resize(900, 760)
-        self.panel = DetailsPanel()
-        self.panel.setMinimumWidth(0)
-        self.panel.tabs.set_index(0)
-        self.panel.stack.setCurrentIndex(0)
-        self.panel.show_row(row)
+        self.row, self.info = row, info
+        self.tabs = LineTabs(["Overview", "Descriptors", "Models", "Model details"])
+        self.content = CompositionContent("L")
+        self.content.set_result(row, info)
+        wrap = QWidget()
+        tl = QHBoxLayout(wrap)
+        tl.setContentsMargins(20, 0, 20, 0)
+        tl.addWidget(self.tabs)
         self.body.setContentsMargins(0, 0, 0, 0)
-        self.body.addWidget(self.panel, 1)
-        self.add_footer_button("Print", "secondary", self.panel.print_results)
+        self.body.addWidget(wrap)
+        self.body.addWidget(self.content, 1)
+        self.tabs.changed.connect(self.content.setCurrentIndex)
+        self.content.open_tab.connect(self._open_tab)
+        self.content.model_selected.connect(lambda m: self.content.set_model(m))
+        self.add_footer_button("Export report…", "secondary", self.export_report)
         self.add_footer_button("Close", "primary", self.accept)
+
+    def _open_tab(self, tab: str):
+        i = ("overview", "descriptors", "models", "model_details").index(tab)
+        self.tabs.set_index(i)
+        self.content.setCurrentIndex(i)
+
+    def export_report(self):
+        from ..analysis.report_ui import export_composition_snapshot
+        export_composition_snapshot(self, self.row, self.info)
 
 
 class ImportReportDialog(Modal):

@@ -199,6 +199,25 @@ class ModelFilter:
         return row.model_label(self.key) in self.labels
 
 
+@dataclass
+class IdSetFilter:
+    """Only the given results ("Show in results table" from an Analysis plot selection).
+
+    ``table`` is a ``views.sqlite`` id table written by the view builder (SQL path); ``ids`` the same ids in
+    memory (small: a plot selection), for the in-memory row protocol."""
+    table: str
+    ids: frozenset = frozenset()
+    label: str = "Selected in Analysis"
+
+    @property
+    def count(self) -> int:
+        return len(self.ids)
+
+    def accepts(self, row) -> bool:
+        rid = getattr(row, "id", None) or getattr(row, "row_id", None)
+        return rid in self.ids
+
+
 def apply_filters(rows: list[ResultRow], filters: list) -> list[ResultRow]:
     if not filters:
         return list(rows)
