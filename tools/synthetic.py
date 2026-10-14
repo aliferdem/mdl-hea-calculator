@@ -30,12 +30,13 @@ def synthetic_chunk(engine, n: int, start: int = 0, base: int = 50, source: str 
         _CACHE[key] = _base(engine, base)
     comps, ch = _CACHE[key]
     reps = -(-n // base)
-    big = {"n": n, "strings": ch["strings"], "elements": ch["elements"], "cancelled": False}
-    for k in ("el_idx", "warnings", "errors", "temps"):
+    big = {"n": n, "strings": ch["strings"], "elements": ch["elements"], "families": ch["families"],
+           "cancelled": False}
+    for k in ("el_idx", "warnings", "errors", "temps", "fam_idx", "n_els"):
         big[k] = (ch[k] * reps)[:n]
     for k in ("comp", "amounts"):
         big[k] = (ch[k] * reps)[:n]
-    for group in ("num", "text", "labels", "notes"):
+    for group in ("num", "text", "labels", "notes", "status", "na_kind"):
         big[group] = {k: (v * reps)[:n] for k, v in ch[group].items()}
     # spread a few columns so a sort is not mostly ties (deterministic, small)
     for k, scale in (("dhmix", 1e-7), ("delta", 1e-8), ("omega", 1e-7), ("phi_king", 1e-8)):

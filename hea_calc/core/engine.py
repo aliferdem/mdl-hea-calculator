@@ -142,6 +142,15 @@ MODELS: dict[str, ModelInfo] = {
 STATUS_IN_DOMAIN = "in_domain"          # the criterion applies as the publication defines it
 STATUS_EXTRAPOLATED = "extrapolated"    # evaluated outside the criterion's stated domain
 STATUS_DATA_SUSPECT = "data_suspect"    # a binary value flagged as unreliable drives it
+STATUSES = (STATUS_IN_DOMAIN, STATUS_EXTRAPOLATED, STATUS_DATA_SUSPECT)
+
+# Why a verdict is N/A.  Classification only - the reason text is unchanged - so that collection
+# analysis can count "missing data" apart from "undefined" (a zero denominator) and from results
+# that could not be evaluated at all.  Missing data is never zero (AGENTS.md section 4).
+NA_MISSING_DATA = "missing_data"        # an elemental property or binary pair is not in the dataset
+NA_UNDEFINED = "undefined"              # the criterion's quantity has a zero denominator here
+NA_ERROR = "error"                      # the composition could not be evaluated at all
+NA_KINDS = (NA_MISSING_DATA, NA_UNDEFINED, NA_ERROR)
 
 
 @dataclass
@@ -152,6 +161,13 @@ class ModelOutcome:
     values: dict = field(default_factory=dict)
     caution: str | None = None
     status: str = STATUS_IN_DOMAIN
+    na_kind: str | None = None      # NA_* when label is N/A, else None
+
+    def __post_init__(self):
+        if self.label == NA and self.na_kind is None:
+            self.na_kind = NA_MISSING_DATA
+        if self.label != NA:
+            self.na_kind = None
 
 
 @dataclass
@@ -665,7 +681,8 @@ class Engine:
         # M1 Yang & Zhang
         if d["omega"] is None:
             m["M1"] = ModelOutcome("M1", NA,
-                                   d.get("omega_undefined") or "ΔHmix unavailable (missing binary data).")
+                                   d.get("omega_undefined") or "ΔHmix unavailable (missing binary data).",
+                                   na_kind=NA_UNDEFINED if d.get("omega_undefined") else NA_MISSING_DATA)
         elif d["delta_cn12"] is None:
             m["M1"] = ModelOutcome("M1", NA, "Kittel CN12 radius unavailable.")
         else:
@@ -707,7 +724,8 @@ class Engine:
         # M4 Singh et al.
         lam = d["lambda"]
         if lam is None:
-            m["M4"] = ModelOutcome("M4", NA, d.get("lambda_undefined") or "Atomic radius unavailable.")
+            m["M4"] = ModelOutcome("M4", NA, d.get("lambda_undefined") or "Atomic radius unavailable.",
+                                   na_kind=NA_UNDEFINED if d.get("lambda_undefined") else NA_MISSING_DATA)
         else:
             lab = SS if lam > 0.96 else (SS_IM if lam >= 0.24 - _tol(0.24) else IM)
             m["M4"] = ModelOutcome("M4", lab, values={"lambda": lam}, caution=caution_gl)
@@ -715,7 +733,8 @@ class Engine:
         # M5 Ye et al.
         if d["phi_ye"] is None:
             reason = "ΔHmix unavailable (missing binary data)." if d["dhmix"] is None else "S_E could not be evaluated."
-            m["M5"] = ModelOutcome("M5", NA, reason)
+            kind = NA_MISSING_DATA if d["dhmix"] is None or d["delta"] is None else NA_UNDEFINED
+            m["M5"] = ModelOutcome("M5", NA, reason, na_kind=kind)
         else:
             m["M5"] = ModelOutcome("M5", SS if d["phi_ye"] >= 20.0 - _tol(20.0) else MP,
                                    values={"phi": d["phi_ye"], "s_e": d["s_e"]},
@@ -794,7 +813,7 @@ class Engine:
         if d["phi_king"] is None:
             reason = d.get("phi_king_undefined")
             if reason:
-                m["M8"] = ModelOutcome("M8", NA, reason)
+                m["M8"] = ModelOutcome("M8", NA, reason, na_kind=NA_UNDEFINED)
             else:
                 missing = d.get("king_missing") or []
                 m["M8"] = ModelOutcome("M8", NA, "Miedema parameters unavailable for "

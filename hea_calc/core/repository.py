@@ -25,6 +25,17 @@ Identity
     ``result_id`` (``INTEGER PRIMARY KEY``) is assigned by the writer in arrival order, is never
     reused within a session and is the only identity of a result.  A visible row index never is.
 
+Schema 2 (Analysis data contract, ``docs/analysis-redesign/ANALYSIS_DATA_CONTRACT.md``)
+    * ``results.status_M1..M8`` - evidence status of an evaluated verdict (``chunks.STATUS_CODES``:
+      0 in domain, 1 extrapolated, 2 flagged data); NULL when the verdict is N/A;
+    * ``results.na_kind_M1..M8`` - why a verdict is N/A (``chunks.NA_CODES``: 1 missing data,
+      2 undefined, 3 not evaluable); NULL when evaluated;
+    * ``results.family_id`` -> ``families(family_id, key, size)`` (canonical element family,
+      ``core/family.py``) and ``results.n_elements``; NULL for a row that could not be evaluated;
+    * ``runs.app_version``, ``runs.engine_version``, ``runs.dataset_ids`` (``core/provenance.py``).
+    Session databases are temporary and always created by this version; a database that reports
+    another schema version is refused by :func:`check_schema` rather than misread.
+
 Table views (:class:`ResultView`)
     * natural order (no filter, no sort): the workspace is the contiguous id range ``lo..hi``
       minus the ids the user removed - pages are ``WHERE result_id >= ? LIMIT n`` (O(page));
@@ -61,14 +72,18 @@ from .chunks import NUM_KEYS, TEXT_KEYS, decode_amounts, pack_results, with_meta
 from .engine import MODEL_KEYS, NA, AlloyResult
 from .results import COLUMN_BY_KEY, ModelFilter, RangeFilter, ResultRow, format_cell
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 APP_DIR_NAME = "HEA Calculator"
 NOTE_COLS = tuple(f"n_{k}" for k in MODEL_KEYS)
+STATUS_COLS = tuple(f"status_{k}" for k in MODEL_KEYS)
+NA_COLS = tuple(f"na_kind_{k}" for k in MODEL_KEYS)
 RECORD_COLS: tuple[str, ...] = ("result_id", "run_id", "seq", "block", "src", "name", "comp", "elset", "amounts",
-                                *NUM_KEYS, *TEXT_KEYS, *MODEL_KEYS, *NOTE_COLS, "warn", "err", "temp")
+                                *NUM_KEYS, *TEXT_KEYS, *MODEL_KEYS, *NOTE_COLS, "warn", "err", "temp",
+                                *STATUS_COLS, *NA_COLS, "family_id", "n_elements")
 COL = {c: i for i, c in enumerate(RECORD_COLS)}
 _I_ID, _I_RUN, _I_SEQ, _I_BLOCK, _I_SRC, _I_NAME, _I_COMP, _I_ELSET, _I_AMOUNTS = range(9)
 _I_WARN, _I_ERR, _I_TEMP = COL["warn"], COL["err"], COL["temp"]
+_I_FAMILY, _I_NEL = COL["family_id"], COL["n_elements"]
 
 COMMIT_ROWS = 20_000          # rows per write transaction at most
 COMMIT_SECONDS = 0.25         # ... and at most this long before committed rows become visible
@@ -181,16 +196,19 @@ _RESULTS_DDL = (
     + ", ".join(f"{q(k)} REAL" for k in NUM_KEYS) + ", "
     + ", ".join(f"{q(k)} TEXT" for k in (*TEXT_KEYS, *MODEL_KEYS)) + ", "
     + ", ".join(f"{q(k)} INTEGER" for k in NOTE_COLS)
-    + ", warn INTEGER, err INTEGER NOT NULL DEFAULT 0, temp REAL)")
+    + ", warn INTEGER, err INTEGER NOT NULL DEFAULT 0, temp REAL, "
+    + ", ".join(f"{q(k)} INTEGER" for k in (*STATUS_COLS, *NA_COLS))
+    + ", family_id INTEGER, n_elements INTEGER)")
 
 _SCHEMA = [
     "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)",
     "CREATE TABLE IF NOT EXISTS runs(run_id INTEGER PRIMARY KEY, mode TEXT NOT NULL, label TEXT, "
     "status TEXT NOT NULL, created TEXT, finished TEXT, expected INTEGER, calculated INTEGER NOT NULL DEFAULT 0, "
     "first_id INTEGER, last_id INTEGER, settings TEXT, source TEXT, axes TEXT, elements TEXT, message TEXT, "
-    "cleared TEXT, errors INTEGER NOT NULL DEFAULT 0)",
+    "cleared TEXT, errors INTEGER NOT NULL DEFAULT 0, app_version TEXT, engine_version TEXT, dataset_ids TEXT)",
     "CREATE TABLE IF NOT EXISTS strings(code INTEGER PRIMARY KEY, s TEXT NOT NULL UNIQUE)",
     "CREATE TABLE IF NOT EXISTS elsets(id INTEGER PRIMARY KEY, els TEXT NOT NULL UNIQUE)",
+    "CREATE TABLE IF NOT EXISTS families(family_id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, size INTEGER)",
     _RESULTS_DDL,
 ]
 
@@ -238,20 +256,24 @@ class RunInfo:
     message: str | None = None
     cleared: str | None = None
     errors: int = 0                 # results that could not be evaluated (engine error)
+    app_version: str | None = None
+    engine_version: str | None = None
+    dataset_ids: dict = field(default_factory=dict)
 
     @staticmethod
     def from_row(r) -> "RunInfo":
         def js(x, default):
             return json.loads(x) if x else default
         return RunInfo(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7] or 0, r[8], r[9], js(r[10], {}),
-                       js(r[11], {}), js(r[12], []), js(r[13], []), r[14], r[15], r[16] or 0)
+                       js(r[11], {}), js(r[12], []), js(r[13], []), r[14], r[15], r[16] or 0,
+                       r[17], r[18], js(r[19], {}))
 
     def axis(self, name: str) -> dict | None:
         return next((a for a in self.axes if a["name"] == name), None)
 
 
 _RUN_COLS = ("run_id, mode, label, status, created, finished, expected, calculated, first_id, last_id, settings, "
-             "source, axes, elements, message, cleared, errors")
+             "source, axes, elements, message, cleared, errors, app_version, engine_version, dataset_ids")
 
 
 def _now() -> str:
@@ -267,6 +289,16 @@ _S_COMMITTED, _S_ROWS, _S_COMMITS, _S_INSERT_S, _S_RUN, _S_RUN_COUNT, _S_RUN_NEX
 FINALIZE_WAIT_S = 30.0       # a finalize waits this long for chunks still in transit, then closes the run
 
 
+def check_schema(con: sqlite3.Connection) -> int:
+    """The database's schema version; raises :class:`RepositoryError` unless it is this version's."""
+    row = con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    version = int(row[0]) if row and str(row[0]).isdigit() else 0
+    if version != SCHEMA_VERSION:
+        raise RepositoryError(f"The results database has schema version {version}; this version of the "
+                              f"calculator reads version {SCHEMA_VERSION}.")
+    return version
+
+
 def _init_database(db_path: Path) -> int:
     """Create the schema (WAL) and return the highest stored result id."""
     con = _connect(db_path)
@@ -275,6 +307,7 @@ def _init_database(db_path: Path) -> int:
         for ddl in _SCHEMA:
             con.execute(ddl)
         con.execute("INSERT OR IGNORE INTO meta VALUES('schema_version', ?)", (str(SCHEMA_VERSION),))
+        check_schema(con)
         con.execute("INSERT OR IGNORE INTO meta VALUES('created', ?)", (_now(),))
         row = con.execute("SELECT COALESCE(MAX(result_id), 0) FROM results").fetchone()
         stored = con.execute("SELECT value FROM meta WHERE key='next_result_id'").fetchone()
@@ -315,6 +348,7 @@ class _WriterCore:
         self._closed_runs: set[int] = set()
         self._strings = LRU(20_000)
         self._elsets = LRU(8_192)
+        self._families = LRU(8_192)
         self.delay = 0.0                       # test hooks (inject): a slow or failing disk
         self.fail: str | None = None
         con = _connect(db_path, same_thread=False, cache_kib=16_384)    # append-only: a small cache suffices
@@ -407,6 +441,16 @@ class _WriterCore:
             self._elsets.put(key, c)
         return c
 
+    def _family(self, key: str) -> int:
+        c = self._families.get(key)
+        if c is None:
+            con = self._con
+            row = con.execute("SELECT family_id FROM families WHERE key=?", (key,)).fetchone()
+            c = row[0] if row else con.execute("INSERT INTO families(key, size) VALUES(?, ?)",
+                                               (key, key.count("-") + 1)).lastrowid
+            self._families.put(key, c)
+        return c
+
     # -------------------------------------------------------------- chunks
     def chunk(self, run_id: int, index: int | None, chunk: dict) -> None:
         """Store chunk ``index`` of a run; out-of-order chunks wait until their predecessors arrive."""
@@ -465,6 +509,16 @@ class _WriterCore:
         cols += [[strings[c] for c in chunk["labels"][k]] for k in MODEL_KEYS]
         cols += [[db[c] for c in chunk["notes"][k]] for k in MODEL_KEYS]
         cols += [[db[c] for c in chunk["warnings"]], [db[c] or 0 for c in chunk["errors"]], chunk["temps"]]
+        for group in ("status", "na_kind"):
+            arrays = chunk.get(group)
+            cols += [[None if c < 0 else c for c in arrays[k]] if arrays else repeat(None, n) for k in MODEL_KEYS]
+        fams = chunk.get("families")
+        if fams is not None:
+            fid = [self._family(f) for f in fams]
+            cols.append([None if i < 0 else fid[i] for i in chunk["fam_idx"]])
+            cols.append([None if x < 0 else x for x in chunk["n_els"]])
+        else:
+            cols += [repeat(None, n), repeat(None, n)]
         con.executemany(f"INSERT INTO results VALUES ({','.join('?' * len(RECORD_COLS))})", zip(*cols))
         design = chunk.get("design")
         if st.design_cols and design is not None:
@@ -544,10 +598,11 @@ class _WriterCore:
         con.execute("BEGIN")
         try:
             cur = con.execute(
-                "INSERT INTO runs(mode, label, status, created, expected, settings, source, axes, elements) "
-                "VALUES(?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO runs(mode, label, status, created, expected, settings, source, axes, elements, "
+                "app_version, engine_version, dataset_ids) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (info.mode, info.label, "running", _now(), info.expected, json.dumps(info.settings),
-                 json.dumps(info.source), json.dumps(info.axes), json.dumps(info.elements)))
+                 json.dumps(info.source), json.dumps(info.axes), json.dumps(info.elements),
+                 info.app_version, info.engine_version, json.dumps(info.dataset_ids)))
             run_id = cur.lastrowid
             cols = [a["col"] for a in info.axes if a.get("col")]
             if cols:
@@ -857,7 +912,7 @@ class ResultWriter:
 # ====================================================================== view builder
 @dataclass
 class ViewTask:
-    kind: str                       # build | extend | drop | position
+    kind: str                       # build | extend | drop | position | vacuum | exec
     token: int = 0
     table: str = ""
     where: str = ""
@@ -872,6 +927,8 @@ class ViewTask:
     error: BaseException | None = None
     cancelled: bool = False
     done: threading.Event = field(default_factory=threading.Event)
+    statements: list = field(default_factory=list)   # exec: [(sql, params), ...] in one transaction
+    tag: object = None                               # exec: caller's label, returned untouched
 
 
 class ViewBuilder:
@@ -889,6 +946,9 @@ class ViewBuilder:
         con.execute(f"ATTACH DATABASE ? AS vw", (str(views_path),))
         con.execute("PRAGMA vw.journal_mode=WAL")
         con.execute("PRAGMA vw.synchronous=OFF")      # derived data only: rebuilt from results if lost
+        # Checked results (Analysis "Checked results", data contract section 11): ids only, independent of
+        # the table's filter and page; written here like every other views.sqlite table.
+        con.execute("CREATE TABLE IF NOT EXISTS vw.checked(rid INTEGER PRIMARY KEY)")
         self._con = con
         self._thread = threading.Thread(target=self._loop, name="hea-view-builder", daemon=True)
         self._thread.start()
@@ -949,6 +1009,18 @@ class ViewBuilder:
                     con.execute(f"DROP TABLE IF EXISTS vw.{q(task.table)}")
                 elif task.kind == "vacuum":
                     con.execute("VACUUM vw")             # dropped orders of a cleared table give their space back
+                elif task.kind == "exec":
+                    con.execute("BEGIN")
+                    try:
+                        total = 0
+                        for sql, params in task.statements:
+                            cur = con.execute(sql, tuple(params))
+                            total += max(0, cur.rowcount)
+                        task.result = total
+                        con.execute("COMMIT")
+                    except BaseException:
+                        con.execute("ROLLBACK")
+                        raise
                 elif task.kind == "position":
                     row = con.execute(f"SELECT pos FROM vw.{q(task.table)} WHERE rid=?", (task.rid,)).fetchone()
                     task.result = row[0] if row else 0
@@ -963,7 +1035,7 @@ class ViewBuilder:
             with self._lock:
                 self._running = None
             task.done.set()
-            if self.notify is not None and task.kind in ("build", "extend", "position"):
+            if self.notify is not None and task.kind in ("build", "extend", "position", "exec"):
                 try:
                     self.notify(task)
                 except Exception:                     # noqa: BLE001 - a closed GUI receiver
@@ -1063,6 +1135,38 @@ class ResultRecord:
     def model_note(self, key: str) -> str:
         return self.reader.string(self.v[COL["n_" + key]]) or ""
 
+    def model_reason(self, key: str) -> str:
+        """Why the verdict is N/A (empty for an evaluated verdict) - see the ``core/chunks`` notes."""
+        return self.model_note(key) if self.v[COL[key]] in (None, NA) else ""
+
+    def model_caution(self, key: str) -> str:
+        return "" if self.v[COL[key]] in (None, NA) else self.model_note(key)
+
+    def model_status(self, key: str) -> str | None:
+        """Evidence status of an evaluated verdict (``engine.STATUS_*``), None when N/A."""
+        from .chunks import STATUS_NAMES
+        c = self.v[COL["status_" + key]]
+        return None if c is None else STATUS_NAMES.get(c)
+
+    def model_na_kind(self, key: str) -> str | None:
+        """Why a verdict is N/A (``engine.NA_*``), None when evaluated."""
+        from .chunks import NA_NAMES
+        c = self.v[COL["na_kind_" + key]]
+        return None if c is None else NA_NAMES.get(c)
+
+    @property
+    def family_id(self) -> int | None:
+        return self.v[_I_FAMILY]
+
+    @property
+    def family(self) -> str | None:
+        """Canonical element family key ("Co-Cr-Fe-Mn-Ni"), None for a row that was not evaluated."""
+        return self.reader.family(self.v[_I_FAMILY])
+
+    @property
+    def n_elements(self) -> int | None:
+        return self.v[_I_NEL]
+
     def display(self, key: str) -> str:
         return format_cell(self, key)
 
@@ -1094,6 +1198,7 @@ class Reader:
         self.engine = engine
         self._strings = LRU(20_000)
         self._elsets = LRU(8_192)
+        self._families = LRU(8_192)
         self._runs: dict[int, RunInfo] = {}
 
     # -------------------------------------------------------------- lookups
@@ -1106,6 +1211,16 @@ class Reader:
             s = row[0] if row else None
             self._strings.put(code, s)
         return s
+
+    def family(self, family_id: int | None) -> str | None:
+        if family_id is None:
+            return None
+        key = self._families.get(family_id)
+        if key is None:
+            row = self.con.execute("SELECT key FROM families WHERE family_id=?", (family_id,)).fetchone()
+            key = row[0] if row else None
+            self._families.put(family_id, key)
+        return key
 
     def elset(self, i: int | None) -> tuple[str, ...]:
         if i is None:
@@ -1299,8 +1414,12 @@ class ResultRepository:
     def create_run(self, mode: str, *, label: str | None = None, settings: dict | None = None,
                    source: dict | None = None, axes: list | None = None, elements: list | None = None,
                    expected: int | None = None) -> int:
+        from .provenance import run_provenance
+        prov = run_provenance()
         info = RunInfo(0, mode, label, settings=dict(settings or {}), source=dict(source or {}),
-                       axes=list(axes or []), elements=list(elements or []), expected=expected)
+                       axes=list(axes or []), elements=list(elements or []), expected=expected,
+                       app_version=prov["app_version"], engine_version=prov["engine_version"],
+                       dataset_ids=dict(prov["dataset_ids"]))
         return self.writer.call("create_run", info)
 
     def finalize_run(self, run_id: int, status: str, message: str | None = None, wait: bool = True,

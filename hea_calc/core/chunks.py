@@ -8,7 +8,15 @@ single database writer only re-maps a few string codes and hands the columns to 
 * text/label columns (crystal structure, M1-M8 labels, model notes, warnings, errors) as small
   integer codes into the chunk's own string table (code 0 is ``None``);
 * per alloy: its element order (an index into ``elements``), the composition text shown in the
-  table, and the input amounts followed by the normalised atomic fractions as one ``float64`` blob.
+  table, and the input amounts followed by the normalised atomic fractions as one ``float64`` blob;
+* per alloy and model (schema 2): the evidence status of the verdict and, for N/A verdicts, why it
+  is not available - as small integer codes (``STATUS_CODES`` / ``NA_CODES``, -1 = none);
+* per alloy: its element family (an index into ``families``, -1 for a row that could not be
+  evaluated) and the number of elements of that family.
+
+Model notes: the engine gives an N/A verdict a ``reason`` and never a ``caution``, and an evaluated
+verdict a ``caution`` at most and never a ``reason`` (tests/test_analysis_schema.py pins this), so the
+one stored note per model is unambiguous: it is the reason when the label is N/A, else the caution.
 
 Everything per-alloy that is formatted for storage (composition text, amount blobs) is produced
 here, in the worker process, so the GUI process never loops over alloys in Python.
@@ -22,12 +30,20 @@ from __future__ import annotations
 from array import array
 from collections.abc import Sequence
 
-from .engine import MODEL_KEYS, AlloyResult
+from .engine import (MODEL_KEYS, NA_ERROR, NA_MISSING_DATA, NA_UNDEFINED, STATUS_DATA_SUSPECT,
+                     STATUS_EXTRAPOLATED, STATUS_IN_DOMAIN, AlloyResult)
+from .family import family_key
 from .results import COLUMNS, composition_text
 
 NUM_KEYS: tuple[str, ...] = tuple(c.key for c in COLUMNS if c.kind == "num")
 TEXT_KEYS: tuple[str, ...] = tuple(c.key for c in COLUMNS if c.kind == "text" and c.key not in ("name", "composition"))
 NAN = float("nan")
+
+# Storage codes (schema 2).  SQL stores NULL for "none" (-1 in a chunk).
+STATUS_CODES = {STATUS_IN_DOMAIN: 0, STATUS_EXTRAPOLATED: 1, STATUS_DATA_SUSPECT: 2}
+STATUS_NAMES = {v: k for k, v in STATUS_CODES.items()}
+NA_CODES = {NA_MISSING_DATA: 1, NA_UNDEFINED: 2, NA_ERROR: 3}
+NA_NAMES = {v: k for k, v in NA_CODES.items()}
 
 
 class _Strings:
@@ -70,7 +86,12 @@ def pack_results(compositions: Sequence[dict], results: Sequence[AlloyResult]) -
     text = {k: array("H") for k in TEXT_KEYS}
     labels = {k: array("H") for k in MODEL_KEYS}
     notes = {k: array("H") for k in MODEL_KEYS}
+    status = {k: array("b") for k in MODEL_KEYS}
+    na_kind = {k: array("b") for k in MODEL_KEYS}
     warnings, errors, temps = array("H"), array("H"), array("d")
+    families: list[str] = []
+    fam_index: dict[str, int] = {}
+    fam_idx, n_els = array("i"), array("b")
     for comp, res in zip(compositions, results):
         els = tuple(str(e).strip() for e in comp)
         i = el_index.get(els)
@@ -92,11 +113,32 @@ def pack_results(compositions: Sequence[dict], results: Sequence[AlloyResult]) -
             o = res.models.get(k)
             labels[k].append(strings.code(o.label if o else None))
             notes[k].append(strings.code((o.reason or o.caution or None) if o else None))
+            if o is None:                       # not evaluated at all (engine error)
+                status[k].append(-1)
+                na_kind[k].append(NA_CODES[NA_ERROR] if res.error else -1)
+            elif o.na_kind is not None:         # N/A verdict
+                status[k].append(-1)
+                na_kind[k].append(NA_CODES[o.na_kind])
+            else:
+                status[k].append(STATUS_CODES[o.status])
+                na_kind[k].append(-1)
+        fkey = family_key(frac) if res.ok else None
+        if fkey is None:
+            fam_idx.append(-1)
+            n_els.append(-1)
+        else:
+            j = fam_index.get(fkey)
+            if j is None:
+                j = fam_index[fkey] = len(families)
+                families.append(fkey)
+            fam_idx.append(j)
+            n_els.append(fkey.count("-") + 1)
         warnings.append(strings.code(" ".join(res.warnings) or None))
         errors.append(strings.code(res.error))
         temps.append(NAN if res.temperature is None else float(res.temperature))
     return {"n": len(results), "strings": strings.table, "elements": elements, "el_idx": el_idx,
             "comp": comp_text, "amounts": blobs, "num": num, "text": text, "labels": labels, "notes": notes,
+            "status": status, "na_kind": na_kind, "families": families, "fam_idx": fam_idx, "n_els": n_els,
             "warnings": warnings, "errors": errors, "temps": temps, "cancelled": False}
 
 
