@@ -222,7 +222,6 @@ class ContentSwitcher(QWidget):
             sel = i == self.index_
             if sel:
                 crisp.fill_rounded(p, seg, CORNER_RADIUS, t("switcher-selected"))
-                crisp.frame(p, seg, HAIRLINE, t("border-inverse"), CORNER_RADIUS)
             elif i == self.hover:
                 p.save()
                 p.setClipPath(clip)
@@ -238,9 +237,14 @@ class ContentSwitcher(QWidget):
                 p.setBrush(QColor(t("support-info")))
                 p.setPen(Qt.PenStyle.NoPen)
                 p.drawEllipse(QPointF(seg.center().x() + tw / 2 + 6, seg.center().y() - 6), 3, 3)
-            if self.hasFocus() and i == self.focus_i:
-                crisp.frame(p, seg, FOCUS_WIDTH, t("focus"), CORNER_RADIUS)
+        # group outline first, then the selected segment's frame on top of it (all four sides visible),
+        # then the keyboard focus ring
         crisp.frame(p, r, HAIRLINE, t("border-strong-02"), CORNER_RADIUS)
+        crisp.frame(p, QRect(self.index_ * self.segment, 0, self.segment, r.height()), HAIRLINE, t("border-inverse"),
+                    CORNER_RADIUS)
+        if self.hasFocus():
+            crisp.frame(p, QRect(self.focus_i * self.segment, 0, self.segment, r.height()), FOCUS_WIDTH, t("focus"),
+                        CORNER_RADIUS)
         p.end()
 
 
@@ -313,8 +317,9 @@ class Dropdown(QAbstractButton):
         self.setFixedHeight(32)
         if width:
             self.setFixedWidth(width)
-        self.setMinimumWidth(96)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        else:
+            self.setMinimumWidth(96)
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.setAccessibleName(accessible or prefix or "Dropdown")
@@ -406,7 +411,8 @@ class Dropdown(QAbstractButton):
                             "text-secondary" if enabled else "text-disabled") + 8
         html = self.current_html()
         empty = self.value is None and not isinstance(self, MultiSelect)
-        color = "text-disabled" if not enabled else ("text-placeholder" if empty else "text-primary")
+        color = "text-disabled" if not enabled else ("text-placeholder" if empty else
+                                                     ("link-primary" if getattr(self, "link", False) else "text-primary"))
         paint_html(p, QRectF(x, 0, r.width() - x - 40, r.height()), html, BODY_COMPACT_01, color)
         name = "chevron_down"
         p.save()

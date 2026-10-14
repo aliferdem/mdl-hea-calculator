@@ -355,7 +355,7 @@ class CalculationJob:
         self.finished_at: float | None = None
         self.cancel_requested_at: float | None = None
         self.mode = "inprocess"
-        self.plan_counts: tuple | None = None    # expression: (valid, skipped, duplicates, combinations)
+        self.plan_counts: tuple | None = None    # expression: (valid, skipped, duplicates, combinations, by block)
         self._cancel = threading.Event()
         self._service: CalculationService | None = None
         self._thread: threading.Thread | None = None
@@ -474,6 +474,8 @@ class CalculationJob:
             m = recipe.materialise()
             comps, n = m["comps"], len(m["comps"])
             self.total = n
+            if m.get("counts") is not None:            # expression: the generation facts the plan would give
+                self.plan_counts = m["counts"]
             src = m["sources"]
             sources = [src] * n if isinstance(src, str) else list(src)
             design_all = m.get("design")

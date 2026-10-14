@@ -563,3 +563,16 @@ def test_show_in_results_table_applies_a_visible_id_filter(win, app, tmp_path):
                         val, ev, q)
     status, n = q.get(timeout=10)
     assert (status, n) == ("ok", 7)
+
+
+def test_expression_run_records_block_duplicates_for_analysis(win, app):
+    recipe = samples.expression_recipe("AlxCoCrFeNi\n\nAlyCoCrFeNi", {"x": (0.0, 1.0, 0.25), "y": (0.0, 1.0, 0.25)})
+    win.calculate("expression", None, recipe)
+    t0 = time.perf_counter()
+    while win.worker is not None and time.perf_counter() - t0 < 120:
+        pump(app)
+        time.sleep(0.01)
+    pump(app)
+    info = win.repo.get_run(win.runner.run_id)
+    assert info.calculated == 5
+    assert info.source.get("duplicates_by_block") == {"1": 5}

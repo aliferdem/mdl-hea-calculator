@@ -433,6 +433,7 @@ class ExpressionBatch:
     skipped: int  # combinations rejected (negative amounts, fewer than two elements, …)
     duplicates: int
     blocks: list[int] = field(default_factory=list)   # index of the expression block of each composition
+    duplicates_by_block: dict = field(default_factory=dict)   # block -> duplicates it generated (kept earlier)
 
 
 def composition_key(positive: dict[str, float]) -> tuple:
@@ -541,16 +542,20 @@ def generate_blocks(expressions: list[Expression], ranges: dict[str, VariableRan
     """Generate every block with the shared variable ranges; duplicates across blocks are removed."""
     comps, names, envs, blocks = [], [], [], []
     skipped = dups = 0
+    by_block: dict[int, int] = {}
     seen = set()
     for b, ex in enumerate(expressions):
         sub = {k: v for k, v in ranges.items() if k in ex.variables}
         batch = generate(ex, sub, limit, cancelled)
         skipped += batch.skipped
         dups += batch.duplicates
+        if batch.duplicates:
+            by_block[b] = by_block.get(b, 0) + batch.duplicates
         for c, n, e in zip(batch.compositions, batch.names, batch.variables):
             key = composition_key(c)
             if key in seen:
                 dups += 1
+                by_block[b] = by_block.get(b, 0) + 1
                 continue
             seen.add(key)
             comps.append(c)
@@ -559,7 +564,7 @@ def generate_blocks(expressions: list[Expression], ranges: dict[str, VariableRan
             blocks.append(b)
             if len(comps) > limit:
                 raise RangeError(f"More than {limit:,} compositions; increase the steps.")
-    return ExpressionBatch(comps, names, envs, skipped, dups, blocks)
+    return ExpressionBatch(comps, names, envs, skipped, dups, blocks, by_block)
 
 
 def expression_elements(expressions: list[Expression]) -> list[str]:

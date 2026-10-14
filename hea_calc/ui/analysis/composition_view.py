@@ -382,7 +382,9 @@ class CompositionContent(QStackedWidget):
         for key in (*KEY_DESCRIPTORS, *extra):
             desc = DESCRIPTORS[key]
             val, tip = kv_value(d, key)
-            rows.append((f"{KEY_LABELS.get(key, desc.name)} {desc.symbol}", val, desc.unit, None, None, tip))
+            name = KEY_LABELS.get(key, desc.name)
+            text = f"{desc.symbol} {name}" if self.size_class == "S" else f"{name} {desc.symbol}"   # frame 13 / 2
+            rows.append((text, val, desc.unit, None, None, tip))
         cstr = d.get("cstr")
         rows.append(("Crystal structure (VEC rule)", "", "", DESCRIPTORS["cstr"].definition, cstr or NA))
         return rows
@@ -850,7 +852,7 @@ class CompositionContent(QStackedWidget):
             ll.addWidget(note)
         ll.addSpacing(8)
         ll.addWidget(label("Criterion", "heading"))
-        from ..widgets.details_panel import Equation
+        from ..widgets.equation import Equation
         ll.addWidget(Equation(k, 1.4 if cls == "W" else 1.0))
         ll.addWidget(label(_html.escape(MODELS[k].criterion), "label", wrap=True))
         ll.addSpacing(8)

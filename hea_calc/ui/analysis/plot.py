@@ -136,6 +136,7 @@ class PlotWidget(QWidget):
         self.window: tuple | None = None    # zoom window (data coords) or None = data limits
         self.hidden: set = set()            # categories hidden from the drawing (legend toggle)
         self.selection: set = set()
+        self.active_id: int | None = None     # the active composition, ringed when it is in the plot
         self.focus_index = -1
         self.dim = False                    # previous plot shown dimmed while a query runs
         self.message = ""
@@ -157,6 +158,7 @@ class PlotWidget(QWidget):
     # ================================================================== data
     def set_spec(self, spec: PlotSpec | None, keep_view: bool = False) -> None:
         self.spec = spec
+        self._place_tag_info()
         if not keep_view:
             self.window = None
         self.hidden = set()
@@ -188,6 +190,7 @@ class PlotWidget(QWidget):
 
     def _invalidate(self, *_):
         self._cache = None
+        self._jobs = None
         self.update()
 
     def resizeEvent(self, e):
@@ -286,11 +289,33 @@ class PlotWidget(QWidget):
         p.setOpacity(1.0)
         if s.tag:
             self._paint_tag(p, s.tag)
-        if s.caption:
+        if s.caption and not (self.legend_mode == "row" and s.caption.startswith("0 omitted")):
             p.setFont(font(LABEL_01))
             p.setPen(QColor(t("text-secondary")))
             p.drawText(QRectF(0, h - 18, w - 4, 18), int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
                        s.caption)
+
+    def tag_width(self) -> float:
+        from PySide6.QtGui import QFontMetricsF
+        return QFontMetricsF(font(LABEL_01)).horizontalAdvance(self.spec.tag) + 16 if self.spec and self.spec.tag else 0
+
+    def _place_tag_info(self) -> None:
+        """SAMPLED / BINNED tags carry a 16 px Toggletip trigger 4 px after the tag (design guide 5.7)."""
+        from .widgets import rich
+        info = getattr(self, "_tag_info", None)
+        s = self.spec
+        text = s.extra.get("tag_info", "") if s is not None else ""
+        if not text:
+            if info is not None:
+                info.hide()
+            return
+        if info is None:
+            from ..widgets.tooltip import InfoButton
+            info = self._tag_info = InfoButton("", self, title="Plot representation")
+        info.tip_text = rich(text)
+        info.move(int(12 + self.tag_width() + 4), 9)
+        info.show()
+        info.raise_()
 
     def _paint_tag(self, p: QPainter, text: str) -> None:
         f = font(LABEL_01)
@@ -312,7 +337,7 @@ class PlotWidget(QWidget):
         p.setFont(font(LABEL_01))
         grid = QColor(t("border-subtle-01"))
         txt = QColor(t("text-secondary"))
-        xt = nice_ticks(x0, x1, max(3, int(rect.width() / 90))) if not self.spec.log_x else _log_ticks(x0, x1)
+        xt = nice_ticks(x0, x1, max(4, int(rect.width() / 70))) if not self.spec.log_x else _log_ticks(x0, x1)
         yt = nice_ticks(y0, y1, max(3, int(rect.height() / 36))) if not self.spec.log_y else _log_ticks(y0, y1)
         for v in xt:
             x = fx(v)
@@ -448,40 +473,86 @@ class PlotWidget(QWidget):
             c0, c1 = (min(cvals), max(cvals)) if cvals else (0.0, 1.0)
             outline = QColor(t("layer-01"))
             r = 2.5 if len(d["x"]) > 5000 else 3.0
-            self._screen = []
-            grid: dict = {}
             xs, ys, cs = d["x"], d["y"], d.get("c", [])
             x0, x1, y0, y1 = win
-            for i in range(len(xs)):
-                xv, yv = xs[i], ys[i]
-                if not (x0 <= xv <= x1 and y0 <= yv <= y1):
-                    continue
-                c = cs[i] if i < len(cs) else None
-                if c in self.hidden:
-                    continue
+            # Points are batched per colour and drawn with QPainter.drawPoints (round pen = filled disc):
+            # one call per colour instead of one ellipse per point; screen coordinates come from one
+            # comprehension per axis, and the hit-test grid is built only when the pointer first needs it.
+            n = len(xs)
+            cs = list(cs) + [None] * (n - len(cs)) if len(cs) < n else cs
+            keep = [i for i in range(n) if x0 <= xs[i] <= x1 and y0 <= ys[i] <= y1 and cs[i] not in self.hidden]                 if (self.window is not None or self.hidden) else range(n)
+            sxs = [fx(xs[i]) for i in keep]
+            sys_ = [fy(ys[i]) for i in keep]
+            default = t("border-interactive")
+            groups: dict[str, list] = {}
+            for k, i in enumerate(keep):
+                c = cs[i]
                 if cont:
-                    col = QColor(sequential((c - c0) / ((c1 - c0) or 1)) if isinstance(c, (int, float)) else "#525252")
+                    col = sequential((c - c0) / ((c1 - c0) or 1)) if isinstance(c, (int, float)) else "#525252"
                 elif cmap:
-                    col = QColor(cmap.get(c, categorical(MAX_CATEGORIES - 1)))
+                    col = cmap.get(c) or categorical(MAX_CATEGORIES - 1)
                 else:
-                    col = QColor(t("border-interactive"))
-                sx, sy = fx(xv), fy(yv)
-                if s.hollow:
-                    q.setPen(QPen(col, 1.2))
-                    q.setBrush(Qt.BrushStyle.NoBrush)
-                else:
-                    q.setPen(QPen(outline, 1))
-                    q.setBrush(col)
-                q.drawEllipse(QPointF(sx, sy), r, r)
-                if interactive:
-                    self._screen.append((sx, sy, i))
-                    grid.setdefault((int(sx // 8), int(sy // 8)), []).append(len(self._screen) - 1)
+                    col = default
+                groups.setdefault(col, []).append(k)
+            groups = {col: [QPointF(sxs[k], sys_[k]) for k in ks] for col, ks in groups.items()}
+            if interactive:
+                self._screen = list(zip(sxs, sys_, keep))
+                self._grid = None                   # built lazily by _nearest
+            jobs = []
+            for col, pts in groups.items():
+                for k in range(0, len(pts), self.CHUNK):
+                    jobs.append((col, pts[k:k + self.CHUNK]))
+            if interactive and sum(len(pts) for _c, pts in jobs) > self.CHUNK:
+                # progressive: one chunk per event-loop turn, starting right after this paint (no long paint)
+                self._jobs = (jobs, s.hollow, r, outline)
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(0, self._next_chunk)
+            else:
+                for job in jobs:
+                    self._draw_chunk(q, job, s.hollow, r, outline)
             if interactive:
                 q.end()
                 self._cache = img
-                self._grid = grid
         if interactive and self._cache is not None:
             p.drawImage(0, 0, self._cache)
+
+    CHUNK = 2500
+
+    @staticmethod
+    def _draw_chunk(q: QPainter, job, hollow: bool, r: float, outline: QColor) -> None:
+        col, pts = job
+        poly = QPolygonF(pts)
+        if hollow:                      # sampled: rings (colour disc, panel-coloured centre)
+            q.setPen(QPen(QColor(col), 2 * r + 0.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            q.drawPoints(poly)
+            q.setPen(QPen(outline, 2 * r - 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            q.drawPoints(poly)
+        else:                           # raw: filled discs with a 1 px panel-coloured outline
+            q.setPen(QPen(outline, 2 * r + 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            q.drawPoints(poly)
+            q.setPen(QPen(QColor(col), 2 * r, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            q.drawPoints(poly)
+
+    def _next_chunk(self) -> None:
+        state = getattr(self, "_jobs", None)
+        img = self._cache
+        if not state or img is None:
+            return
+        jobs, hollow, r, outline = state
+        if not jobs:
+            self._jobs = None
+            return
+        q = QPainter(img)
+        q.setRenderHint(QPainter.RenderHint.Antialiasing)
+        q.setClipRect(self._frame_rect(self.width(), self.height()).adjusted(-6, -6, 6, 6))
+        self._draw_chunk(q, jobs.pop(0), hollow, r, outline)
+        q.end()
+        self.update()
+        if jobs:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self._next_chunk)
+        else:
+            self._jobs = None
 
     def _paint_bins(self, p, rect, fx, fy):
         s = self.spec
@@ -582,6 +653,16 @@ class PlotWidget(QWidget):
         s = self.spec
         if s is None:
             return []
+        key = (id(s), frozenset(self.hidden) if self.hidden else None, THEME.name)
+        cached = getattr(self, "_legend_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        items = self._legend_items_uncached()
+        self._legend_cache = (key, items)
+        return items
+
+    def _legend_items_uncached(self) -> list:
+        s = self.spec
         if s.kind in ("scatter", "binned") and s.color_metric is None and s.color not in ("none", ""):
             cmap = self._color_map()
             cats = self._categories()
@@ -620,8 +701,11 @@ class PlotWidget(QWidget):
             return
         title = s.legend_title
         if self.legend_mode == "row":
-            x = rect.left()
+            x = 0.0
             y = h - 18
+            if title:
+                from PySide6.QtGui import QFontMetricsF
+                x += paint_html(p, QRectF(0, y, 220, 16), f"<b>{title}:</b>", LABEL_01, "text-primary") + 10
             for col, text, key in items:
                 p.setBrush(QColor(col))
                 p.setPen(Qt.PenStyle.NoPen)
@@ -660,6 +744,13 @@ class PlotWidget(QWidget):
             ids = d.get("ids", [])
             xs = d.get("x", [])
             ys = d.get("y", []) if s.kind == "scatter" else d["y"][s.y.id]
+            if self.active_id is not None:
+                for i, rid in enumerate(ids):
+                    if rid == self.active_id and ys[i] is not None:
+                        p.setPen(QPen(QColor(t("support-info")), 2))
+                        p.setBrush(Qt.BrushStyle.NoBrush)
+                        p.drawEllipse(QPointF(fx(xs[i]), fy(ys[i])), 8, 8)
+                        break
             for idx in self._selected_indices():
                 if idx < len(xs) and ys[idx] is not None:
                     sx, sy = fx(xs[idx]), fy(ys[idx])
@@ -885,6 +976,11 @@ class PlotWidget(QWidget):
     def _nearest(self, pos: QPointF, radius: float = 7.0) -> int:
         if not self._screen:
             return -1
+        if self._grid is None:
+            grid: dict = {}
+            for k, (sx, sy, _idx) in enumerate(self._screen):
+                grid.setdefault((int(sx // 8), int(sy // 8)), []).append(k)
+            self._grid = grid
         gx, gy = int(pos.x() // 8), int(pos.y() // 8)
         best, bd = -1, radius * radius
         for ix in (gx - 1, gx, gx + 1):

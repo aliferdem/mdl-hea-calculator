@@ -380,3 +380,21 @@ def test_point_activation_only_from_explicit_action():
     assert t.context == S.COLLECTION and t.active is None and t.inspector == 11
     u = S.analyse_point(t, 11)
     assert u.active == 11 and u.context == S.COMPOSITION and u.coll_tab == "plots"
+
+
+def test_expression_plan_counts_duplicates_per_block(tmp_path):
+    recipe = samples.expression_recipe("AlxCoCrFeNi\n\nAlyCoCrFeNi", {"x": (0.0, 1.0, 0.25), "y": (0.0, 1.0, 0.25)})
+    valid, skipped, dups, total, by_block = recipe.plan(str(tmp_path / "plan.bin"), 64)
+    assert (valid, skipped, dups, total) == (5, 0, 5, 10)
+    assert by_block == {1: 5}, "every composition of block 2 was generated first by block 1"
+
+
+def test_run_source_update_is_merged(engine, tmp_path):
+    repo = ResultRepository(engine, root=tmp_path)
+    try:
+        run = repo.create_run("expression", source={"text": "AlxCoCrFeNi"})
+        repo.update_run_source(run, {"duplicates": 3, "duplicates_by_block": {"1": 3}})
+        src = repo.get_run(run).source
+        assert src == {"text": "AlxCoCrFeNi", "duplicates": 3, "duplicates_by_block": {"1": 3}}
+    finally:
+        repo.close()

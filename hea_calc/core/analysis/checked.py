@@ -175,5 +175,20 @@ class CheckedSet:
             (f"INSERT INTO vw.{q(name)}(rid) SELECT rid FROM vw.checked", ())]))
         return name, task
 
+    def id_table(self, ids, timeout: float = 30.0) -> str:
+        """A ``vw`` table holding exactly ``ids`` (the results-table id filter of "Show in results table");
+        written by the view builder, returned once written.  Raises the builder's error if it failed."""
+        name = f"sel_{uuid.uuid4().hex[:12]}"
+        ids = sorted({int(i) for i in ids})
+        stmts = [(f"CREATE TABLE vw.{q(name)}(rid INTEGER PRIMARY KEY)", ())]
+        for k in range(0, len(ids), 500):
+            part = ids[k:k + 500]
+            stmts.append((f"INSERT OR IGNORE INTO vw.{q(name)}(rid) VALUES {','.join(['(?)'] * len(part))}", part))
+        task = self.repo.builder.submit(ViewTask("exec", statements=stmts))
+        task.done.wait(timeout)
+        if task.error is not None:
+            raise task.error
+        return name
+
     def drop_snapshot(self, name: str) -> None:
         self.repo.builder.submit(ViewTask("exec", statements=[(f"DROP TABLE IF EXISTS vw.{q(name)}", ())]))

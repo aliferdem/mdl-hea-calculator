@@ -243,3 +243,25 @@ comparisons only. A source that prints `≥` or `≤` states an inclusive rule, 
 must not exclude a value equal to the bound. A source that prints `<` or `>` states a strict rule,
 and that strictness is meaningful at the bound, so those comparisons are exact. Both halves are
 pinned from both sides in `tests/test_model_boundaries.py`.
+
+---
+
+## 9. Analysis redesign (2026-10-14): what changed in `core/engine.py` and the result store
+
+No equation, constant, threshold, dataset value, radius set, parser convention or reason text changed.
+The scientific validator (the independent validator script) gives the same
+600 PASS / 8 FAIL / 5 UNSUPPORTED / 0 ERROR as before (the 8 documented failures of section 8).
+
+| Change | Kind | Why |
+|---|---|---|
+| `ModelOutcome.na_kind` (`missing_data` / `undefined`; `error` for a composition the engine rejects) | classification of an existing N/A, set at the site that already wrote its reason | Collection analysis must count "not available — missing data" apart from "not available — undefined" (zero denominator: Ω, Λ, φ, Φ) and from not-evaluable results; missing data is never zero (section 6). M5: a missing ΔH<sub>mix</sub> or radius is `missing_data`; an S<sub>E</sub> that cannot be evaluated or is zero is `undefined` |
+| `Engine.formation_pairs(composition)` | read-only dataset accessor (no calculation) | Model details draws the M6 pair window from the same Troparevsky values the engine compares; the UI may not look datasets up itself (AGENTS.md section 3) |
+| Results store schema 2: `status_M*`, `na_kind_M*`, `family_id` / `families`, `n_elements`, run `app_version` / `engine_version` / `dataset_ids` | storage of values the engine already produced | evidence status survives storage, so distributions never flatten N/A, extrapolated and flagged verdicts into one state |
+
+Invariant relied on by the store (tested in `tests/test_analysis_schema.py`): an N/A verdict carries a reason and
+never a caution; an evaluated verdict carries a caution at most and never a reason, so the one stored note per
+model is unambiguous.
+
+Open scientific questions recorded by the Analysis audit (`docs/analysis-redesign/AUDIT_WORK_STATUS.md` items 1-7:
+Troparevsky suspect rule and causal flagging, M3 radius set, formula-group convention, density volume source,
+supplementary radii) are **unchanged**; Analysis displays CURRENT engine behaviour and its existing caution texts.

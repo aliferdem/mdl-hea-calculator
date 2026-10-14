@@ -170,27 +170,31 @@ class ExpressionRecipe:
         return out
 
     # -------------------------------------------------------------- plan (one worker)
-    def plan(self, path: str, block: int, cancelled=lambda: False) -> tuple[int, int, int, int]:
+    def plan(self, path: str, block: int, cancelled=lambda: False) -> tuple[int, int, int, int, dict]:
         """Write one bit per combination (1 = calculated) to ``path`` in ranges of ``block``
         combinations, flushed range by range so calculation can follow; returns
-        ``(valid, skipped, duplicates, combinations)``.  The only process holding a duplicate set."""
+        ``(valid, skipped, duplicates, combinations, duplicates per expression block)`` - a duplicate is
+        counted in the block that generated it again (it is kept in the first one).  The only process
+        holding a duplicate set."""
         import hashlib
         space = self.space
         seen: set[bytes] = set()
         valid = skipped = dups = 0
+        by_block: dict[int, int] = {}
         nbytes = block // 8
         with open(path, "wb") as fh:
             bits = bytearray(nbytes)
             for g in range(space.total):
                 if not g & 0x3FF and cancelled():
                     break
-                _b, _env, positive = space.evaluate(g)
+                b, _env, positive = space.evaluate(g)
                 if positive is None:
                     skipped += 1
                 else:
                     key = hashlib.blake2b(repr(composition_key(positive)).encode(), digest_size=16).digest()
                     if key in seen:
                         dups += 1
+                        by_block[b] = by_block.get(b, 0) + 1
                     else:
                         seen.add(key)
                         valid += 1
@@ -200,7 +204,7 @@ class ExpressionRecipe:
                     fh.write(bits)
                     fh.flush()
                     bits = bytearray(nbytes)
-        return valid, skipped, dups, space.total
+        return valid, skipped, dups, space.total, by_block
 
     def take(self, bits: bytes, k: int, block: int) -> tuple[list, list, list, list]:
         """Compositions of combination range ``k`` (kept by the plan bits)."""
@@ -228,7 +232,8 @@ class ExpressionRecipe:
         if not b.compositions:
             raise RangeError("No valid compositions for these ranges.")
         return {"sources": "expression", "names": b.names, "comps": b.compositions, "variables": b.variables,
-                "blocks": b.blocks}
+                "blocks": b.blocks, "counts": (len(b.compositions), b.skipped, b.duplicates,
+                                               len(b.compositions) + b.skipped + b.duplicates, b.duplicates_by_block)}
 
 
 # ====================================================================== recalculation

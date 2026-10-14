@@ -285,6 +285,8 @@ def overflow_menu(parent, c) -> CarbonMenu:
         a = menu.add_action("Export composition report…", lambda: c.report_requested.emit("composition"),
                             enabled=ok, icon="document_export")
         a.setToolTip("" if ok else "No composition to report")
+        menu.add_action("Print composition report…", lambda: c.report_requested.emit("print"), enabled=ok,
+                        icon="printer")
         menu.add_action("Show full precision", lambda: c.apply(S.update, full_precision=not st.full_precision),
                         checkable=True, checked=st.full_precision)
         menu.addSeparator()

@@ -617,6 +617,13 @@ class _WriterCore:
         sh[_S_RUN], sh[_S_RUN_COUNT], sh[_S_RUN_NEXT] = run_id, 0, 0
         return run_id
 
+    def do_update_source(self, run_id: int, patch: dict) -> None:
+        """Merge generation facts known only after the run started (expression duplicate counts)."""
+        row = self._con.execute("SELECT source FROM runs WHERE run_id=?", (run_id,)).fetchone()
+        src = json.loads(row[0]) if row and row[0] else {}
+        src.update(patch)
+        self._con.execute("UPDATE runs SET source=? WHERE run_id=?", (json.dumps(src), run_id))
+
     def do_append_sync(self, run_id: int, chunk: dict) -> range:
         st = self._runs.get(run_id)
         if st is None:
@@ -1429,6 +1436,10 @@ class ResultRepository:
         """Close a run (status complete | cancelled | failed) once its first ``upto`` chunks are stored."""
         fut = self.writer.call("finalize", run_id, status, message, upto, wait=False)
         return fut.result(60) if wait else fut
+
+    def update_run_source(self, run_id: int, patch: dict) -> None:
+        self.writer.call("update_source", run_id, dict(patch))
+        self.reader._runs.pop(run_id, None)
 
     def inject(self, delay: float = 0.0, fail: str | None = None) -> None:
         """Test hook: make the writer slow (``delay`` s per chunk) or fail every insert (``fail``)."""

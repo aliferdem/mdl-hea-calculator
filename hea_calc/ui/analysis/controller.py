@@ -210,11 +210,8 @@ class AnalysisController(QObject):
         ids = [r.run_id for r in self._runs_cache]
 
         def count(sq):
-            out = {}
-            for rid in ids:
-                out[rid] = sq.con.execute("SELECT COUNT(*) FROM results WHERE run_id=? AND result_id >= ?",
-                                          (rid, lo)).fetchone()[0]
-            return out
+            return sq.run_counts(ids)
+        _ = lo
         if ids:
             self.run_query("run_counts", count, scope=CollectionScope(ids[0]), use_cache=False)
         self.runs_changed.emit()

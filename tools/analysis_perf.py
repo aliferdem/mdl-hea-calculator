@@ -68,6 +68,7 @@ def main():
             c.apply(S.switch_context, S.COLLECTION)
 
             def timed_slot(name, request, slot):
+                print(f"  {name}…", flush=True)
                 c.data.pop(slot, None)
                 c.data_keys.pop(slot, None)
                 t = time.perf_counter()
@@ -76,6 +77,7 @@ def main():
                 out[name] = round(time.perf_counter() - t, 3) if ok else None
                 return c.data.get(slot)
 
+            print(f"{n:,} rows stored in {insert_s:.1f} s", flush=True)
             t = time.perf_counter()
             c.scope_for(run, "full")
             wait_until(app, lambda: c.state.resolved is not None and c.state.scope.run_id == run, 1800)
@@ -88,9 +90,9 @@ def main():
             out["statisticsExact"] = bool(st and st["exact"])
             timed_slot("histogramS", lambda: c.run_query("hist", lambda sq: sq.histogram("delta"), use_cache=False),
                        "hist")
-            b = timed_slot("binned200S", lambda: c.run_query("plot", lambda sq: sq.binned("delta", "dhmix", (200, 200),
+            b = timed_slot("binned200S", lambda: c.run_query("perf_binned", lambda sq: sq.binned("delta", "dhmix", (200, 200),
                                                                                          "model:M2"),
-                                                               use_cache=False), "plot")
+                                                               use_cache=False), "perf_binned")
             out["binnedCells"] = len(b["cells"]) if b else None
             p = timed_slot("sampledScatterS", lambda: c.run_query("plot2", lambda sq: sq.points("delta", "dhmix",
                                                                                                "model:M2"),

@@ -612,6 +612,11 @@ class ScopeQuery:
                 "missing_cells": len(xs) * len(ys) - len(cells), "value": value, "categorical": cat,
                 "n": len(rows)}
 
+    def run_counts(self, run_ids) -> dict[int, int]:
+        """Alive results per run in the table's workspace (the Run selector's counts)."""
+        return {rid: self._exec("SELECT COUNT(*) FROM results WHERE run_id=? AND result_id >= ?",
+                                (rid, self.lo)).fetchone()[0] for rid in run_ids}
+
     # -------------------------------------------------------------- ids
     def ids(self, limit: int | None = None) -> list[int]:
         sql = f"SELECT r.result_id FROM {self.frm} WHERE {self.where} ORDER BY r.result_id"

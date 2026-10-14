@@ -288,9 +288,10 @@ class MainWindow(QMainWindow):
         c = self.file_menu.add_action("Copy table", self.copy_table, shortcut="Ctrl+Shift+C")
         self.file_menu.addSeparator()
         self.file_menu.add_action("Calculation settings…", self.edit_settings)
+        hlp = self.file_menu.add_action("Help…", lambda: self.show_help("workload"), shortcut="F1")
         self.file_menu.addSeparator()
         q = self.file_menu.add_action("Exit", self.close, shortcut="Ctrl+Q")
-        for act in (a, c, q):
+        for act in (a, c, q, hlp):
             self.addAction(act)
         self.theme_menu = CarbonMenu(parent=self)
         group = QActionGroup(self)
@@ -444,6 +445,13 @@ class MainWindow(QMainWindow):
 
     def _done(self, job):
         r = self.runner
+        pc = getattr(job, "plan_counts", None)
+        if r.run_id is not None and pc and len(pc) > 4:
+            try:                                  # expression generation facts for Analysis (block restriction)
+                self.repo.update_run_source(r.run_id, {"skipped": pc[1], "duplicates": pc[2], "combinations": pc[3],
+                                                       "duplicates_by_block": {str(k): v for k, v in pc[4].items()}})
+            except Exception:                     # noqa: BLE001 - informative only
+                pass
         self.analysis_ctl.run_finished(r.run_id)
         info = self.repo.get_run(r.run_id) if r.run_id is not None else None
         self._batch_added += r.added
@@ -825,18 +833,11 @@ class MainWindow(QMainWindow):
             self._jump_to(ids[0], analyse=False)
             return
         # several: an explicit, visible id filter (removable in the Filter dialog), never a silent change
-        import uuid
-        from ..core.repository import ViewTask, q
         from ..core.results import IdSetFilter
-        name = f"sel_{uuid.uuid4().hex[:12]}"
-        stmts = [(f"CREATE TABLE vw.{q(name)}(rid INTEGER PRIMARY KEY)", ())]
-        for k in range(0, len(ids), 500):
-            part = ids[k:k + 500]
-            stmts.append((f"INSERT OR IGNORE INTO vw.{q(name)}(rid) VALUES {','.join(['(?)'] * len(part))}", part))
-        task = self.repo.builder.submit(ViewTask("exec", statements=stmts))
-        task.done.wait(30)
-        if task.error is not None:
-            self.notify("error", user_message(task.error))
+        try:
+            name = self.table.model.checked.id_table(ids)
+        except Exception as exc:                      # noqa: BLE001 - storage problem, reported
+            self.notify("error", user_message(exc))
             return
         m = self.table.model
         filters = [f for f in m.filters if not isinstance(f, IdSetFilter)] + [IdSetFilter(name, frozenset(ids))]
@@ -852,7 +853,10 @@ class MainWindow(QMainWindow):
         self.analysis_ctl.table_checked_changed()
 
     def export_report(self, kind: str):
-        from .analysis.report_ui import export_report
+        from .analysis.report_ui import export_report, print_composition
+        if kind == "print":
+            print_composition(self)
+            return
         export_report(self, kind)
 
     def export_analysis(self, kind: str):
