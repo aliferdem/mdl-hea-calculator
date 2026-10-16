@@ -236,13 +236,14 @@ SUPPORT_LEGEND_ROWS = (
 )
 
 
-def support_legend_html() -> str:
-    """Model-support legend for the toggletip (design/components/Group 241.png): the status icons
-    themselves, inline, each followed by ': explanation'.  Built at open time so the icons follow
-    the current theme."""
-    rows = [f"<img src='{icons.status_url(name)}' width='16' height='16' style='vertical-align: middle'>"
-            f": {text}" for name, text in SUPPORT_LEGEND_ROWS]
-    return "Model support for the highlighted element:<br>" + "<br>".join(rows)
+def support_legend_html() -> list:
+    """Model-support legend for the toggletip (design/components/Group 241.png): one row per status icon
+    followed by its explanation.  The icons are vector-painted by the toggletip from the inverse tokens
+    (crisp at 100 / 125 / 150 %; the former inline raster <img> was blurry at fractional scaling and took the
+    main surface's colours)."""
+    return (["Model support for the highlighted element:"]
+            + [("icon", name, text[:1].upper() + text[1:]) for name, text in SUPPORT_LEGEND_ROWS]
+            + ["<a href='help://models'>Prediction model coverage</a>"])
 
 
 # Plain-text form (accessibility, tests).

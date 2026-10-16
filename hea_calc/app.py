@@ -23,8 +23,12 @@ def run(argv: list[str] | None = None) -> int:
     from .ui.theme import THEME, load_fonts
 
     load_fonts()
-    theme = QSettings("MDL", "HEA Calculator").value("theme", "dark")
-    THEME.set_theme(theme if theme in ("dark", "light") else "dark")
+    # the stored preference is system | light | dark; the effective theme is resolved (System default follows
+    # the OS colour scheme) before the first window exists, so nothing flashes in the wrong theme
+    from .ui.preferences import DEFAULT_THEME, THEME_PREFERENCES
+    from .ui.system_theme import resolve
+    pref = QSettings("MDL", "HEA Calculator").value("theme", DEFAULT_THEME)
+    THEME.set_theme(resolve(pref if pref in THEME_PREFERENCES else DEFAULT_THEME))
 
     from .ui.widgets.common import install_tooltips
 

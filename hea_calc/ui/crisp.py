@@ -125,6 +125,19 @@ def fill_rounded(painter: QPainter, rect: QRectF | QRect, radius: float, color) 
         p.fillPath(path, QColor(color))
 
 
+def fill_pill(painter: QPainter, rect: QRectF | QRect, color) -> None:
+    """Fully rounded fill (radius = half the snapped thickness) - scroll-bar thumbs: the 4 px bar is a pill
+    at every device pixel ratio (ends are semicircles of the actual device thickness)."""
+    d = device_rect(painter, rect)
+    if d.width() <= 0 or d.height() <= 0:
+        return
+    r = min(d.width(), d.height()) / 2
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(d), r, r)
+    with _DeviceSpace(painter, antialias=True) as p:
+        p.fillPath(path, QColor(color))
+
+
 def hline(painter: QPainter, x0: float, x1: float, y: float, color, width: float = 1.0) -> None:
     """Horizontal rule whose *top* edge is at logical ``y``, ``width`` logical px thick."""
     m = painter.deviceTransform()

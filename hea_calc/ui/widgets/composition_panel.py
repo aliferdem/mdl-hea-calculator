@@ -1,10 +1,17 @@
-"""Composition Setup panel (Figma 278:30198) with three workflows sharing one engine:
+"""Composition setup panel - the current Figma component "Composition setup" (Mode=Single / Space / Expression,
+nodes 392:69182 / 392:69349 / 392:69514 and their base components), with three workflows sharing one engine:
 
-* Single composition — editable representation columns (El., At. ratio, at.%, wt.%, Mass)
-* Composition sweep — composition space: per-element Min / Max / Step (at. ratio or at.%), Lock
-  (required/optional), system-size filter (Figma 278:17008)
-* Expression mode — one or more expression blocks with variables, Min / Max / Step per variable
-  (Figma 256:38340)
+* Single composition - editable representation columns (El., At. ratio, at.%, wt.%, Mass) and a persisted
+  Total mass (``ui/preferences.py``);
+* Composition space - per-element Min / Max / Step in a *range basis* (at. ratio, at.%, wt.% or mass, chosen in
+  the panel header), Lock (required / optional), editable element symbols, a multi-select System size and the
+  workload summary;
+* Composition expression - expression blocks with variables and their Min / Max / Step.
+
+Product decisions (release reconciliation): the panel is **not responsive** - its geometry is the component's
+(457 × 465) at every window width; its title names the mode; every explanation (invalid input, counting,
+readiness, workload, model coverage) is in the 32 px footer (``composition_footer.py``), fields only mark
+which input is invalid; calculation progress is in the UI shell header, not here.
 
 The panel only builds compositions; calculations are requested through ``calculate_requested``.
 """
@@ -14,27 +21,30 @@ from __future__ import annotations
 import math
 import re
 
-from PySide6.QtCore import QPointF, QTimer, Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QPainter
-from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
-                               QPlainTextEdit, QRadioButton, QScrollArea, QSizePolicy, QSpacerItem, QStackedWidget,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QFrame, QHBoxLayout, QLabel, QLineEdit,
+                               QPlainTextEdit, QRadioButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
 
 from ...core import composition as C
 from ...core.data import Datasets
 from ...core.expression import (MAX_COMBINATIONS, ExpressionError, GenerationCancelled, VariableRange,
                                  block_variables, count_combinations, generate_blocks, parse_blocks)
-from ...core.generation import RangeError, SweepSpec, summarize_space
-from ...core.limits import HARD_LIMIT, capacity_problem, describe, estimate
+from ...core.generation import SUM_UNITS, RangeError, SweepSpec, summarize_space
+from ...core.limits import HARD_LIMIT, LARGE, capacity_problem, describe, estimate, fmt_short_bytes, \
+    fmt_short_duration
 from ...core.recipes import (ExpressionRecipe, SweepRecipe, compositions_tsv, expression_count, recipe_preview,
                              recipe_tsv)
 from .. import crisp
+from ..preferences import DEFAULT_TOTAL_MASS, format_mass, valid_mass
+from ..theme import COMPOSITION_PANEL_WIDTH, FOCUS_WIDTH, HAIRLINE, t
 from ..worker import BackgroundTask
+from .common import (Divider, EmptyState, IconContentSwitcher, InfoButton, Panel, install_wheel_guard,
+                     refresh_style, retire)
+from .composition_footer import CompositionFooter, Status, WorkloadSummary
+from .dropdown import Dropdown, MultiSelect
 from .menu import carbon_context_menu
-from ..theme import COMPOSITION_PANEL_MIN, FOCUS_WIDTH, HAIRLINE, t
 from .scroll import own_wheel, thin_scrollbars
-from .common import (Divider, EmptyState, IconButton, IconContentSwitcher, InfoButton, Panel, button,
-                     install_wheel_guard, refresh_style)
 
 COL_ELEMENT = 64
 COL_VALUE = 88
@@ -47,10 +57,24 @@ DECIMALS = {"ratio": 4, "at": 4, "wt": 4, "mass": 5}
 SWEEP_LIMIT = HARD_LIMIT     # largest measured batch (core/limits.py); was 200 000 (in-memory result store)
 COUNT_DEBOUNCE_MS = 200      # pre-flight counts wait for a pause in typing
 HEAVY_THRESHOLD = 5_000      # combinations above which a pre-flight runs in a worker process
+SUM_TOLERANCE = 1e-3         # at.% / wt.% columns must sum to 100 within 0.001 % (4-decimal input)
+
+MODE_TITLES = {"single": "Single composition", "sweep": "Composition space", "expression": "Composition expression"}
+RANGE_BASES = (("ratio", "At. ratio"), ("at", "at.%"), ("wt", "wt.%"), ("mass", "Mass"))
+# defaults of a new row / after a basis change: (min, max, step)
+RANGE_DEFAULTS = {"ratio": ("1.0", "1.0", "0.1"), "at": ("0", "100", "10"), "wt": ("0", "100", "10"),
+                  "mass": ("1.0", "1.0", "0.1")}
+
+SYSTEM_SIZE_HELP = ("System size (N) specifies the number of constituent elements in each generated alloy. "
+                    "Multiple values of N may be selected. Only element combinations satisfying the "
+                    "required-element constraints are included.")
+WORKLOAD_HELP = [("Summarizes the valid composition count and estimated computational requirements. Runtime and "
+                  "temporary disk usage depend on the workload and system performance. Actual resource usage "
+                  "may vary."), "<a href='help://workload'>About workload estimates</a>"]
 
 
 def size_note(n: int, workers: int) -> tuple[str, str]:
-    """Tier label (Large set / Very large set) and the tooltip text: the tier message for large sets
+    """Tier label (Large set / Very large set) and the explanation: the tier message for large sets
     and the measured estimates of calculation time and temporary storage."""
     if not n:
         return "", ""
@@ -58,17 +82,53 @@ def size_note(n: int, workers: int) -> tuple[str, str]:
     return tier, tip
 
 
+def coverage_status(coverage: dict | None) -> Status | None:
+    """Footer warning when some models lack data for the chosen elements (engine.model_coverage)."""
+    if not coverage:
+        return None
+    missing = [k for k, v in coverage.items() if v]
+    if not missing:
+        return None
+    ok = [k for k, v in coverage.items() if not v]
+
+    def names(keys):
+        return keys[0] if len(keys) == 1 else ", ".join(keys[:-1]) + " and " + keys[-1]
+    reasons = []
+    for k in missing:
+        r = coverage[k]
+        if r not in reasons:
+            reasons.append(r)
+    text = (f"{names(missing)} {'is' if len(missing) == 1 else 'are'} unavailable for these elements: "
+            + " ".join(reasons))
+    if ok:
+        text += f" {names(ok)} can still be evaluated."
+    return Status("warning", "Partial model coverage",
+                  [text, "<a href='help://models'>View model support</a>"], "Partial model coverage")
+
+
+def check_symbol(text: str, data: Datasets, existing, current: str) -> tuple[str, str | None]:
+    """Normalised element symbol and an error (or None) - the one element-entry rule of every composition table:
+    a known element symbol that is not already in the composition."""
+    new = text.strip()
+    new = new[:1].upper() + new[1:].lower() if new else new
+    if new == current:
+        return new, None
+    if not new:
+        return new, "Enter an element symbol"
+    if not data.is_element(new):
+        return new, f"'{new}' is not an element symbol"
+    if new in existing:
+        return new, f"{new} is already in the composition"
+    return new, None
+
+
 class ColumnGrid:
     """Column widths shared by the three composition tables (single, sweep, expression).
 
-    The design columns (element 64, value 88, lock 64 px, 1 px gaps) fit the 457 px panel.  On a
-    narrower panel (Windows 125 % / 150 %) the columns compress with the panel and the value
-    fields' horizontal text padding shrinks from 16 px towards 8 px, so a five-digit value such as
-    ``14.2857`` still fits unclipped.  Widgets opt in with a ``col_role`` property (element / value
-    / lock); :meth:`apply` re-sizes every tagged descendant of a widget.
-    """
+    The design columns (element 64, value 88, lock 64 px, 1 px gaps) fit the 457 px panel, which is fixed by
+    design; the grid is kept as the one place that sizes every tagged cell (``col_role`` property)."""
 
-    DESIGN_PANEL = 457
+    DESIGN_PANEL = COMPOSITION_PANEL_WIDTH
     SINGLE_SPAN = COL_ELEMENT + 4 * COL_VALUE + 4 * COL_GAP     # 420 px of the 457 px panel
     PAD = 16
     PAD_MIN = 8
@@ -103,8 +163,6 @@ class ColumnGrid:
             elif isinstance(w, QLabel) and role == "value" and w.property("col_header"):
                 w.setContentsMargins(self.pad, 0, 0, 0)
             elif isinstance(w, QRadioButton):
-                # "At. ratio" = 20 px indicator + 8 px spacing + 51 px label; below an 80 px column
-                # the spacing tightens to 4 px so the label never runs into the next radio
                 compact = self.value < 80
                 if bool(w.property("compact")) != compact:
                     w.setProperty("compact", compact)
@@ -125,17 +183,16 @@ def fmt(v: float | None, decimals: int) -> str:
 class Field(QLineEdit):
     """Carbon text input (sm, 32 px) with an ``invalid`` state.
 
-    Its strokes - the 1 px bottom rule, the 2 px focus frame and the 2 px invalid frame - are
-    painted in device pixels (``crisp``) rather than by QSS borders: at DPR 1.25 a QSS 1 px rule
-    rendered 1 or 2 device px depending on the field's position, and a 2 px frame 2 px on some sides
-    and 3 px on others.  The QSS only provides background, text and the hover state.
-    """
+    Its strokes - the 1 px bottom rule, the 2 px focus frame and the 2 px invalid frame - are painted in device
+    pixels (``crisp``) over the field, never as QSS borders, so the text origin is identical in every state.
+    The explanation of an invalid value is the footer's (``error`` keeps it for the footer)."""
 
     def __init__(self, width: int, parent=None, cell: str = "value"):
         super().__init__(parent)
         self.setFixedSize(width, ROW_H)
         self.setProperty("cell", cell)
         self.setProperty("crisp", True)
+        self.error = ""
         col_role(self, "element" if width == COL_ELEMENT else "value")
         carbon_context_menu(self)        # Cut / Copy / Paste through the shared Carbon menu
         self.set_padding(4 if width == COL_ELEMENT else ColumnGrid.PAD)
@@ -161,10 +218,10 @@ class Field(QLineEdit):
         p.end()
 
     def set_invalid(self, invalid: bool, message: str = ""):
+        self.error = message if invalid else ""
         if bool(self.property("invalid")) != invalid:
             self.setProperty("invalid", invalid)
             refresh_style(self)
-        self.setToolTip(message if invalid else "")
 
     def number(self) -> float | None:
         return C.parse_number(self.text())
@@ -182,6 +239,11 @@ class _Rows(QWidget):
 
     def insert(self, w: QWidget):
         self.lay.insertWidget(self.lay.count() - 1, w)
+
+    def order(self, widgets: list[QWidget]) -> None:
+        for i, w in enumerate(widgets):
+            self.lay.removeWidget(w)
+            self.lay.insertWidget(i, w)
 
 
 class FadeOverlay(QWidget):
@@ -209,7 +271,7 @@ class FadeOverlay(QWidget):
         self.raise_()
 
     def paintEvent(self, _e):
-        from PySide6.QtGui import QColor, QLinearGradient, QPainter
+        from PySide6.QtGui import QColor, QLinearGradient
         p = QPainter(self)
         g = QLinearGradient(0, 0, 0, self.height())
         c0 = QColor(t("layer-01"))
@@ -232,6 +294,15 @@ def scroll_wrap(inner: QWidget) -> QScrollArea:
     return sa
 
 
+def element_field(element: str) -> Field:
+    """The editable element-symbol cell shared by Single composition and Composition space."""
+    f = Field(COL_ELEMENT, cell="element")
+    f.setText(element)
+    f.setMaxLength(2)
+    f.setAccessibleName("Element symbol")
+    return f
+
+
 # ======================================================================== single composition
 class SingleRow(QWidget):
     def __init__(self, element: str, parent=None):
@@ -240,10 +311,7 @@ class SingleRow(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(COL_GAP)
         self.element = element
-        self.el = Field(COL_ELEMENT, cell="element")
-        self.el.setText(element)
-        self.el.setMaxLength(2)
-        self.el.setAccessibleName("Element")
+        self.el = element_field(element)
         lay.addWidget(self.el)
         self.fields: dict[str, Field] = {}
         for rep in REP_KEYS:
@@ -259,20 +327,23 @@ class SingleView(QWidget):
     grid = ColumnGrid()          # replaced by the panel's shared grid
     changed = Signal()
     element_renamed = Signal(str, str)  # old, new
-    message = Signal(str, str)          # kind, text
+    message = Signal(str, str)          # kind, text (action results for the window notification)
+    total_mass_committed = Signal(float)
 
     def __init__(self, datasets: Datasets, parent=None):
         super().__init__(parent)
         self.data = datasets
         self.input_rep = "ratio"         # active input column (or "element")
         self.values: dict[str, float | None] = {}  # values of the active numeric column, full precision
-        self.total_mass = 2.0
+        self.total_mass = DEFAULT_TOTAL_MASS
         self.rows: dict[str, SingleRow] = {}
+        self.notice: Status | None = None     # a one-off explanation (input column switch, normalise)
+        self.element_error: tuple[SingleRow, str] | None = None
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Input column radio group (Figma 278:30254 at y 68, 44 px)
+        # Input column radio group (Figma: label-01 at y 76, radios at y 102, divider at y 130)
         radios = QWidget()
         radios.setFixedHeight(74)
         rl = QVBoxLayout(radios)
@@ -307,21 +378,21 @@ class SingleView(QWidget):
         self.rows_widget = _Rows()
         self.scroll = scroll_wrap(self.rows_widget)
         self.empty = EmptyState("Start by selecting elements", "Click elements in the periodic table.",
-                                 art="magnifier")
+                                art="magnifier")
         self.rows_stack = QStackedWidget()
         self.rows_stack.addWidget(self.empty)
         self.rows_stack.addWidget(self.scroll)
         root.addWidget(self.rows_stack, 1)
 
-        # Totals (Figma: band from y 332, divider, total row at y 373)
+        # Totals (Figma: divider at y 356, total row 373-405, then the footer at y 433)
         totals = QWidget()
-        totals.setFixedHeight(67)
+        totals.setFixedHeight(77)
         tl = QVBoxLayout(totals)
         tl.setContentsMargins(0, 0, 0, 0)
         tl.setSpacing(0)
         tl.addWidget(Divider())
         trow = QHBoxLayout()
-        trow.setContentsMargins(19, 16, 0, 18)
+        trow.setContentsMargins(19, 16, 0, 28)
         trow.setSpacing(COL_GAP)
         tot_lab = col_role(QLabel("Total:"), "element")
         tot_lab.setFixedSize(COL_ELEMENT, ROW_H)
@@ -332,8 +403,8 @@ class SingleView(QWidget):
         for rep in REP_KEYS:
             if rep == "mass":
                 f = Field(COL_VALUE, cell="total")
-                f.setText(f"{self.total_mass:g}")
-                f.setToolTip("Total mass (g)")
+                f.setText(format_mass(self.total_mass))
+                f.setAccessibleName("Total mass (g)")
                 f.editingFinished.connect(self._total_mass_edited)
                 self.totals[rep] = f
                 trow.addWidget(f)
@@ -354,8 +425,9 @@ class SingleView(QWidget):
         for el in current:
             if el not in elements:
                 row = self.rows.pop(el)
-                row.setParent(None)
-                row.deleteLater()
+                if self.element_error and self.element_error[0] is row:
+                    self.element_error = None
+                retire(row)
                 self.values.pop(el, None)
         for el in elements:
             if el not in self.rows:
@@ -366,9 +438,7 @@ class SingleView(QWidget):
                 self.rows_widget.insert(row)
                 self.values[el] = 1.0 if self.input_rep in ("ratio", "element") else 0.0
         # keep visual order equal to selection order
-        for i, el in enumerate(elements):
-            self.rows_widget.lay.removeWidget(self.rows[el])
-            self.rows_widget.lay.insertWidget(i, self.rows[el])
+        self.rows_widget.order([self.rows[el] for el in elements])
         self.rows = {el: self.rows[el] for el in elements}
         self.values = {el: self.values.get(el) for el in elements}
         self.rows_stack.setCurrentIndex(1 if elements else 0)
@@ -377,7 +447,8 @@ class SingleView(QWidget):
 
     def _wire(self, row: SingleRow):
         for rep, f in row.fields.items():
-            f.textEdited.connect(lambda _txt, el=row.element, r=rep: self._edited(el, r))
+            f.textEdited.connect(lambda _txt, r=row, rp=rep: self._edited(r.element, rp))
+            f.editingFinished.connect(lambda r=row: self._value_committed(r))
         row.el.editingFinished.connect(lambda r=row: self._element_edited(r))
 
     # ---------------------------------------------------------------- state
@@ -392,13 +463,17 @@ class SingleView(QWidget):
         # switch the input column without changing the composition: adopt the computed values
         reps = self._representations()
         new_numeric = "ratio" if key == "element" else key
+        self.notice = None
         if reps is not None:
             self.values = dict(reps[new_numeric])
         elif new_numeric != self.numeric_rep:
             self.values = {el: None for el in self.rows}
-            self.message.emit("warning", "The previous column contained invalid values; enter values in the "
-                                         "new input column.")
+            self.notice = Status("warning", "Enter values in the new input column",
+                                 "The previous column contained invalid values, so they could not be converted.")
         self.input_rep = key
+        for row in self.rows.values():
+            for f in row.fields.values():
+                f.set_invalid(False)
         self._apply_editability()
         self.refresh()
         self.changed.emit()
@@ -416,69 +491,86 @@ class SingleView(QWidget):
         mass_total.setReadOnly(rep == "mass")
 
     def _edited(self, el: str, rep: str):
-        if rep != self.numeric_rep or self.input_rep == "element":
+        if rep != self.numeric_rep or self.input_rep == "element" or el not in self.rows:
             return
+        self.notice = None
         f = self.rows[el].fields[rep]
         v = f.number()
         if f.text().strip() == "":
             self.values[el] = None
-            f.set_invalid(True, "Value required")
+            f.set_invalid(True, f"{el}: value required")
         elif v is None:
             self.values[el] = None
-            f.set_invalid(True, "Enter a number")
+            f.set_invalid(True, f"{el}: enter a number")
         elif v < 0:
             self.values[el] = None
-            f.set_invalid(True, "Value must be ≥ 0")
+            f.set_invalid(True, f"{el}: value must be ≥ 0")
         else:
             self.values[el] = v
             f.set_invalid(False)
         self.refresh(skip=(el, rep))
         self.changed.emit()
 
+    def _value_committed(self, _row: SingleRow):
+        if self.input_rep == "mass" and self._representations() is not None:
+            self.total_mass_committed.emit(self.total_mass)
+
     def _element_edited(self, row: SingleRow):
-        new = row.el.text().strip()
-        new = new[:1].upper() + new[1:].lower() if new else new
-        old = row.element
-        if new == old:
-            row.el.set_invalid(False)
-            return
-        if not self.data.is_element(new):
-            row.el.set_invalid(True, f"'{new}' is not an element symbol")
-            self.message.emit("error", f"'{new}' is not an element symbol.")
-            return
-        if new in self.rows:
-            row.el.set_invalid(True, f"{new} is already in the composition")
-            self.message.emit("error", f"{new} is already in the composition.")
+        others = {e for e in self.rows if e != row.element}
+        new, error = check_symbol(row.el.text(), self.data, others, row.element)
+        if error:
+            row.el.set_invalid(True, error)
+            self.element_error = (row, error)
+            self.changed.emit()
             return
         row.el.set_invalid(False)
-        self.element_renamed.emit(old, new)
+        self.element_error = None
+        if new != row.element:
+            self.element_renamed.emit(row.element, new)
+        self.changed.emit()
 
     def rename(self, old: str, new: str, order: list[str]):
-        """Replace ``old`` by ``new`` keeping its value (called by the window after selection sync)."""
+        """Replace ``old`` by ``new`` keeping its value (called by the panel after selection sync)."""
         row = self.rows.pop(old)
         row.element = new
         row.el.setText(new)
         for rep, f in row.fields.items():
-            try:
-                f.textEdited.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-            f.textEdited.connect(lambda _txt, el=new, r=rep: self._edited(el, r))
+            f.setAccessibleName(f"{new} {C.REPRESENTATION_LABELS[rep]}")
         self.rows[new] = row
         self.values[new] = self.values.pop(old, None)
         self.set_elements(order)
 
+    def set_total_mass(self, grams: float) -> None:
+        """The persisted batch mass (preference); updates the Mass column, never a scientific value."""
+        g = valid_mass(grams)
+        if g is None:
+            return
+        self.total_mass = g
+        f = self.totals["mass"]
+        f.set_invalid(False)
+        if not f.hasFocus():
+            f.setText(format_mass(g))
+        if self.input_rep == "mass" and self.values and all(v is not None for v in self.values.values()):
+            s = sum(self.values.values())
+            if s > 0:                   # mass input: rescale the batch, same composition
+                self.values = {el: v * g / s for el, v in self.values.items()}
+        self.refresh()
+        self.changed.emit()
+
     def _total_mass_edited(self):
         f = self.totals["mass"]
-        if not f.text().strip() and not self.rows:
+        if f.isReadOnly() or (not f.text().strip() and not self.rows):
             return
         v = f.number()
-        if v is None or v <= 0:
-            f.set_invalid(True, "Total mass must be > 0")
+        if v is None or v <= 0 or not math.isfinite(v):
+            f.set_invalid(True, "Total mass must be > 0 g")
+            self.changed.emit()
             return
         f.set_invalid(False)
         self.total_mass = v
         self.refresh()
+        self.total_mass_committed.emit(v)
+        self.changed.emit()
 
     def _representations(self):
         vals = self.values
@@ -488,6 +580,15 @@ class SingleView(QWidget):
             return C.all_representations(dict(vals), self.numeric_rep, total_mass=self.total_mass, datasets=self.data)
         except ValueError:
             return None
+
+    def column_sum(self) -> float | None:
+        raw = [v for v in self.values.values() if v is not None]
+        return sum(raw) if raw and len(raw) == len(self.values) else None
+
+    def sum_off(self) -> bool:
+        """at.% / wt.% input whose column does not sum to 100 % (Figma State: "Composition sum ≠ 100%")."""
+        s = self.column_sum()
+        return self.numeric_rep in ("at", "wt") and s is not None and abs(s - 100.0) > SUM_TOLERANCE
 
     def refresh(self, skip: tuple | None = None):
         reps = self._representations()
@@ -504,8 +605,7 @@ class SingleView(QWidget):
                 f.setText(fmt(reps[rep][el], DECIMALS[rep]) if reps else "")
         # totals
         if reps is None:
-            raw = [v for v in self.values.values() if v is not None]
-            s = sum(raw) if raw else None
+            s = self.column_sum()
             for rep in ("ratio", "at", "wt"):
                 lab = self.totals[rep]
                 if rep == active and s is not None:
@@ -514,8 +614,10 @@ class SingleView(QWidget):
                     lab.setText("—")
         else:
             self.totals["ratio"].setText(f"{sum(reps['ratio'].values()):.2f}")
-            self.totals["at"].setText(f"{sum(reps['at'].values()):.4g}%")
-            self.totals["wt"].setText(f"{sum(reps['wt'].values()):.4g}%")
+            self.totals["at"].setText(f"{sum(self.values.values()):.4g}%" if active == "at"
+                                      else f"{sum(reps['at'].values()):.4g}%")
+            self.totals["wt"].setText(f"{sum(self.values.values()):.4g}%" if active == "wt"
+                                      else f"{sum(reps['wt'].values()):.4g}%")
             if active == "mass":
                 self.total_mass = sum(reps["mass"].values())
         mt = self.totals["mass"]
@@ -523,14 +625,42 @@ class SingleView(QWidget):
         if not self.rows:
             for rep in ("ratio", "at", "wt"):
                 self.totals[rep].setText("0.00")
-            if not mt.hasFocus():
-                mt.clear()
-        elif not mt.hasFocus():
-            mt.setText(f"{self.total_mass:.5g}")
+        if not mt.hasFocus():
+            mt.setText(format_mass(self.total_mass))
+        off = self.sum_off()
         for rep in ("at", "wt"):
             lab = self.totals[rep]
-            off = rep == active and reps is None and self.values and all(v is not None for v in self.values.values())
-            lab.setStyleSheet(f"color: {t('text-error')};" if off else "")
+            bad = rep == active and off
+            # the total cell is framed like an invalid field (Figma: red 2 px frame around "95%")
+            lab.setStyleSheet(f"border: 2px solid {t('support-error')};" if bad else "")
+
+    # ---------------------------------------------------------------- status (footer)
+    def status(self) -> Status | None:
+        if not self.rows:
+            return None
+        if self.element_error:
+            return Status("error", self.element_error[1])
+        bad = [row.fields[self.numeric_rep] for row in self.rows.values()
+               if self.input_rep != "element" and row.fields[self.numeric_rep].error]
+        if bad or any(v is None for v in self.values.values()):
+            msg = bad[0].error if len(bad) == 1 else "Missing or invalid values"
+            return Status("error", msg[:1].upper() + msg[1:])
+        if self.totals["mass"].error:
+            return Status("error", self.totals["mass"].error)
+        if self.sum_off():
+            return Status("error", "Composition sum ≠ 100%",
+                          "at.% and wt.% values must sum to 100 %. Use Normalize (Calculate menu) to scale them.")
+        if len(self.rows) < 2:
+            return Status("info", "Select at least two elements")
+        if sum(self.values.values()) <= 0:
+            return Status("error", "Total is zero")
+        if sum(1 for v in self.values.values() if v > 0) < 2:
+            return Status("error", "At least two elements need non-zero amounts")
+        return self.notice
+
+    def can_calculate(self) -> bool:
+        st = self.status()
+        return len(self.rows) >= 2 and (st is None or not st.blocking)
 
     # ---------------------------------------------------------------- actions
     def can_normalise(self) -> bool:
@@ -540,6 +670,7 @@ class SingleView(QWidget):
         return self.input_rep != "element" and bool(self.rows)
 
     def set_equal(self):
+        self.notice = None
         self.values = C.set_equal(list(self.rows), self.numeric_rep, total_mass=self.total_mass)
         for row in self.rows.values():
             for f in row.fields.values():
@@ -551,28 +682,43 @@ class SingleView(QWidget):
         try:
             self.values = C.normalise(dict(self.values), self.numeric_rep)
         except ValueError as exc:
-            self.message.emit("error", f"Cannot normalize: {exc}")
+            self.notice = Status("error", "Cannot normalize", str(exc))
+            self.changed.emit()
             return
+        self.notice = None
+        for row in self.rows.values():
+            for f in row.fields.values():
+                f.set_invalid(False)
         self.refresh()
         self.changed.emit()
 
     def composition(self):
         """Return (name, amounts as atomic ratios) or raise ValueError with a user message."""
+        st = self.status()
         if len(self.rows) < 2:
             raise ValueError("Select at least two elements.")
-        bad = [el for el, v in self.values.items() if v is None]
-        if bad:
-            raise ValueError("Missing or invalid value for " + ", ".join(bad) + ".")
-        if sum(self.values.values()) <= 0:
-            raise ValueError("Total is zero.")
+        if st is not None and st.blocking:
+            raise ValueError(st.text + ".")
         x = C.to_fractions(dict(self.values), self.numeric_rep, self.data)
-        if sum(1 for v in x.values() if v > 0) < 2:
-            raise ValueError("At least two elements need non-zero amounts.")
         ratios = C.from_fractions(x, "ratio")
         return C.alloy_name(ratios), ratios
 
+    def table_tsv(self) -> str:
+        """The composition table (every representation) as Excel-pastable text (Calculate menu: Copy table)."""
+        reps = self._representations()
+        head = ["Element"] + [C.REPRESENTATION_LABELS[r] + (" (g)" if r == "mass" else "") for r in REP_KEYS]
+        lines = ["\t".join(head)]
+        for el in self.rows:
+            vals = [fmt(reps[r][el], DECIMALS[r]) if reps else "" for r in REP_KEYS]
+            lines.append("\t".join([el] + vals))
+        return "\r\n".join(lines) + "\r\n"
+
     def clear(self):
+        self.notice = None
         self.values = {el: (1.0 if self.input_rep in ("ratio", "element") else 0.0) for el in self.rows}
+        for row in self.rows.values():
+            for f in row.fields.values():
+                f.set_invalid(False)
         self.refresh()
 
 
@@ -591,7 +737,7 @@ class Toggle(QAbstractButton):
 
     def paintEvent(self, _e):
         from PySide6.QtCore import QRectF
-        from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+        from PySide6.QtGui import QColor, QPainterPath
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         r = QRectF(self.rect())
@@ -627,9 +773,8 @@ def header_label(text: str, width: int, center: bool = False, role: str | None =
     return c
 
 
-# ======================================================================== composition space (sweep)
-SWEEP_MARGIN = 31  # Figma 278:17008: table starts at x = 31
-
+# ======================================================================== composition space
+SWEEP_MARGIN = 31  # Figma: table starts at x = 31
 
 
 class SweepRow(QWidget):
@@ -639,10 +784,8 @@ class SweepRow(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(COL_GAP)
-        self.el = Field(COL_ELEMENT, cell="element-filled")
-        self.el.setText(element)
-        self.el.setReadOnly(True)
-        self.el.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # editable symbol, exactly as in Single composition (same cell, same rule: check_symbol)
+        self.el = element_field(element)
         lay.addWidget(self.el)
         self.min, self.max, self.step = Field(COL_VALUE), Field(COL_VALUE), Field(COL_VALUE)
         for f, name in ((self.min, "Min"), (self.max, "Max"), (self.step, "Step")):
@@ -654,27 +797,52 @@ class SweepRow(QWidget):
         ll = QHBoxLayout(lock_cell)
         ll.setContentsMargins(0, 0, 0, 0)
         self.lock = Toggle(True)
-        self.lock.setToolTip("Lock on: element always present (required). Off: optional — systems with and "
-                             "without it are generated.")
+        # the column header says "Lock"; the toggle explains what locking means (not just its name)
+        self.lock.setToolTip("On: always present (required). Off: optional - systems with and without it")
         self.lock.setAccessibleName(f"{element} required")
         ll.addWidget(self.lock, 0, Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(lock_cell)
         lay.addStretch(1)
         self.setFixedHeight(ROW_H)
 
+    def set_values(self, values: tuple[str, str, str]) -> None:
+        for f, v in zip((self.min, self.max, self.step), values):
+            f.setText(v)
+            f.set_invalid(False)
 
-class SweepView(QWidget):
-    grid = ColumnGrid()
-    """Composition space (Figma 278:17008): per-element ranges, Lock (required/optional), All row,
-    system-size filter and live counts."""
 
-    changed = Signal()
-    message = Signal(str, str)
+class SystemSizeSelect(MultiSelect):
+    """System size (Figma: 116 px field, "4, 5, 6" / "All"): the element counts N a generated alloy may have."""
 
     def __init__(self, parent=None):
+        super().__init__("system sizes", parent=parent, accessible="System size")
+        self.setFixedWidth(116)
+
+    def current_html(self) -> str:
+        if not self.options:
+            return "System size"
+        if not self.selected:
+            return "All"
+        return ", ".join(str(v) for v in sorted(self.selected))
+
+
+class SweepView(QWidget):
+    """Composition space (Figma "_Composition setup Composition space bases" 392:60079): per-element ranges in
+    the range basis, Lock (required / optional), All row, System size and the workload summary."""
+
+    grid = ColumnGrid()
+    changed = Signal()
+    message = Signal(str, str)
+    element_renamed = Signal(str, str)
+
+    def __init__(self, datasets: Datasets | None = None, parent=None):
         super().__init__(parent)
+        from ...core.data import default_datasets
+        self.data = datasets or default_datasets()
         self.rows: dict[str, SweepRow] = {}
         self.unit = "ratio"
+        self.element_error: tuple[SweepRow, str] | None = None
+        self.range_error: str | None = None
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -692,15 +860,17 @@ class SweepView(QWidget):
         hw = QWidget()
         hw.setLayout(head)
         hw.setFixedHeight(32)
-        self.page = QWidget()
-        pl = QVBoxLayout(self.page)
-        pl.setContentsMargins(0, 0, 0, 0)
-        pl.setSpacing(0)
-        pl.addWidget(hw)
+        root.addWidget(hw)
+        root.addWidget(Divider())
         self.rows_widget = _Rows(margin=SWEEP_MARGIN)
         self.scroll = scroll_wrap(self.rows_widget)
-        pl.addWidget(self.scroll, 1)
-        # All row
+        self.empty = EmptyState("Start by selecting elements",
+                                "Click elements in the periodic table to set their ranges.", art="magnifier")
+        self.rows_stack = QStackedWidget()
+        self.rows_stack.addWidget(self.empty)
+        self.rows_stack.addWidget(self.scroll)
+        root.addWidget(self.rows_stack, 1)
+        # All row (Figma: divider at y 301, row at y 313, 12 px margins)
         all_w = QWidget()
         all_w.setFixedHeight(57)
         al = QVBoxLayout(all_w)
@@ -708,7 +878,7 @@ class SweepView(QWidget):
         al.setSpacing(0)
         al.addWidget(Divider())
         ar = QHBoxLayout()
-        ar.setContentsMargins(SWEEP_MARGIN, 12, 0, 12)
+        ar.setContentsMargins(SWEEP_MARGIN, 11, 0, 13)
         ar.setSpacing(COL_GAP)
         lab = col_role(QLabel("All:"), "element")
         lab.setFixedSize(COL_ELEMENT, ROW_H)
@@ -731,36 +901,44 @@ class SweepView(QWidget):
         ar.addWidget(lc)
         ar.addStretch(1)
         al.addLayout(ar)
-        pl.addWidget(all_w)
-        # summary + system size (Figma: two text lines left, dropdown right)
+        root.addWidget(all_w)
+        # System size | Workload summary (Figma: divider x 20..437 at y 357; size at x 20, y 366, 116 px;
+        # vertical divider x 148; workload summary at x 161)
         sum_w = QWidget()
-        sum_w.setFixedHeight(68)
+        sum_w.setFixedHeight(76)
         sl = QVBoxLayout(sum_w)
-        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setContentsMargins(20, 0, 20, 0)
         sl.setSpacing(0)
         sl.addWidget(Divider())
         srow = QHBoxLayout()
-        srow.setContentsMargins(SWEEP_MARGIN, 8, 20, 8)
-        self.summary = QLabel("")
-        self.summary.setTextFormat(Qt.TextFormat.RichText)
-        srow.addWidget(self.summary, 1)
-        self.size_box = QComboBox()
-        self.size_box.setAccessibleName("System size")
-        self.size_box.setToolTip("Restrict the number of elements per system (optional elements)")
-        self.size_box.setMinimumWidth(120)
-        self.size_box.currentIndexChanged.connect(lambda _i: self._edited())
-        srow.addWidget(self.size_box, 0, Qt.AlignmentFlag.AlignVCenter)
+        srow.setContentsMargins(0, 8, 0, 8)
+        srow.setSpacing(0)
+        size_col = QVBoxLayout()
+        size_col.setSpacing(8)
+        cap_row = QHBoxLayout()
+        cap_row.setSpacing(8)
+        cap = QLabel("System size")
+        cap.setObjectName("Label01")
+        cap_row.addWidget(cap)
+        cap_row.addWidget(InfoButton(SYSTEM_SIZE_HELP, title="System size"))
+        cap_row.addStretch(1)
+        size_col.addLayout(cap_row)
+        self.size_box = SystemSizeSelect()
+        self.size_box.changed.connect(lambda _sel: self._edited())
+        size_col.addWidget(self.size_box)
+        size_col.addStretch(1)
+        srow.addLayout(size_col)
+        srow.addSpacing(12)
+        vdiv = Divider(vertical=True)
+        vdiv.setFixedHeight(59)
+        srow.addWidget(vdiv, 0, Qt.AlignmentFlag.AlignTop)
+        srow.addSpacing(12)
+        self.workload = WorkloadSummary(WORKLOAD_HELP)
+        srow.addWidget(self.workload, 1)
         sl.addLayout(srow)
-        pl.addWidget(sum_w)
-        self.empty = EmptyState("Start by selecting elements",
-                                "Click elements in the periodic table to set their ranges.",
-                                art="magnifier")
-        self.stack = QStackedWidget()
-        self.stack.addWidget(self.empty)
-        self.stack.addWidget(self.page)
-        root.addWidget(self.stack, 1)
-        # Pre-flight count: debounced, computed on a background thread (count_space never
-        # materialises a composition; at.% is an exact DP, ratio a bounded walk), latest-wins.
+        root.addWidget(sum_w)
+        # Pre-flight count: debounced, computed on a background thread (count_space never materialises a
+        # composition; at.% / wt.% are an exact DP, ratio / mass a bounded walk), latest-wins.
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(COUNT_DEBOUNCE_MS)
@@ -769,65 +947,88 @@ class SweepView(QWidget):
         self._counter.done.connect(self._show_summary)
         self._counter.failed.connect(self._summary_failed)
         self.summary_data = None
+        self.counting = False
         self._refresh_sizes()
+        self._show_workload(None)
+        self._sync_enabled()
 
     # -- elements
     def set_elements(self, elements: list[str]):
         for el in list(self.rows):
             if el not in elements:
                 row = self.rows.pop(el)
-                row.setParent(None)
-                row.deleteLater()
+                if self.element_error and self.element_error[0] is row:
+                    self.element_error = None
+                retire(row)
         for el in elements:
             if el not in self.rows:
                 row = SweepRow(el)
                 self.grid.apply(row)
-                if self.unit == "ratio":
-                    row.min.setText("1.0")
-                    row.max.setText("1.0")
-                    row.step.setText("0.1")
-                else:
-                    row.min.setText("0")
-                    row.max.setText("100")
-                    row.step.setText("10")
+                row.set_values(RANGE_DEFAULTS[self.unit])
                 for f in (row.min, row.max, row.step):
-                    f.textEdited.connect(lambda _t: self._edited())
+                    f.textEdited.connect(lambda _t, fld=f: (fld.set_invalid(False), self._edited()))
                 row.lock.toggled.connect(lambda _c: self._edited())
+                row.el.editingFinished.connect(lambda r=row: self._element_edited(r))
                 self.rows[el] = row
                 self.rows_widget.insert(row)
-        for i, el in enumerate(elements):
-            self.rows_widget.lay.removeWidget(self.rows[el])
-            self.rows_widget.lay.insertWidget(i, self.rows[el])
+        self.rows_widget.order([self.rows[el] for el in elements])
         self.rows = {el: self.rows[el] for el in elements}
-        self.stack.setCurrentIndex(1 if elements else 0)
+        self.rows_stack.setCurrentIndex(1 if elements else 0)
         self._refresh_sizes()
+        self._sync_enabled()
         self._edited()
 
+    def _element_edited(self, row: SweepRow):
+        others = {e for e in self.rows if e != row.element}
+        new, error = check_symbol(row.el.text(), self.data, others, row.element)
+        if error:
+            row.el.set_invalid(True, error)
+            self.element_error = (row, error)
+            self.changed.emit()
+            return
+        row.el.set_invalid(False)
+        self.element_error = None
+        if new != row.element:
+            self.element_renamed.emit(row.element, new)
+        self.changed.emit()
+
+    def rename(self, old: str, new: str, order: list[str]) -> None:
+        """Replace ``old`` by ``new`` keeping the row's range and lock (row identity follows the symbol)."""
+        row = self.rows.pop(old, None)
+        if row is None:
+            self.set_elements(order)
+            return
+        row.element = new
+        row.el.setText(new)
+        for f, name in ((row.min, "Min"), (row.max, "Max"), (row.step, "Step")):
+            f.setAccessibleName(f"{new} {name}")
+        row.lock.setAccessibleName(f"{new} required")
+        self.rows[new] = row
+        self.set_elements(order)
+
     def set_unit(self, unit: str):
+        """Range basis (at. ratio / at.% / wt.% / mass): new defaults for every row, recounted."""
         if unit == self.unit:
             return
         self.unit = unit
         for row in self.rows.values():
-            if unit == "ratio":
-                row.min.setText("1.0"), row.max.setText("1.0"), row.step.setText("0.1")
-            else:
-                row.min.setText("0"), row.max.setText("100"), row.step.setText("10")
+            row.set_values(RANGE_DEFAULTS[unit])
         self._edited()
 
     def _refresh_sizes(self):
         n = len(self.rows)
-        cur = self.size_box.currentData()
-        self.size_box.blockSignals(True)
-        self.size_box.clear()
-        self.size_box.addItem("System size", None)
-        for k in range(2, n + 1):
-            self.size_box.addItem(f"{k} elements", k)
-        idx = self.size_box.findData(cur) if cur is not None else 0
-        self.size_box.setCurrentIndex(max(idx, 0))
-        self.size_box.blockSignals(False)
+        sel = tuple(k for k in self.size_box.selected if k <= n)
+        self.size_box.set_options([(k, str(k)) for k in range(2, n + 1)], sel)
+
+    def _sync_enabled(self):
+        has = bool(self.rows)
+        for w in (self.all_min, self.all_max, self.all_step, self.all_lock, self.size_box):
+            w.setEnabled(has)
 
     def _edited(self):
         self._sync_all_row()
+        self.range_error = None
+        self.counting = bool(self.rows)
         self.changed.emit()
         self._timer.start()
 
@@ -837,7 +1038,8 @@ class SweepView(QWidget):
             vals = {getattr(r, attr).text().strip() for r in rows}
             if not fld.hasFocus():
                 fld.clear()
-                fld.setPlaceholderText((vals.pop() if len(vals) == 1 else "Mixed") if rows else "")
+                fld.setPlaceholderText((vals.pop() if len(vals) == 1 else "Mixed") if rows else
+                                       {"min": "Min", "max": "Max", "step": "Step"}[attr])
         locks = {r.lock.isChecked() for r in rows}
         self.all_lock.mixed = len(locks) > 1
         self.all_lock.blockSignals(True)
@@ -848,13 +1050,16 @@ class SweepView(QWidget):
     def _apply_all(self, attr: str, fld: Field):
         text = fld.text().strip()
         if not text:
+            fld.set_invalid(False)
             return
         if C.parse_number(text) is None:
-            fld.set_invalid(True, "Enter a number")
+            fld.set_invalid(True, f"All {attr}: enter a number")
+            self.changed.emit()
             return
         fld.set_invalid(False)
         for r in self.rows.values():
             getattr(r, attr).setText(text)
+            getattr(r, attr).set_invalid(False)
         self._edited()
 
     def _apply_all_lock(self):
@@ -872,24 +1077,33 @@ class SweepView(QWidget):
         out = []
         for el, row in self.rows.items():
             vals = []
-            for f in (row.min, row.max, row.step):
+            for f, name in ((row.min, "Min"), (row.max, "Max"), (row.step, "Step")):
                 v = f.number()
-                f.set_invalid(v is None, "Enter a number")
+                f.set_invalid(v is None, f"{el}: {name} is missing or invalid")
                 vals.append(v)
             if None in vals:
-                raise RangeError(f"{el}: enter Min, Max and Step.")
-            out.append(SweepSpec(el, vals[0], vals[1], vals[2], row.lock.isChecked()))
+                raise RangeError("Missing range values")
+            spec = SweepSpec(el, vals[0], vals[1], vals[2], row.lock.isChecked())
+            try:
+                spec.as_range().validate()
+            except RangeError as exc:
+                bad = row.max if "Max" in str(exc) else row.step if "Step" in str(exc) else row.min
+                bad.set_invalid(True, str(exc))
+                raise
+            out.append(spec)
         return out
 
     def sizes(self):
-        k = self.size_box.currentData()
-        return {k} if k else None
+        sel = self.size_box.selected
+        return set(sel) if sel else None
 
     def _update_summary(self):
         if not self.rows:
             self._counter.cancel()
-            self.summary.setText("")
             self.summary_data = None
+            self.counting = False
+            self._show_workload(None)
+            self.changed.emit()
             return
         try:
             specs, sizes = self.specs(), self.sizes()
@@ -897,43 +1111,89 @@ class SweepView(QWidget):
             self._counter.cancel()
             self._summary_failed(exc)
             return
-        if self.unit == "at":
+        self.counting = True
+        self.changed.emit()
+        unit = self.unit
+        if unit in SUM_UNITS:
             # exact bounded-knapsack DP: microseconds to milliseconds
-            self._counter.run(lambda cancelled=None: summarize_space(specs, "at", sizes, limit=SWEEP_LIMIT,
+            self._counter.run(lambda cancelled=None: summarize_space(specs, unit, sizes, limit=SWEEP_LIMIT,
                                                                      cancelled=cancelled))
         else:
-            # ratio spaces may need a duplicate-removing walk of up to ~10^6 tuples: worker process
-            recipe = SweepRecipe(tuple(specs), "ratio", frozenset(sizes) if sizes else None, SWEEP_LIMIT)
+            # ratio / mass spaces may need a duplicate-removing walk of up to ~10^6 tuples: worker process
+            recipe = SweepRecipe(tuple(specs), unit, frozenset(sizes) if sizes else None, SWEEP_LIMIT)
             if recipe.estimate() <= HEAVY_THRESHOLD:
-                self._counter.run(lambda cancelled=None: summarize_space(specs, "ratio", sizes, limit=SWEEP_LIMIT,
+                self._counter.run(lambda cancelled=None: summarize_space(specs, unit, sizes, limit=SWEEP_LIMIT,
                                                                          cancelled=cancelled))
             else:
-                self._counter.run_heavy(summarize_space, specs, "ratio", sizes, SWEEP_LIMIT)
+                self._counter.run_heavy(summarize_space, specs, unit, sizes, SWEEP_LIMIT)
 
     def _summary_failed(self, exc):
-        self.summary.setText(f"<span style='color:{t('text-error')}'>{exc}</span>")
         self.summary_data = None
+        self.counting = False
+        self.range_error = str(exc) or "Invalid ranges"
+        self._show_workload(None)
+        self.changed.emit()
 
     def _show_summary(self, s):
         self.summary_data = s
-        sep = f"<span style='color:{t('text-helper')}'> | </span>"
-        line1 = f"{s.selected} selected{sep}{s.required} required{sep}{s.optional} optional"
-        comp = f"more than {SWEEP_LIMIT:,}" if s.truncated else f"{s.compositions:,}"
-        color = t("text-error") if s.truncated or s.compositions == 0 else t("text-primary")
-        line2 = (f"{s.systems} combination{'s' if s.systems != 1 else ''}{sep}"
-                 f"<span style='color:{color}'>{comp} valid composition{'s' if s.compositions != 1 else ''}</span>")
-        # The tier and the measured estimates live in the tooltip: the summary row has no room for
-        # another phrase (the System size select shares it), and Composition setup is not redesigned here.
-        _tier, tip = size_note(s.compositions if not s.truncated else SWEEP_LIMIT + 1, self.workers())
-        self.summary.setToolTip(tip if s.compositions else "")
-        self.summary.setText(f"{line1}<br>{line2}")
+        self.counting = False
+        self.range_error = None
+        self._show_workload(s)
+        self.changed.emit()
+
+    def _show_workload(self, s):
+        if s is None:
+            self.workload.set_values(f"<span style='color:{t('text-secondary')}'>—</span>"
+                                     "<span style='font-size:12px'> valid compositions</span>", "", "")
+            return
+        n = SWEEP_LIMIT + 1 if s.truncated else s.compositions
+        est = estimate(n, self.workers())
+        count = f"&gt;{SWEEP_LIMIT:,}" if s.truncated else f"{s.compositions:,}"
+        color = t("text-error") if s.truncated or not s.compositions else t("text-primary")
+        self.workload.set_values(f"<span style='color:{color}; font-weight:600; font-size:14px'>{count}</span>"
+                                 f"<span style='font-size:12px'> valid composition"
+                                 f"{'s' if s.compositions != 1 else ''}</span>",
+                                 fmt_short_duration(est.seconds), fmt_short_bytes(est.bytes))
 
     def workers(self) -> int:
         svc = getattr(self.window(), "jobs", None)
         return getattr(svc, "workers", 1)
 
+    # -- status (footer)
+    def status(self) -> Status | None:
+        if not self.rows:
+            return None
+        if self.element_error:
+            return Status("error", self.element_error[1])
+        bad = [f for row in self.rows.values() for f in (row.min, row.max, row.step) if f.error]
+        if self.range_error or bad:
+            if bad and all("missing or invalid" in f.error for f in bad):
+                return Status("error", "Missing range values")
+            msg = bad[0].error if bad else self.range_error
+            return Status("error", msg.rstrip("."))
+        if len(self.rows) < 2:
+            return Status("info", "Select at least two elements")
+        if self.counting or self._timer.isActive():
+            return Status("loading", "Updating…")
+        s = self.summary_data
+        if s is None:
+            return None
+        if s.truncated:
+            return Status("error", "Workload too large",
+                          capacity_problem(SWEEP_LIMIT + 1, None), "Workload too large")
+        if not s.compositions:
+            hint = " - values must sum to 100 %" if self.unit in SUM_UNITS else ""
+            return Status("error", "No valid compositions" + hint)
+        if s.compositions >= LARGE:
+            _tier, tip = size_note(s.compositions, self.workers())
+            return Status("info", "Large workload", [tip, "<a href='help://workload'>About workload estimates</a>"],
+                          "Large workload")
+        return None
+
     def can_calculate(self) -> bool:
-        return len(self.rows) >= 2
+        st = self.status()
+        return len(self.rows) >= 2 and self.summary_data is not None and (st is None or not st.blocking) \
+            and not (st is not None and st.kind == "loading")
 
     def compositions(self):
         names, comps = self.recipe()()[1:3]
@@ -946,7 +1206,7 @@ class SweepView(QWidget):
         specs, sizes, unit = self.specs(), self.sizes(), self.unit
         s = self.summary_data
         recipe = SweepRecipe(tuple(specs), unit, frozenset(sizes) if sizes else None, SWEEP_LIMIT)
-        if unit == "at":
+        if unit in SUM_UNITS:
             n = recipe.estimate()                    # exact (DP, < 1 ms), whatever the summary shows
             if n > SWEEP_LIMIT:
                 raise RangeError(capacity_problem(n, None))
@@ -956,10 +1216,7 @@ class SweepView(QWidget):
 
     def clear(self):
         for row in self.rows.values():
-            if self.unit == "ratio":
-                row.min.setText("1.0"), row.max.setText("1.0"), row.step.setText("0.1")
-            else:
-                row.min.setText("0"), row.max.setText("100"), row.step.setText("10")
+            row.set_values(RANGE_DEFAULTS[self.unit])
             row.lock.setChecked(True)
         self._edited()
 
@@ -995,15 +1252,16 @@ EXPRESSION_HELP = (
     "<i>Ti{0.1*k}</i>, <i>Mo_(1-y)</i>.<br>"
     "Groups (…) are normalised: (FeCoNi)90Al10 = 30/30/30/10 at.%.<br>"
     "Use braces when a variable would merge with a symbol: B{a}.<br>"
-    "Enter one expression per block; separate blocks with a blank line."
+    "Enter one expression per block; separate blocks with a blank line.<br>"
+    "<a href='help://expression-syntax'>Expression syntax reference</a>"
 )
 
 
 class ExpressionView(QWidget):
-    grid = ColumnGrid()
-    """Expression mode (Figma 256:38340): multi-block expression text area, detected variables with
-    Min / Max / Step, live count of valid compositions."""
+    """Composition expression (Figma "_Composition setup Composition expression bases" 392:65835): multi-block
+    expression text area, detected variables with Min / Max / Step, live count of valid compositions."""
 
+    grid = ColumnGrid()
     changed = Signal()
     elements_parsed = Signal(list)
     message = Signal(str, str)
@@ -1015,6 +1273,10 @@ class ExpressionView(QWidget):
         self.expressions: list = []
         self.var_rows: dict[str, VariableRow] = {}
         self._remembered: dict[str, tuple[str, str, str]] = {}
+        self.parse_error: str | None = None
+        self.range_error: str | None = None
+        self.counting = False
+        self.count_data = None
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 14, 20, 0)
         root.setSpacing(0)
@@ -1035,6 +1297,7 @@ class ExpressionView(QWidget):
         self.edit.setAccessibleName("Composition expression")
         carbon_context_menu(self.edit)
         self.edit.textChanged.connect(self._dirty)
+        from .common import IconButton
         self.preview_btn = IconButton("data_table", "Preview generated compositions", self.edit)
         self.preview_btn.clicked.connect(self.preview_requested.emit)
         self.edit.installEventFilter(self)
@@ -1061,14 +1324,11 @@ class ExpressionView(QWidget):
         root.addWidget(self.var_header)
         self.rows_widget = _Rows(margin=0)
         self.scroll = scroll_wrap(self.rows_widget)
-        # One variable row is the least it needs; QScrollArea's own minimum hint (76 px) made the
-        # view taller than the panel once the helper wrapped (Windows 150 %), and the layout then
-        # overlapped the helper with the expression field.
         self.scroll.setMinimumHeight(ROW_H)
         root.addWidget(self.scroll, 1)
         self.summary = QLabel("")
         self.summary.setTextFormat(Qt.TextFormat.RichText)
-        self.summary.setFixedHeight(48)
+        self.summary.setFixedHeight(40)
         root.addWidget(self.summary)
         self._parse_timer = QTimer(self)
         self._parse_timer.setSingleShot(True)
@@ -1092,23 +1352,26 @@ class ExpressionView(QWidget):
         return False
 
     def _fit_helper(self):
-        # On a narrow panel (Windows 150 %) the helper wraps to two lines; reserve that height, or the
-        # layout keeps a one-line box and the second line is drawn over the field above it.
         w = self.edit.width()
         if w > 0:
             self.helper.setMinimumHeight(self.helper.heightForWidth(w))
 
     def _dirty(self):
         self._parse_timer.start()
+        self.counting = bool(self.text().strip())
         self.changed.emit()
 
     def text(self) -> str:
         return self.edit.toPlainText()
 
     def parse(self) -> bool:
+        self._parse_timer.stop()
         if not self.text().strip():
             self.expressions = []
-            self._set_invalid(False)
+            self.parse_error = None
+            self.counting = False
+            self.count_data = None
+            self._set_state(None)
             self.helper.setText(HELPER_TEXT)
             self._fit_helper()
             self._set_variables([])
@@ -1119,7 +1382,11 @@ class ExpressionView(QWidget):
             exprs = parse_blocks(self.text(), self.data)
         except ExpressionError as exc:
             self.expressions = []
-            self._set_invalid(True)
+            self.parse_error = str(exc)
+            self.counting = False
+            self.count_data = None
+            self._set_state("invalid")
+            # the per-expression detail stays under the field (Figma: block number, text, reason)
             self.helper.setText(f"<span style='color:{t('text-error')}'>{exc}</span>")
             self._fit_helper()
             self._set_variables([])
@@ -1127,7 +1394,8 @@ class ExpressionView(QWidget):
             self.changed.emit()
             return False
         self.expressions = exprs
-        self._set_invalid(False)
+        self.parse_error = None
+        self._set_state("valid")
         els: list[str] = []
         for ex in exprs:
             _collect_elements(ex.items, els)
@@ -1141,18 +1409,18 @@ class ExpressionView(QWidget):
         self._preview()
         return True
 
-    def _set_invalid(self, bad: bool):
-        if bool(self.edit.property("invalid")) != bad:
-            self.edit.setProperty("invalid", bad)
-            refresh_style(self.edit)
+    def _set_state(self, state: str | None):
+        for prop, on in (("invalid", state == "invalid"), ("valid", state == "valid")):
+            if bool(self.edit.property(prop)) != on:
+                self.edit.setProperty(prop, on)
+                refresh_style(self.edit)
 
     def _set_variables(self, names: list[str]):
         if list(self.var_rows) == names:
             return
         for name, row in list(self.var_rows.items()):
             self._remembered[name] = (row.min.text(), row.max.text(), row.step.text())
-            row.setParent(None)
-            row.deleteLater()
+            retire(row)
         self.var_rows = {}
         for name in names:
             row = VariableRow(name)
@@ -1162,23 +1430,28 @@ class ExpressionView(QWidget):
             row.max.setText(mx)
             row.step.setText(st)
             for f in (row.min, row.max, row.step):
-                f.textEdited.connect(lambda _t: (self.changed.emit(), self._count_timer.start()))
+                f.textEdited.connect(lambda _t, fld=f: (fld.set_invalid(False), self._ranges_edited()))
             self.var_rows[name] = row
             self.rows_widget.insert(row)
         has = bool(names)
         self.var_header.setVisible(has)
         self.scroll.setVisible(has)
 
+    def _ranges_edited(self):
+        self.counting = True
+        self.changed.emit()
+        self._count_timer.start()
+
     def ranges(self) -> dict[str, VariableRange]:
         out = {}
         for name, row in self.var_rows.items():
             vals = []
-            for f in (row.min, row.max, row.step):
+            for f, label in ((row.min, "Min"), (row.max, "Max"), (row.step, "Step")):
                 v = f.number()
-                f.set_invalid(v is None, "Enter a number")
+                f.set_invalid(v is None, f"{name}: {label} is missing or invalid")
                 vals.append(v)
             if None in vals:
-                raise RangeError(f"{name}: enter Min, Max and Step.")
+                raise RangeError("Missing range values")
             out[name] = VariableRange(name, *vals)
         return out
 
@@ -1192,16 +1465,21 @@ class ExpressionView(QWidget):
         if not self.expressions:
             self._counter.cancel()
             self.summary.setText("")
+            self.counting = False
+            self.changed.emit()
             return
+        self.range_error = None
         try:
             exprs, ranges = list(self.expressions), self.ranges()
             n = count_combinations(exprs, ranges)
             if n > MAX_COMBINATIONS:
-                raise RangeError(f"{n:,} combinations exceed the limit of {MAX_COMBINATIONS:,}; increase the steps.")
+                raise RangeError(f"{n:,} combinations exceed the limit of {MAX_COMBINATIONS:,}; increase the steps")
         except (RangeError, ExpressionError) as exc:
             self._counter.cancel()
             self._preview_failed(exc)
             return
+        self.counting = True
+        self.changed.emit()
         if n <= HEAVY_THRESHOLD:
             self._counter.run(lambda cancelled=None: generate_blocks(exprs, ranges, cancelled=cancelled))
         else:
@@ -1210,10 +1488,16 @@ class ExpressionView(QWidget):
     def _preview_failed(self, exc):
         if isinstance(exc, GenerationCancelled):
             return
-        self.summary.setText(f"<span style='color:{t('text-error')}'>{exc}</span>")
+        self.counting = False
+        self.count_data = None
+        self.range_error = str(exc)
+        self.summary.setText("")
+        self.changed.emit()
 
     def _show_preview(self, b):
         n = len(b.compositions) if hasattr(b, "compositions") else b.count
+        self.counting = False
+        self.count_data = (n, b.skipped, b.duplicates)
         extra = []
         if b.skipped:
             extra.append(f"{b.skipped:,} skipped")
@@ -1221,17 +1505,45 @@ class ExpressionView(QWidget):
             extra.append(f"{b.duplicates:,} duplicate{'s' if b.duplicates != 1 else ''}")
         blocks, els, names = self.detected
         sep = f"<span style='color:{t('text-helper')}'> | </span>"
-        svc = getattr(self.window(), "jobs", None)
-        _tier, tip = size_note(n, getattr(svc, "workers", 1))
-        self.summary.setText(f"{blocks} block{'s' if blocks != 1 else ''}{sep}{len(els)} elements{sep}"
-                             f"{len(names)} variable{'s' if len(names) != 1 else ''}<br>"
-                             f"<b>{n:,}</b> valid composition{'s' if n != 1 else ''}"
-                             + (sep + ", ".join(extra) if extra else ""))
-        skipped = "Skipped: variable values giving negative amounts or fewer than two elements. " if b.skipped else ""
-        self.summary.setToolTip((skipped + tip) if n else skipped.strip())
+        self.summary.setText(f"<span style='font-size:12px; color:{t('text-secondary')}'>{blocks} block"
+                             f"{'s' if blocks != 1 else ''}{sep}{len(els)} elements{sep}"
+                             f"{len(names)} variable{'s' if len(names) != 1 else ''}</span><br>"
+                             f"<b>{n:,}</b> <span style='font-size:12px'>valid composition{'s' if n != 1 else ''}"
+                             + (sep + ", ".join(extra) if extra else "") + "</span>")
+        self.changed.emit()
+
+    def status(self) -> Status | None:
+        if not self.text().strip():
+            return None
+        if self._parse_timer.isActive():
+            return Status("loading", "Updating…")
+        if self.parse_error:
+            return Status("error", "Invalid expression")
+        bad = [f for row in self.var_rows.values() for f in (row.min, row.max, row.step) if f.error]
+        if bad:
+            return Status("error", "Missing range values" if all("missing" in f.error for f in bad)
+                          else bad[0].error)
+        if self.range_error:
+            return Status("error", self.range_error.rstrip("."))
+        if self.counting or self._count_timer.isActive():
+            return Status("loading", "Updating…")
+        if self.count_data is not None:
+            n, skipped, _dups = self.count_data
+            if not n:
+                return Status("error", "No valid compositions")
+            if n >= LARGE:
+                svc = getattr(self.window(), "jobs", None)
+                _tier, tip = size_note(n, getattr(svc, "workers", 1))
+                return Status("info", "Large workload", [tip, "<a href='help://workload'>About workload "
+                                                              "estimates</a>"], "Large workload")
+            if skipped:
+                return Status("info", f"{skipped:,} combination{'s' if skipped != 1 else ''} skipped",
+                              "Skipped: variable values giving negative amounts or fewer than two elements.")
+        return None
 
     def can_calculate(self) -> bool:
-        return bool(self.text().strip())
+        st = self.status()
+        return bool(self.text().strip()) and (st is None or (not st.blocking and st.kind != "loading"))
 
     def compositions(self):
         return self.recipe()()[1:]
@@ -1263,6 +1575,7 @@ class ExpressionView(QWidget):
 
     def clear(self):
         self.edit.clear()
+        self.count_data = None
         self.parse()
 
 
@@ -1283,33 +1596,35 @@ class CompositionPanel(Panel):
     elements_changed = Signal(list)                       # elements chosen inside the panel
     message = Signal(str, str)
     copy_compositions = Signal(str)                       # TSV of generated compositions
+    copy_text = Signal(str, str)                          # TSV, description (Single: Copy table)
     mode_changed = Signal(str)                            # "single" | "sweep" | "expression"
+    cancel_requested = Signal()
+    total_mass_committed = Signal(float)
 
     MODES = ("single", "sweep", "expression")
 
-    def __init__(self, datasets: Datasets, parent=None):
-        super().__init__("Composition setup", parent)
+    def __init__(self, datasets: Datasets, parent=None, engine=None):
+        super().__init__(MODE_TITLES["single"], parent)
         self.data = datasets
+        self.engine = engine
+        self._coverage_cache: dict[frozenset, dict] = {}
         self.title_holder.setFixedHeight(55)
-        self.unit_box = QComboBox()
-        self.unit_box.addItem("At. ratio", "ratio")
-        self.unit_box.addItem("at.%", "at")
-        self.unit_box.setAccessibleName("Range unit")
-        self.unit_box.setToolTip("Unit of the Min / Max / Step values")
-        self.unit_box.setFixedWidth(104)
+        # Range basis (Figma: an inline dropdown at x 229, 12 px before the mode switcher; Composition space only)
+        self.unit_box = Dropdown(RANGE_BASES, "ratio", inline=True, accessible="Range basis")
+        self.unit_box.setFixedWidth(self.unit_box.width_for_items())     # the widest basis never clips
+        self.unit_box.setToolTip("Range basis of Min / Max / Step")
         self.unit_box.hide()
         self.title_row.addWidget(self.unit_box)
-        self.unit_gap = QSpacerItem(16, 1, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
-        self.title_row.addSpacerItem(self.unit_gap)
-        self.switcher = IconContentSwitcher([("mode_single", "Single composition"),
-                                             ("mode_sweep", "Composition sweep"),
-                                             ("mode_expression", "Expression mode")])
+        self.title_row.addSpacing(12)
+        self.switcher = IconContentSwitcher([("mode_single", MODE_TITLES["single"]),
+                                             ("mode_sweep", MODE_TITLES["sweep"]),
+                                             ("mode_expression", MODE_TITLES["expression"])])
         self.title_row.addWidget(self.switcher)
         self.title_row.setContentsMargins(20, 0, 18, 0)
         self.root.addWidget(Divider())
         self.stack = QStackedWidget()
         self.single = SingleView(datasets)
-        self.sweep = SweepView()
+        self.sweep = SweepView(datasets)
         self.expr = ExpressionView(datasets)
         for v in (self.single, self.sweep, self.expr):
             self.stack.addWidget(v)
@@ -1319,70 +1634,47 @@ class CompositionPanel(Panel):
         self.expr.elements_parsed.connect(self.elements_changed.emit)
         self.expr.preview_requested.connect(self.preview_expression)
         self.single.element_renamed.connect(self._renamed)
-        self.unit_box.currentIndexChanged.connect(lambda _i: self.sweep.set_unit(self.unit_box.currentData()))
+        self.sweep.element_renamed.connect(self._renamed)
+        self.single.total_mass_committed.connect(self.total_mass_committed.emit)
+        self.unit_box.changed.connect(lambda v: self.sweep.set_unit(v))
 
-        # footer toolbar (Figma 278:30201, 40 px, top border); visible actions depend on the mode
-        bar = QWidget()
-        bar.setFixedHeight(40)
-        bl = QHBoxLayout(bar)
-        bl.setContentsMargins(0, 0, 0, 0)
-        bl.setSpacing(0)
-        self.clear_btn = button("Clear", "danger-ghost", "md")
-        self.normalize_btn = button("Normalize", "ghost", "md")
-        self.equal_btn = button("Set equal", "ghost", "md")
-        self.copy_btn = button("Copy table", "ghost", "md")
-        self.calc_btn = button("Calculate", "primary", "md")
-        self.calc_btn.setFixedWidth(141)
-        bl.addWidget(self.clear_btn)
-        bl.addStretch(1)
-        for b in (self.normalize_btn, self.equal_btn, self.copy_btn, self.calc_btn):
-            bl.addWidget(b)
-        self.root.addWidget(Divider())
-        self.root.addWidget(bar)
-        self.clear_btn.clicked.connect(self.clear)
-        self.normalize_btn.clicked.connect(self._normalize)
-        self.equal_btn.clicked.connect(self._set_equal)
-        self.copy_btn.clicked.connect(self._copy_compositions)
+        # footer (Figma: 32 px, status | Clear | Calculate [▾])
+        self.footer = CompositionFooter()
+        self.root.addWidget(self.footer)
+        self.clear_btn = self.footer.clear_btn
+        self.calc_btn = self.footer.calc_btn
+        self.clear_btn.clicked.connect(self._clear_or_cancel)
         self.calc_btn.clicked.connect(self.calculate)
         self.switcher.changed.connect(self.set_mode)
-        for b in (self.clear_btn, self.normalize_btn, self.equal_btn, self.copy_btn, self.calc_btn):
-            b.setProperty("tip_align", "bottom")
-        self.normalize_btn.setToolTip("Scale at.% or wt.% values to sum to 100 %")
-        self.equal_btn.setToolTip("Equal values in the active input column")
-        self.copy_btn.setToolTip("Copy the generated compositions (tab-separated)")
-        self.setMinimumWidth(COMPOSITION_PANEL_MIN)
+        self.setFixedWidth(COMPOSITION_PANEL_WIDTH)      # not responsive: the Figma component's width
         self.grid = ColumnGrid()
         for v in (self.single, self.sweep, self.expr):
             v.grid = self.grid
         self._elements: list[str] = []
         self.service = None
+        self._calculating = False
         self.set_mode(0)
 
     CALC_WIDTH = 141
-    UNIT_WIDTH = 104
-    CALC_WIDTH_MIN = 112
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
         if self.grid.set_panel_width(self.width()):
             self.grid.apply(self)
-        self.calc_btn.setFixedWidth(max(self.CALC_WIDTH_MIN,
-                                        self.CALC_WIDTH - max(0, ColumnGrid.DESIGN_PANEL - self.width())))
-        # sweep header: the 104 px unit select gives up to 8 px so the title is never clipped
-        self.unit_box.setFixedWidth(self.UNIT_WIDTH - min(8, max(0, ColumnGrid.DESIGN_PANEL - self.width())))
-        gap = 16 - min(8, max(0, ColumnGrid.DESIGN_PANEL - self.width()) // 4)
-        if self.unit_gap.sizeHint().width() != gap:
-            self.unit_gap.changeSize(gap, 1, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
-            self.title_row.invalidate()
 
     @property
     def mode(self) -> str:
         return self.MODES[self.stack.currentIndex()]
 
+    def view(self):
+        return self.stack.currentWidget()
+
     def set_mode(self, i: int):
         self.stack.setCurrentIndex(i)
         self.switcher.set_index(i)
+        self.title.setText(MODE_TITLES[self.mode])          # the panel title names the mode
         self.unit_box.setVisible(self.mode == "sweep")
+        self.footer.set_split(self.mode != "sweep")
         self.mode_changed.emit(self.mode)
         if self.mode != "expression":
             self.elements_changed.emit(self._elements)
@@ -1415,11 +1707,20 @@ class CompositionPanel(Panel):
         self.set_elements(self._elements)
 
     def _renamed(self, old: str, new: str):
+        """An element symbol typed in Single or Space: one rename for both tables, the periodic table and the
+        model-support state (row identity follows the symbol; values and locks are kept)."""
         order = [new if e == old else e for e in self._elements]
         self._elements = order
-        self.single.rename(old, new, order)
-        self.sweep.set_elements(order)
+        if old in self.single.rows:
+            self.single.rename(old, new, order)
+        else:
+            self.single.set_elements(order)
+        self.sweep.rename(old, new, order)
         self.elements_changed.emit(order)
+        self._update_actions()
+
+    def set_total_mass(self, grams: float) -> None:
+        self.single.set_total_mass(grams)
 
     def set_service(self, service) -> None:
         """The calculation service whose worker processes run heavy pre-flight work."""
@@ -1428,32 +1729,63 @@ class CompositionPanel(Panel):
         self.expr._counter.service = service
 
     def set_calculating(self, running: bool):
-        """While a batch job runs, Calculate shows the busy state (Cancel lives in the progress bar)."""
+        """State=Calculating: Cancel + inline "Calculating…" in the footer; progress is in the shell header."""
         self._calculating = running
-        self.calc_btn.setText("Calculating…" if running else "Calculate")
+        self.footer.set_running(running)
         self._update_actions()
+
+    # ---------------------------------------------------------------- status / actions
+    def coverage(self, elements) -> dict:
+        els = frozenset(elements)
+        if self.engine is None or len(els) < 2:
+            return {}
+        cov = self._coverage_cache.get(els)
+        if cov is None:
+            if len(self._coverage_cache) > 256:
+                self._coverage_cache.clear()
+            cov = self._coverage_cache[els] = self.engine.model_coverage(list(elements))
+        return cov
+
+    def current_elements(self) -> list[str]:
+        if self.mode == "expression":
+            return list(self.expr.detected[1]) if self.expr.expressions else []
+        return list(self._elements)
+
+    def status(self) -> Status | None:
+        st = self.view().status()
+        if st is None:
+            cov = coverage_status(self.coverage(self.current_elements()))
+            if cov is not None:
+                return cov
+            if self.mode != "single" and self.view().can_calculate():
+                return Status("ready", "Ready")
+        return st
 
     def _update_actions(self):
         m = self.mode
-        self.normalize_btn.setVisible(m == "single")
-        self.equal_btn.setVisible(m == "single")
-        self.copy_btn.setVisible(m == "expression")
+        v = self.view()
+        self.footer.status.set_status(self.status())
         if m == "single":
             has = bool(self._elements)
-            self.normalize_btn.setEnabled(self.single.can_normalise())
-            self.equal_btn.setEnabled(self.single.can_set_equal())
-            self.clear_btn.setEnabled(has)
-            self.calc_btn.setEnabled(len(self._elements) >= 2)
+            self.footer.calc.set_actions([("Normalize", self._normalize, self.single.can_normalise(), None),
+                                          ("Set equal", self._set_equal, self.single.can_set_equal(), None),
+                                          ("-", None, False, None),
+                                          ("Copy table", self._copy_single, has, "copy")])
+            self.clear_btn.setEnabled(has or self._calculating)
         elif m == "sweep":
-            self.clear_btn.setEnabled(bool(self._elements))
-            self.calc_btn.setEnabled(self.sweep.can_calculate())
+            self.clear_btn.setEnabled(bool(self._elements) or self._calculating)
         else:
-            has = self.expr.can_calculate()
-            self.clear_btn.setEnabled(has)
-            self.copy_btn.setEnabled(has)
-            self.calc_btn.setEnabled(has)
-        if getattr(self, "_calculating", False):
-            self.calc_btn.setEnabled(False)
+            has = bool(self.expr.text().strip())
+            self.footer.calc.set_actions([("Copy table", self._copy_compositions, self.expr.can_calculate(),
+                                           "copy")])
+            self.clear_btn.setEnabled(has or self._calculating)
+        self.calc_btn.setEnabled(v.can_calculate() and not self._calculating)
+
+    def _clear_or_cancel(self):
+        if self._calculating:
+            self.cancel_requested.emit()
+            return
+        self.clear()
 
     def _normalize(self):
         if self.mode == "single":
@@ -1462,6 +1794,9 @@ class CompositionPanel(Panel):
     def _set_equal(self):
         if self.mode == "single":
             self.single.set_equal()
+
+    def _copy_single(self):
+        self.copy_text.emit(self.single.table_tsv(), "composition table")
 
     def _generated_tsv(self, generated=None) -> str:
         names, comps, _envs = generated or self.expr.compositions()
@@ -1497,10 +1832,10 @@ class CompositionPanel(Panel):
         from .dialogs import Modal
         dlg = Modal("Generated compositions", f"{total:,} valid", self, width=560)
         lst = QListWidget()
+        thin_scrollbars(lst)
         lst.addItems(lines)
         dlg.body.addWidget(lst, 1)
-        dlg.add_footer_button("Copy table", "secondary", lambda: self.copy_compositions.emit(tsv))
-        dlg.add_footer_button("Close", "primary", dlg.accept)
+        dlg.add_footer_button("Copy table", "primary", lambda: self.copy_compositions.emit(tsv))
         dlg.exec()
         dlg.deleteLater()
 
@@ -1521,7 +1856,7 @@ class CompositionPanel(Panel):
                 name, ratios = self.single.composition()
                 self.calculate_requested.emit("single", [name], [ratios], [{}])
             elif m == "sweep":
-                # generation happens in the calculation job, not here (it can be 200 000 rows)
+                # generation happens in the calculation job, not here (it can be millions of rows)
                 self.calculate_requested.emit("sweep", None, self.sweep.recipe(), None)
             else:
                 self.calculate_requested.emit("expression", None, self.expr.recipe(), None)

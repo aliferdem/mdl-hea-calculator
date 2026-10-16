@@ -29,23 +29,25 @@ PANEL_PADDING_X = 20
 TILE_SIZE = 29          # design tile; the periodic table shrinks it down to TILE_SIZE_MIN on narrow windows
 TILE_SIZE_MIN = 24
 TILE_GAP = 2
-ELEMENT_PANEL_WIDTH = 596
-# Approved Analysis layout (docs/analysis-redesign/ANALYSIS_RESPONSIVE_LAYOUT.md section 1): at the 1920 px
-# reference the Analysis panel is 805 px; the 18 px come from Composition setup (457 -> 439), so the periodic
-# table keeps its 29 px tiles.
-COMPOSITION_PANEL_WIDTH = 439
+# Current Figma frame DARK_MODE_FULLSCREEN (node 341:33323, 1920 px): Elements 578 · Composition setup 457 ·
+# Analysis 805, 20 px margins and gaps.
+ELEMENT_PANEL_WIDTH = 578
+# Composition setup is NOT responsive (product decision, release reconciliation): its geometry is the Figma
+# component's (instance 415:59801, 457 × 465) at every window width.  When the row cannot hold it next to the
+# periodic table and an 805 px Analysis, the main layout moves Analysis below the other two.
+COMPOSITION_PANEL_WIDTH = 457
 ANALYSIS_PANEL_WIDTH = 805
 DETAILS_PANEL_WIDTH = ANALYSIS_PANEL_WIDTH      # former name of the third panel's reference width
 TOP_ROW_HEIGHT = 465
 
-# Responsive upper row.  The 1920 px design frame (20 px margins and gaps) gives the reference widths
-# above; narrower windows compress the panels proportionally down to these minimums (at Windows 150 %
-# on a 2160 × 1440 display the client is 1440 logical px wide: 506 + 400 + 454 + 4 × 20 = 1440).
-# Wider windows give the extra width to Calculation details only - the periodic table and the
-# composition columns have nothing to show in extra width.
+# Responsive upper row.  Only the periodic table compresses (down to ELEMENT_PANEL_MIN); Composition setup is
+# fixed and Analysis keeps its 805 px preferred width in the wide row, so the wide row needs
+# 506 + 457 + 805 + 2 × 20 = 1808 px of content; below that Analysis is stacked under the first two panels
+# (full width).  Wider windows give the extra width to Analysis only.
 ELEMENT_PANEL_MIN = 506      # 18 tiles of TILE_SIZE_MIN + gaps, plus 2 × 20 px padding
-COMPOSITION_PANEL_MIN = 400
-DETAILS_PANEL_MIN = 454      # the five line tabs at compact padding, plus 2 × 20 px padding
+COMPOSITION_PANEL_MIN = COMPOSITION_PANEL_WIDTH
+DETAILS_PANEL_MIN = 454      # Analysis' own minimum (the five line tabs at compact padding + 2 × 20 px)
+ANALYSIS_WIDE_MIN = ANALYSIS_PANEL_WIDTH   # narrowest Analysis allowed beside the other two panels
 
 # ------------------------------------------------------------------ shape tokens (shared)
 # One corner radius for every *rounded* component (tooltip, toggletip, content switcher, focus ring of
@@ -102,6 +104,10 @@ DARK = {
     "support-info": "#4589ff",
     "status-green": "#24a148", "status-yellow": "#f1c21b", "status-red": "#fa4d56", "status-gray": "#8d8d8d",
     "status-inner": "#000000",
+    # Carbon g100 inverse tokens: content on the light inverse surface of tooltips / toggletips
+    "icon-inverse": "#161616", "link-inverse": "#0f62fe",
+    "support-success-inverse": "#24a148", "support-error-inverse": "#da1e28",
+    "support-warning-inverse": "#f1c21b", "support-info-inverse": "#0f62fe", "status-gray-inverse": "#6f6f6f",
     "overlay": "rgba(0, 0, 0, 0.65)", "shadow": "rgba(0, 0, 0, 0.8)",
     "switcher-selected": "#404040", "switcher-unselected": "#212121",
     # The selected row must not share the header's colour, and every row carries a 1 px top and
@@ -137,6 +143,10 @@ LIGHT = {
     "support-info": "#0043ce",
     "status-green": "#24a148", "status-yellow": "#f1c21b", "status-red": "#da1e28", "status-gray": "#8d8d8d",
     "status-inner": "#000000",
+    # Carbon g10 inverse tokens: content on the dark inverse surface of tooltips / toggletips
+    "icon-inverse": "#ffffff", "link-inverse": "#78a9ff",
+    "support-success-inverse": "#42be65", "support-error-inverse": "#fa4d56",
+    "support-warning-inverse": "#f1c21b", "support-info-inverse": "#4589ff", "status-gray-inverse": "#a8a8a8",
     "overlay": "rgba(22, 22, 22, 0.5)", "shadow": "rgba(0, 0, 0, 0.3)",
     "switcher-selected": "#ffffff", "switcher-unselected": "#e0e0e0",
     "row-hover": "#c6c6c6", "row-selected": "#e8e8e8", "header-row": "#e0e0e0", "row-border": "#e0e0e0",
@@ -256,7 +266,7 @@ QMainWindow, #AppBody, #ContentScroll {{ background: {k['background']}; }}
                    padding: 0px 16px; font-size: 14px; text-align: left; }}
 #HeaderMenuItem:hover, #HeaderMenuItem[open="true"] {{ background: {k['layer-hover-01']};
                    color: {k['text-primary']}; }}
-#HeaderMenuItem:focus {{ border: 2px solid {k['focus']}; }}
+#HeaderMenuItem:focus {{ border: 2px solid {k['focus']}; padding: 0px 14px; }}
 /* Menus are widgets/menu.CarbonMenu (painted from tokens); these rules only give it Carbon geometry:
    4 px block padding, 32 px items, 9 px dividers (1 px rule + 4 px margins). */
 QMenu {{ background: {k['layer-01']}; border: none; padding: 4px 0px; }}
@@ -288,7 +298,10 @@ QPushButton[kind="icon"] {{ background: transparent; padding: 0px; min-width: 32
 QPushButton[kind="icon"]:hover {{ background: {k['button-ghost-hover']}; }}
 QPushButton[kind="icon"]:pressed {{ background: {k['button-ghost-active']}; }}
 QPushButton[kind="icon"][active="true"] {{ background: {k['layer-selected-01']}; }}
-QPushButton:focus {{ border: 2px solid {k['focus']}; }}
+/* Focus: a 2 px inside frame.  The horizontal padding drops by the same 2 px so the label never moves between
+   rest / hover / focus / pressed (release reconciliation: no text shift between states). */
+QPushButton:focus {{ border: 2px solid {k['focus']}; padding: 0px 14px; }}
+QPushButton[kind="icon"]:focus {{ padding: 0px; }}
 QPushButton[kind="primary"]:focus, QPushButton[kind="secondary"]:focus {{
     border: 2px solid {k['focus']}; padding: 0px 14px; }}
 QPushButton[btnsize="md"] {{ min-height: {BUTTON_HEIGHT}px; max-height: {BUTTON_HEIGHT}px; }}
@@ -334,10 +347,13 @@ QLineEdit[cell="element"]:!read-only {{ background: {k['field-02']}; }}
 QLineEdit[cell="total"] {{ font-weight: 400; }}
 QLineEdit[cell="element-filled"] {{ font-weight: 600; background: {k['layer-02']}; qproperty-alignment: AlignCenter; }}
 #LockCell {{ border-bottom: 1px solid {k['border-strong-01']}; }}
-QPlainTextEdit[invalid="true"] {{ border: 2px solid {k['support-error']}; }}
 QPlainTextEdit, QTextEdit {{ background: {k['field-02']}; color: {k['text-primary']}; border: none;
-             border-bottom: 1px solid {k['border-strong-02']}; padding: 8px 12px; }}
-QPlainTextEdit:focus, QTextEdit:focus {{ border: 2px solid {k['focus']}; }}
+             border-bottom: 1px solid {k['border-strong-02']}; padding: 8px 12px 7px 12px; }}
+/* 2 px frames with the padding reduced by the frame width: the text never moves on focus / error */
+QPlainTextEdit:focus, QTextEdit:focus {{ border: 2px solid {k['focus']}; padding: 6px 10px 5px 10px; }}
+QPlainTextEdit[invalid="true"], QPlainTextEdit[invalid="true"]:focus {{ border: 2px solid {k['support-error']};
+             padding: 6px 10px 5px 10px; }}
+QPlainTextEdit[valid="true"] {{ border: 2px solid {k['support-success']}; padding: 6px 10px 5px 10px; }}
 
 /* ---------------- radio buttons / checkboxes */
 QRadioButton, QCheckBox {{ spacing: 8px; color: {k['text-primary']}; background: transparent; }}
@@ -356,7 +372,7 @@ QRadioButton:focus, QCheckBox:focus {{ border: 1px solid {k['focus']}; }}
 QComboBox {{ background: transparent; border: none; padding: 0px 8px; min-height: {CONTROL_HEIGHT}px;
              color: {k['text-primary']}; }}
 QComboBox:hover {{ background: {k['layer-hover-01']}; }}
-QComboBox:focus {{ border: 2px solid {k['focus']}; }}
+QComboBox:focus {{ border: 2px solid {k['focus']}; padding: 0px 6px; }}
 QComboBox::drop-down {{ border: none; width: 24px; }}
 QComboBox::down-arrow {{ image: url({icon_url('chevron_down', 'icon-primary')}); width: 16px; height: 16px; }}
 QComboBox QAbstractItemView {{ background: {k['layer-01']}; color: {k['text-primary']}; border: none;
@@ -384,10 +400,12 @@ QScrollArea {{ background: transparent; border: none; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
 QScrollBar:vertical {{ background: transparent; width: {SCROLLBAR_HIT}px; margin: 0px; }}
 QScrollBar::handle:vertical {{ background: {k['border-strong-01']}; min-height: {SCROLLBAR_MIN_THUMB}px;
-                               border-radius: 0px; margin: 0px {(SCROLLBAR_HIT - SCROLLBAR_VISIBLE) // 2}px; }}
+                               border-radius: {SCROLLBAR_VISIBLE // 2}px;
+                               margin: 0px {(SCROLLBAR_HIT - SCROLLBAR_VISIBLE) // 2}px; }}
 QScrollBar::handle:vertical:hover {{ background: {k['border-strong-02']}; }}
 QScrollBar:horizontal {{ background: transparent; height: {SCROLLBAR_HIT}px; margin: 0px; }}
 QScrollBar::handle:horizontal {{ background: {k['border-strong-01']}; min-width: {SCROLLBAR_MIN_THUMB}px;
+                                 border-radius: {SCROLLBAR_VISIBLE // 2}px;
                                  margin: {(SCROLLBAR_HIT - SCROLLBAR_VISIBLE) // 2}px 0px; }}
 QScrollBar::handle:horizontal:hover {{ background: {k['border-strong-02']}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ width: 0px; height: 0px; }}

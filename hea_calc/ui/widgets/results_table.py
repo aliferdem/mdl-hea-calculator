@@ -13,11 +13,14 @@ Architecture (measured; see ``tools/perf_harness.py`` and ``design/implementatio
   hover only; a drag inside a text cell selects its *characters* (``CellTextSelection``, one
   transient overlay that paints with the delegate's own text layout) and ``Ctrl+C`` copies them;
 * double-click a row → the active composition of Analysis; right-click → :class:`~.menu.CarbonMenu` with
-  "Analyse composition", check, "Open details in new window" and copy/remove actions.  Rows are
-  identified by their stable ``result_id``, never by visual position;
-* a leading checkbox column (:class:`CheckHeader`, the view's vertical header - not a model column and not
-  Qt selection) holds the explicit *Checked results* set (``core/analysis/checked.CheckedSet``, ids in
-  SQL); its corner box checks / unchecks every result passing the current filter.
+  "Analyse composition", "Open details in new window" and copy/remove actions.  Rows are identified by
+  their stable ``result_id``, never by visual position;
+* no checkbox column (product decision, release reconciliation: the clean table geometry was restored; the
+  briefly added "Checked results" column and its set were removed).  Plot selections reach the table only as
+  the explicit id filter of "Show in results table" (``core/analysis/idsets.py``);
+* pagination: items per page (shared Carbon :class:`~.dropdown.Dropdown`), range text, an editable page
+  number (:class:`PageField`: integers 1…last, Enter / focus-out commit, out-of-range values corrected
+  visibly, no wheel changes) and previous / next.
 """
 
 from __future__ import annotations
@@ -27,10 +30,11 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from PySide6.QtCore import (QAbstractListModel, QAbstractTableModel, QEvent, QModelIndex, QPoint, QPointF, QRect,
-                            QRectF, QSize, Qt, Signal)
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QKeySequence, QMouseEvent, QPainter
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFrame, QHBoxLayout, QHeaderView, QLabel,
+from PySide6.QtCore import (QAbstractTableModel, QEvent, QModelIndex, QPoint, QPointF, QRect, QRectF,
+                            QRegularExpression, QSize, Qt, QTimer, Signal)
+from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QGuiApplication, QKeySequence, QMouseEvent, QPainter,
+                           QRegularExpressionValidator)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
                                QStyledItemDelegate, QStyleOptionViewItem, QTableView, QVBoxLayout, QWidget)
 
 from ...core import composition as C
@@ -39,7 +43,8 @@ from ...core.results import COLUMN_BY_KEY, DEFAULT_COLUMNS, ResultRow, format_ce
 from .. import crisp, icons
 from ..responsive import distribute
 from ..theme import BODY_COMPACT_01, HAIRLINE, HEADING_COMPACT_01, THEME, font, t
-from .common import Divider, IconButton, MenuButton, illustration, paint_tag, set_prop
+from .common import Divider, IconButton, MenuButton, illustration, install_wheel_guard, paint_tag, set_prop
+from .dropdown import Dropdown
 from .menu import CarbonMenu
 from .scroll import ThinScrollBar
 
@@ -49,7 +54,6 @@ ROW_HEIGHT = 32
 HEADER_HEIGHT = 32
 TEXT_PAD_LEFT = 16
 TEXT_PAD_RIGHT = 8
-CHECK_COL_WIDTH = 48
 
 
 # ====================================================================== row sequences (lazy, streamed)
@@ -91,7 +95,6 @@ class ResultsModel(QAbstractTableModel):
     page_changed = Signal()
     columns_changed = Signal()
     state_changed = Signal()
-    checked_changed = Signal()           # the Checked results set changed (any row, any page)
     _task_done = Signal(object)          # builder thread -> GUI thread (queued)
 
     def __init__(self, parent=None, engine=None, repo: ResultRepository | None = None):
@@ -108,9 +111,6 @@ class ResultsModel(QAbstractTableModel):
         self._cells: dict[int, list[str]] = {}
         self.last_error: str | None = None
         self._user_request = False           # the pending build was asked for by the user (sort/filter)
-        from ...core.analysis.checked import CheckedSet
-        self.checked = CheckedSet(self.repo)
-        self._page_checked: set[int] = set()
 
     def close(self) -> None:
         """Release the repository if this model created it."""
@@ -273,10 +273,7 @@ class ResultsModel(QAbstractTableModel):
         self.state_changed.emit()
 
     def _on_task(self, task):
-        if task.kind == "exec":
-            if self.checked.busy is False:
-                self._page_checked = self.checked.states([r.id for r in self._page])
-                self.checked_changed.emit()
+        if task.kind == "exec":            # id tables of "Show in results table" (idsets.py)
             return
         try:
             changed = self.view.apply_task(task)
@@ -318,41 +315,7 @@ class ResultsModel(QAbstractTableModel):
                 self.endResetModel()
         else:
             self._page = recs                            # same rows: fresh records (positions)
-        self._page_checked = self.checked.states(ids) if ids else set()
         self.page_changed.emit()
-
-    # ------------------------------------------------------------------ checked results
-    def is_checked(self, r: int) -> bool:
-        rec = self.row_at(r)
-        return rec is not None and rec.id in self._page_checked
-
-    def set_checked(self, ids, on: bool) -> None:
-        self.checked.set(ids, on)
-        self._page_checked = self.checked.states([r.id for r in self._page])
-        self.checked_changed.emit()
-
-    def toggle_checked(self, r: int) -> None:
-        rec = self.row_at(r)
-        if rec is not None:
-            self.set_checked([rec.id], rec.id not in self._page_checked)
-
-    def check_state(self) -> str:
-        """Corner box: "all" right after checking every filtered result, "some" / "none" otherwise."""
-        c = self.checked
-        if c.count <= 0:
-            return "none"
-        return "all" if c.all_filtered_version == c.version else "some"
-
-    def check_all_filtered(self, on: bool) -> None:
-        sp = self.view.export_spec(filtered=bool(self.filters))
-        self.checked.set_matching(sp["where"], sp["params"], sp["lo"], sp["hi"], on)
-        self._page_checked = set()
-        self.checked_changed.emit()
-
-    def clear_checked(self) -> None:
-        self.checked.clear()
-        self._page_checked = set()
-        self.checked_changed.emit()
 
     # ------------------------------------------------------------------ Qt model
     def rowCount(self, parent=QModelIndex()):
@@ -673,118 +636,6 @@ class Header(QHeaderView):
         return QSize(s.width(), HEADER_HEIGHT)
 
 
-# ====================================================================== checkbox column
-def paint_checkbox(p: QPainter, rect: QRectF, state: str, enabled: bool = True) -> None:
-    """Carbon checkbox (16 px) centred in ``rect``: none / some (indeterminate) / all."""
-    name = {"all": "checkbox_checked", "some": "checkbox_indeterminate"}.get(state, "checkbox")
-    size = 16
-    r = QRectF(rect.center().x() - size / 2, rect.center().y() - size / 2, size, size)
-    icons.paint(p, name, r, "icon-primary" if enabled else "icon-disabled")
-
-
-class CheckHeader(QHeaderView):
-    """The checkbox column: the view's vertical header, painted per row from the model's checked states.
-    A click toggles the row's membership in *Checked results*; it never selects or activates the row."""
-
-    def __init__(self, view: "ResultsView"):
-        super().__init__(Qt.Orientation.Vertical, view)
-        self.view = view
-        self.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
-        self.setDefaultSectionSize(ROW_HEIGHT)
-        self.setFixedWidth(CHECK_COL_WIDTH)
-        self.setSectionsClickable(False)
-        self.setHighlightSections(False)
-        self.setMouseTracking(True)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("")
-
-    def sizeHint(self):
-        return QSize(CHECK_COL_WIDTH, ROW_HEIGHT)
-
-    def paintSection(self, p: QPainter, rect: QRect, logical: int):
-        if not rect.isValid():
-            return
-        p.save()
-        crisp.fill_rect(p, rect, t("row-hover") if logical == self.view.hover_row else t("layer-01"))
-        crisp.hline_bottom(p, rect, t("row-border"), HAIRLINE)
-        paint_checkbox(p, QRectF(rect), "all" if self.view.m.is_checked(logical) else "none")
-        p.restore()
-
-    def mousePressEvent(self, e):
-        if e.button() != Qt.MouseButton.LeftButton:
-            return
-        r = self.logicalIndexAt(e.position().toPoint())
-        if r >= 0:
-            self.view.m.toggle_checked(r)
-            self.viewport().update()
-        e.accept()
-
-    def mouseDoubleClickEvent(self, e):
-        self.mousePressEvent(e)
-
-    def mouseMoveEvent(self, e):
-        r = self.logicalIndexAt(e.position().toPoint())
-        self.view._set_hover(r)
-        rec = self.view.m.row_at(r) if r >= 0 else None
-        self.setToolTip("" if rec is None else ("Uncheck result" if self.view.m.is_checked(r) else "Check result"))
-        super().mouseMoveEvent(e)
-
-    def leaveEvent(self, e):
-        self.view._set_hover(-1)
-        super().leaveEvent(e)
-
-
-class CheckAllBox(QWidget):
-    """Corner box of the checkbox column: check / uncheck every result passing the current filter."""
-
-    def __init__(self, view: "ResultsView", parent=None):
-        super().__init__(parent or view)
-        self.view = view
-        self.setFixedSize(CHECK_COL_WIDTH, HEADER_HEIGHT)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
-        self.setAccessibleName("Check all filtered results")
-        self._update_tip()
-
-    def _update_tip(self):
-        st = self.view.m.check_state()
-        filtered = bool(self.view.m.filters)
-        what = "filtered results" if filtered else "results"
-        tip = f"Uncheck all {what}" if st == "all" else f"Check all {what}"
-        if self.view.m.checked.count:
-            tip += f" ({self.view.m.checked.count:,} checked)"
-        self.setToolTip(tip)
-
-    def paintEvent(self, _e):
-        p = QPainter(self)
-        crisp.fill_rect(p, self.rect(), t("header-row"))
-        crisp.hline_bottom(p, self.rect(), t("row-border"), HAIRLINE)
-        enabled = self.view.m.view_count() > 0
-        paint_checkbox(p, QRectF(self.rect()), self.view.m.check_state(), enabled)
-        if self.hasFocus():
-            from ..theme import FOCUS_WIDTH
-            crisp.frame(p, self.rect(), FOCUS_WIDTH, t("focus"))
-        p.end()
-
-    def activate(self):
-        m = self.view.m
-        if not m.view_count():
-            return
-        m.check_all_filtered(m.check_state() != "all")
-        self._update_tip()
-        self.update()
-
-    def mousePressEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton:
-            self.activate()
-
-    def keyPressEvent(self, e):
-        if e.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self.activate()
-            return
-        super().keyPressEvent(e)
-
-
 # ====================================================================== view
 class ResultsView(QTableView):
     details_requested = Signal(object)   # double click anywhere on a row → the active composition of Analysis
@@ -799,10 +650,10 @@ class ResultsView(QTableView):
         self.hover_row = -1
         self.header = Header(model, self)
         self.setHorizontalHeader(self.header)
-        self.check_header = CheckHeader(self)
-        self.setVerticalHeader(self.check_header)
+        self.verticalHeader().hide()
+        self.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
+        self.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         self.setCornerButtonEnabled(False)
-        self.check_all = CheckAllBox(self)
         self.setShowGrid(False)
         # Explicit product decision: no Qt cell/row selection, no current cell, no focus rectangle.
         self.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
@@ -825,8 +676,6 @@ class ResultsView(QTableView):
         self._press: tuple[int, int, QPoint] | None = None
         self._dragging = False
         model.columns_changed.connect(self.apply_widths)
-        model.checked_changed.connect(self._checked_changed)
-        model.page_changed.connect(self._checked_changed)
         model.modelReset.connect(self.selection.end)
         model.dataChanged.connect(lambda *_: self.selection.end())
         self.apply_widths()
@@ -842,18 +691,6 @@ class ResultsView(QTableView):
         for row in (old, r):
             if row >= 0:
                 self.viewport().update(self._row_rect(row))
-        self.check_header.viewport().update()
-
-    def _checked_changed(self):
-        self.check_header.viewport().update()
-        self.check_all._update_tip()
-        self.check_all.update()
-
-    def updateGeometries(self):
-        super().updateGeometries()
-        if hasattr(self, "check_all"):
-            self.check_all.setGeometry(0, 0, CHECK_COL_WIDTH, HEADER_HEIGHT)
-            self.check_all.raise_()
 
     def leaveEvent(self, e):
         self._set_hover(-1)
@@ -931,9 +768,6 @@ class ResultsView(QTableView):
             menu.add_action("Copy", lambda: QGuiApplication.clipboard().setText(sel), shortcut="Ctrl+C")
             menu.addSeparator()
         menu.add_action("Analyse composition", lambda: self.details_requested.emit(row))
-        checked = row.id in self.m.checked.states([row.id])
-        menu.add_action("Uncheck result" if checked else "Check result",
-                        lambda: self.m.set_checked([row.id], not checked))
         menu.add_action("Open details in new window", lambda: self.window_requested.emit(row))
         menu.addSeparator()
         menu.add_action("Copy value", lambda: QGuiApplication.clipboard().setText(
@@ -1052,9 +886,6 @@ class StickyHeader(Header):
         view.m.columns_changed.connect(self.sync)
         view.m.headerDataChanged.connect(lambda *_: self.viewport().update())
         view.horizontalScrollBar().valueChanged.connect(self.setOffset)
-        self.corner = CheckAllBox(view, host)
-        self.corner.hide()
-        view.m.checked_changed.connect(self.corner.update)
         self.hide()
 
     def sync(self):
@@ -1089,7 +920,6 @@ class StickyHeader(Header):
         if not active:
             if self.isVisible():
                 self.hide()
-            self.corner.hide()
             return False
         # pushed up once only the last row is left under it, so it leaves together with the table
         y = min(0, rows_bottom - HEADER_HEIGHT - ROW_HEIGHT)
@@ -1098,66 +928,88 @@ class StickyHeader(Header):
             self.sync()
             self.show()
         self.raise_()
-        self.corner.setGeometry(top.x() - CHECK_COL_WIDTH, y, CHECK_COL_WIDTH, HEADER_HEIGHT)
-        self.corner.show()
-        self.corner.raise_()
         return True
 
 
 # ====================================================================== pagination
-class PageListModel(QAbstractListModel):
-    """Page-number list for the page select: a sliding window of at most ``WINDOW`` pages.
+class PageField(QLineEdit):
+    """Editable current-page number of the pagination bar (Carbon text input, sm, compact).
 
-    Measured on the native Windows platform: ``QComboBox.setCurrentIndex`` reads *every* item of
-    its model (the UI Automation bridge), 0.49 s for 100 000 pages - and 5 M results at 10 per page
-    are 500 000 pages.  The select therefore lists the pages around the current one (all of them
-    up to ``WINDOW``) and re-centres as the page changes, so its cost no longer grows with the
-    dataset.  ``n`` is the true page count."""
+    Integers only (a digits validator); the value is committed on Enter and on focus-out; a value outside
+    1…last is corrected to the nearest valid page and the field flashes its invalid frame, so the correction
+    is visible; an empty field reverts.  The mouse wheel never changes it (wheel guard).  It never shows page
+    0: an empty table shows 1, disabled."""
 
-    WINDOW = 1000
-    MARGIN = 50
+    committed = Signal(int)                 # 0-based page index
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.n = 1
-        self.offset = 0
+        self.setObjectName("PageField")
+        self.setProperty("crisp", True)
+        self.setFixedSize(56, 32)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setValidator(QRegularExpressionValidator(QRegularExpression(r"\d{0,9}"), self))
+        self.setAccessibleName("Current page")
+        self.last = 1
+        self.current = 0
+        self._invalid = False
+        self._flash = QTimer(self)
+        self._flash.setSingleShot(True)
+        self._flash.setInterval(900)
+        self._flash.timeout.connect(self._clear_flash)
+        self.returnPressed.connect(self._commit)
+        install_wheel_guard(self)
+        from .menu import carbon_context_menu
+        carbon_context_menu(self)
 
-    def set_count(self, n: int, current: int = 0) -> bool:
-        offset = self.offset
-        size = min(n, self.WINDOW)
-        if n <= self.WINDOW:
-            offset = 0
-        elif not (offset + self.MARGIN <= current < offset + size - self.MARGIN) or offset + size > n:
-            offset = max(0, min(current - size // 2, n - size))
-        if (n, offset) == (self.n, self.offset):
-            return False
-        old_rows, new_rows = min(self.n, self.WINDOW), size
-        if offset == self.offset and new_rows == old_rows:
-            self.n = n                      # more pages beyond the window: the list itself is unchanged
-            return False
-        if offset == self.offset and new_rows > old_rows:
-            self.beginInsertRows(QModelIndex(), old_rows, new_rows - 1)     # pages appended while results stream in
-            self.n = n
-            self.endInsertRows()
-            return True
-        self.beginResetModel()
-        self.n, self.offset = n, offset
-        self.endResetModel()
-        return True
+    def set_pages(self, current: int, last: int) -> None:
+        self.current, self.last = current, max(1, last)
+        if not self.hasFocus():
+            self.setText(str(current + 1))
+        self.setToolTip(f"Type a page number (1–{self.last:,}) and press Enter")
 
-    def row_of(self, page: int) -> int:
-        return page - self.offset
+    def _commit(self) -> None:
+        text = self.text().strip()
+        if not text:
+            self.setText(str(self.current + 1))
+            return
+        page = int(text)
+        clamped = max(1, min(page, self.last))
+        if clamped != page:
+            self._invalid = True            # visibly corrected
+            self._flash.start()
+            self.update()
+        self.setText(str(clamped))
+        if clamped - 1 != self.current:
+            self.committed.emit(clamped - 1)
 
-    def page_of(self, row: int) -> int:
-        return self.offset + row
+    def _clear_flash(self) -> None:
+        self._invalid = False
+        self.update()
 
-    def rowCount(self, parent=QModelIndex()):
-        return 0 if parent.isValid() else min(self.n, self.WINDOW)
+    def focusOutEvent(self, e):
+        self._commit()
+        super().focusOutEvent(e)
 
-    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if index.isValid() and role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
-            return str(self.offset + index.row() + 1)
-        return None
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key.Key_Escape:
+            self.setText(str(self.current + 1))
+            self.clearFocus()
+            return
+        super().keyPressEvent(e)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        from ..theme import FOCUS_WIDTH
+        p = QPainter(self)
+        r = self.rect()
+        if self._invalid:
+            crisp.frame(p, r, FOCUS_WIDTH, t("support-error"))
+        elif self.hasFocus():
+            crisp.frame(p, r, FOCUS_WIDTH, t("focus"))
+        elif self.isEnabled():
+            crisp.hline_bottom(p, r, t("border-strong-02"), HAIRLINE)
+        p.end()
 
 
 class PaginationBar(QFrame):
@@ -1173,12 +1025,9 @@ class PaginationBar(QFrame):
         lay.setContentsMargins(16, 0, 0, 0)
         lay.setSpacing(0)
         lay.addWidget(QLabel("Items per page:"))
-        self.size_box = QComboBox()
-        for n in PAGE_SIZES:
-            self.size_box.addItem(str(n), n)
-        self.size_box.setCurrentIndex(PAGE_SIZES.index(model.page_size))
-        self.size_box.setFixedWidth(64)
-        self.size_box.setAccessibleName("Items per page")
+        self.size_box = Dropdown([(n, str(n)) for n in PAGE_SIZES], model.page_size, inline=True,
+                                 accessible="Items per page")
+        self.size_box.setFixedWidth(self.size_box.width_for_items())
         lay.addWidget(self.size_box)
         lay.addWidget(self._vdiv())
         self.range_lbl = QLabel("")
@@ -1187,16 +1036,8 @@ class PaginationBar(QFrame):
         lay.addWidget(self.range_lbl, 1)
         lay.addWidget(self._vdiv())
         lay.addSpacing(8)
-        self.pages = PageListModel(self)
-        self.page_box = QComboBox()
-        self.page_box.setModel(self.pages)
-        self.page_box.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self.page_box.setMinimumContentsLength(3)
-        self.page_box.setMaxVisibleItems(12)
-        self.page_box.view().setUniformItemSizes(True)
-        self.page_box.setMinimumWidth(56)
-        self.page_box.setAccessibleName("Current page")
-        lay.addWidget(self.page_box)
+        self.page_field = PageField()
+        lay.addWidget(self.page_field)
         self.of_lbl = QLabel("")
         self.of_lbl.setContentsMargins(4, 0, 16, 0)
         lay.addWidget(self.of_lbl)
@@ -1209,7 +1050,7 @@ class PaginationBar(QFrame):
         lay.addWidget(self._vdiv())
         lay.addWidget(self.next_btn)
         self.size_box.currentIndexChanged.connect(lambda i: self.m.set_page_size(PAGE_SIZES[i]))
-        self.page_box.activated.connect(lambda i: self.m.set_page(self.pages.page_of(i)))
+        self.page_field.committed.connect(self.m.set_page)
         self.prev_btn.clicked.connect(lambda: self.m.set_page(self.m.page - 1))
         self.next_btn.clicked.connect(lambda: self.m.set_page(self.m.page + 1))
         self.m.page_changed.connect(self.refresh)
@@ -1238,12 +1079,8 @@ class PaginationBar(QFrame):
             suffix = f" (+{total - n:,} not yet sorted)"
         self.range_lbl.setText(f"{a + 1 if n else 0:,}–{b:,} of {n:,} item{'s' if n != 1 else ''}{suffix}")
         pc = self.m.page_count()
-        self.page_box.blockSignals(True)
-        self.pages.set_count(pc, self.m.page)
-        row = self.pages.row_of(self.m.page)
-        if self.page_box.currentIndex() != row:
-            self.page_box.setCurrentIndex(row)
-        self.page_box.blockSignals(False)
+        self.page_field.set_pages(self.m.page, pc)
+        self.page_field.setEnabled(n > 0)
         self.of_lbl.setText(f"of {pc:,} page{'s' if pc != 1 else ''}")
         self.prev_btn.setEnabled(self.m.page > 0)
         self.next_btn.setEnabled(self.m.page < pc - 1)

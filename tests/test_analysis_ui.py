@@ -145,7 +145,8 @@ def test_composition_tabs_and_model_drill_in(win, app):
     from hea_calc.ui.analysis.widgets import DataTable
     table = win.analysis.composition.pages[2].findChildren(DataTable)[0]
     assert len(table.rows) == 8
-    statuses = [r[2].status for r in table.rows]
+    # 805 px merges prediction and status into one column; read the status from whichever cell carries it
+    statuses = [next((getattr(c, "status", None) for c in r if getattr(c, "status", None)), None) for r in table.rows]
     assert statuses[5] == statuses[6] == "data_suspect"           # M6, M7 flagged binary data
     assert table.rows[5][1].tag == "IM", "verdict tag keeps its class colour"
     table.activated.emit(5)
@@ -207,49 +208,27 @@ def test_single_click_never_activates_double_click_does(win, app):
     assert win.analysis_ctl.state.active == m.id_at(1)
 
 
-# ====================================================================== checked results + scopes
-def test_checkbox_column_is_not_selection_and_feeds_checked_scope(win, app):
+# ====================================================================== table (no checkbox column) + scopes
+def test_results_table_has_no_checkbox_column_and_full_or_filtered_scopes(win, app):
+    """Release reconciliation: the checkbox column is gone - no vertical header, the first column starts at the
+    table's left edge, the row menu has no check action - and Collection offers Full / Filtered only."""
     run = add_run(win, app, samples.c1_recipe())
     v, m = win.table.view, win.table.model
-    hdr = v.check_header
-    assert hdr.isVisible() and hdr.width() == 48
-    for r in (0, 2, 3):
-        y = hdr.sectionViewportPosition(r) + 16
-        ev = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(20, y), QPointF(hdr.viewport().mapToGlobal(QPoint(20, y))),
-                         Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
-        QApplication.sendEvent(hdr.viewport(), ev)
-    m.checked.wait()
-    pump(app)
-    assert m.checked.count == 3 and m.is_checked(0) and not m.is_checked(1)
-    assert not v.selectionModel().hasSelection(), "checking is not Qt selection"
-    assert win.analysis_ctl.state.active is None, "checking never activates a row"
+    assert not v.verticalHeader().isVisible() and v.verticalHeader().width() == 0
+    assert v.viewport().mapTo(v, QPoint(0, 0)).x() == 0
+    assert not hasattr(m, "checked") and not hasattr(v, "check_header")
+    menu = v.row_menu(m.row_at(0), m.keys[0])
+    texts = [a.text() for a in menu.actions() if not a.isSeparator()]
+    assert not any("heck" in t for t in texts), texts
+    assert "Analyse composition" in texts and "Remove result" in texts
+    from hea_calc.ui.analysis.collection_view import pop_items
     c = win.analysis_ctl
+    assert [p[0] for p in pop_items(c)] == ["full", "filtered"]
     c.apply(S.switch_context, S.COLLECTION)
     settle(win, app)
-    c.scope_for(run, "checked")
+    c.scope_for(run, "full")
     settle(win, app)
-    assert c.state.scope.base == "checked" and c.state.resolved.n == 3
-    m.set_checked([m.id_at(5)], True)
-    m.checked.wait()
-    pump(app)
-    assert c.state.stale == S.STALE_CHECKED and c.state.resolved.n == 3, "the collection does not change by itself"
-    c.update_collection()
-    settle(win, app)
-    assert c.state.stale is None and c.state.resolved.n == 4
-
-
-def test_check_all_filtered_in_sql(win, app):
-    add_run(win, app, samples.c1_recipe())
-    m = win.table.model
-    m.set_filters([ModelFilter("M8", {"SS"})])
-    m.wait()
-    win.table.view.check_all.activate()
-    m.checked.wait()
-    pump(app)
-    assert m.checked.count == 12 and m.check_state() == "all"
-    win.table.view.check_all.activate()
-    m.checked.wait()
-    assert m.checked.count == 0
+    assert c.state.scope.base == "full" and c.state.resolved.n == 341
 
 
 def test_filtered_scope_goes_stale_and_updates(win, app):
@@ -375,10 +354,13 @@ def test_plot_selection_is_visual_only(win, app):
     plot.selection_made.emit(set(ids))
     pump(app)
     assert c.state.selection == frozenset(ids) and c.state.scope == scope and c.state.active is None
-    win.analysis.collection._check_selection()
-    win.table.model.checked.wait()
+    # the selection reaches the table only through the explicit id filter (no hidden checked state)
+    win.analysis.collection._show_selection()
+    win.table.model.wait()
     pump(app)
-    assert win.table.model.checked.count == 5
+    from hea_calc.core.results import IdSetFilter
+    assert any(isinstance(f, IdSetFilter) for f in win.table.model.filters)
+    assert win.table.model.view_count() == 5
 
 
 # ====================================================================== expanded workspace
@@ -419,6 +401,14 @@ def test_workspace_pages_build(win, app):
     for tab in S.COLL_TABS:
         c.apply(S.set_tab, tab)
         settle(win, app)
+        if tab == "statistics":
+            # no descriptor is the default: nothing is plotted until a metric is chosen
+            assert c.state.stats_focus == "" and c.data.get("hist") is None and c.data.get("box") is None
+            for metric in ("delta_cn12", "dhmix"):
+                c.apply(S.update, stats_focus=metric)
+                settle(win, app)
+                assert c.data_keys["hist"][-1] == (metric,) or metric in str(c.data_keys["hist"])
+                assert metric in c.data["box"]["metrics"]
     assert c.data.get("box") is not None and c.data.get("hist") is not None
     c.apply(S.switch_context, S.COMPOSITION)
     for tab in S.COMP_TABS:

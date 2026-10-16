@@ -953,9 +953,8 @@ class ViewBuilder:
         con.execute(f"ATTACH DATABASE ? AS vw", (str(views_path),))
         con.execute("PRAGMA vw.journal_mode=WAL")
         con.execute("PRAGMA vw.synchronous=OFF")      # derived data only: rebuilt from results if lost
-        # Checked results (Analysis "Checked results", data contract section 11): ids only, independent of
-        # the table's filter and page; written here like every other views.sqlite table.
-        con.execute("CREATE TABLE IF NOT EXISTS vw.checked(rid INTEGER PRIMARY KEY)")
+        # (the former Checked-results table vw.checked is gone with the Results checkbox column; explicit
+        # id sets for "Show in results table" are created on demand by core/analysis/idsets.py)
         self._con = con
         self._thread = threading.Thread(target=self._loop, name="hea-view-builder", daemon=True)
         self._thread.start()
@@ -1553,7 +1552,17 @@ class ResultRepository:
         for a in info.axes:
             if a.get("col"):
                 axes.append({**a, "sql": f"d.{q(a['col'])}"})
-        if info.mode == "sweep" and info.source.get("unit") == "ratio":
+        if info.mode == "sweep" and info.source.get("unit") in ("wt", "mass"):
+            # entered wt.% / grams -> at.%: the shared conversion (amount / atomic weight, normalised) as SQL,
+            # with the same standard atomic weights the generation used (composition.to_fractions)
+            data = self.engine.data
+            els = [a for a in info.axes if a.get("kind") == "element"]
+            moles = {a["col"]: f"(d.{q(a['col'])} / {float(data.prop(a['name'], 'atomic_weight'))!r})" for a in els}
+            total = " + ".join(moles.values())
+            for a in els:
+                axes.append({"name": f"{a['name']} at.%", "kind": "fraction", "unit": "at.%",
+                             "sql": f"(100.0 * {moles[a['col']]} / ({total}))"})
+        elif info.mode == "sweep" and info.source.get("unit") == "ratio":
             cols = [a["col"] for a in info.axes if a.get("kind") == "element"]
             total = " + ".join(f"d.{q(c)}" for c in cols)
             for a in info.axes:

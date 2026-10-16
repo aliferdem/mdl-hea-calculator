@@ -221,6 +221,8 @@ def run_sweep(win, app):
     win.composition.unit_box.setCurrentIndex(1)
     for r in win.composition.sweep.rows.values():
         r.min.setText("2"), r.max.setText("32"), r.step.setText("2")       # 31 076 alloys
+    from conftest import settle_composition
+    settle_composition(win, app)
     t0 = time.perf_counter()
     win.composition.calc_btn.click()
     while win.worker is not None and time.perf_counter() - t0 < 120:

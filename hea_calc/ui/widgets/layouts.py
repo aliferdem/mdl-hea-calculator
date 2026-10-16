@@ -9,18 +9,22 @@ from ..responsive import distribute
 
 
 class UpperPanels(QWidget):
-    """The upper content area: Element selection, Composition setup, Calculation details.
+    """The upper content area: Element selection, Composition setup, Analysis.
 
-    * **wide** - one row, the design's 596 / 457 / 787 px reference widths distributed by
-      ``responsive.distribute`` (only Details grows), exactly as before;
-    * **stacked** - when the three panels no longer fit at their minimum widths, Details moves to a
-      second row spanning the full width; Element + Composition share the first row (Composition
-      grows).
+    * **wide** - one row, the design's 578 / 457 / 805 px reference widths distributed by
+      ``responsive.distribute`` (only Analysis grows; only the periodic table compresses);
+    * **stacked** - when the three panels no longer fit at their wide-row minimums, Analysis moves to a
+      second row spanning the full width; Element + Composition share the first row (the periodic table
+      takes the width Composition setup - fixed by design - does not use).
 
-    The breakpoint is not a screen size: it is the width the wide row needs, ``Σ minimums + gaps``
+    ``panels`` are ``(widget, reference, wide_minimum, maximum)``; a widget's own minimum width is its own
+    business (Analysis may be narrower when stacked than it is allowed to be in the wide row).
+
+    The breakpoint is not a screen size: it is the width the wide row needs, ``Σ wide minimums + gaps``
     (``wide_minimum``), with ``HYSTERESIS`` px extra before returning to wide so a resize near the
-    boundary cannot oscillate.  The panels are only repositioned - never re-created - so their state
-    survives every switch; the main scroll area simply receives the taller content.
+    boundary cannot oscillate.  The panels are only repositioned - never re-created or re-parented - so
+    their state survives every switch and no panel ever becomes a top-level window; the main scroll area
+    simply receives the taller content.
     """
 
     HYSTERESIS = 24
@@ -28,13 +32,12 @@ class UpperPanels(QWidget):
     def __init__(self, panels: list[tuple[QWidget, int, int, int | None]], row_height: int, gap: int,
                  parent=None):
         super().__init__(parent)
-        self.panels = panels                        # (widget, reference, minimum, maximum)
+        self.panels = panels                        # (widget, reference, wide minimum, maximum)
         self.row_height = row_height
         self.gap = gap
         self.stacked = False
-        for w, _ref, mn, _mx in panels:
+        for w, _ref, _mn, _mx in panels:
             w.setParent(self)
-            w.setMinimumWidth(mn)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(row_height)
 
@@ -71,8 +74,12 @@ class UpperPanels(QWidget):
         if self.stacked:
             first = self.panels[:-1]
             avail = width - self.gap * (len(first) - 1)
-            widths = distribute(avail, [r for _w, r, _m, _x in first], [m for _w, _r, m, _x in first],
-                                [x for _w, _r, _m, x in first[:-1]] + [None])
+            # the first row's free width goes to the panels without a maximum (the fixed Composition
+            # setup keeps its width; the periodic table takes the rest)
+            maxs = [x for _w, _r, _m, x in first]
+            if all(x is not None for x in maxs):
+                maxs[0] = None
+            widths = distribute(avail, [r for _w, r, _m, _x in first], [m for _w, _r, m, _x in first], maxs)
             x = 0
             for (w, *_), wd in zip(first, widths):
                 w.setGeometry(QRect(x, 0, wd, h))

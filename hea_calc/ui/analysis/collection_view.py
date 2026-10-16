@@ -25,11 +25,12 @@ from ...core.analysis.plotting import (AUTO, BAR_GROUPED, BAR_STACKED, BINNED, B
                                        default_config, representation_text, validate)
 from ...core.analysis.queries import (DIM_BLOCK, DIM_CSTR, DIM_FAMILY, DIM_NONE, DIM_SIZE, RAW_POINT_LIMIT,
                                       dim_label, dim_value_text, is_dimension, run_metrics)
-from ...core.analysis.scope import BASE_LABELS, CHECKED, FILTERED, FULL, filter_text
+from ...core.analysis.scope import BASE_LABELS, FILTERED, FULL, filter_text
 from ...core.engine import MODEL_KEYS, NA, NA_ERROR, NA_MISSING_DATA, NA_UNDEFINED, MODELS
 from .. import crisp, icons
 from ..theme import LABEL_01, PANEL_PADDING_X, font, t
 from ..widgets.common import IconButton, button
+from ..widgets.common import retire
 from ..widgets.tooltip import InfoButton
 from .composition_view import mode_name
 from .plot import PlotSpec, PlotWidget, class_color, categorical
@@ -38,8 +39,8 @@ from .widgets import (ROW_SM, ROW_XS, ActionableNotification, Cell, DataTable, D
                       open_popover, plain_text, rich, scroll_page)
 
 ANA_SCOPE = ("The collection is fixed when it is created or updated. Sorting, paging and double-clicking in the "
-             "results table do not change it. Changes to the table filter or to checked results are announced "
-             "here; choose Update collection to apply them.")
+             "results table do not change it. Changes to the table filter are announced here; choose Update "
+             "collection to apply them.")
 ANA_STATS = ("N = {n} results in scope. N/A values are excluded and counted under N missing. Quartiles by linear "
              "interpolation between ordered values (type 7); SD uses n − 1.")
 ANA_DENOMINATOR = ("Percentages are relative to the {e} results for which the model could be evaluated; {na} "
@@ -133,11 +134,9 @@ def run_items(c):
 
 
 def pop_items(c):
-    n = c.checked.count
     filt = bool(c.model and c.model.filters)
     return [(FULL, "Full result set"),
-            (FILTERED, "Filtered result set", filt, "" if filt else "No filter is set in the results table"),
-            (CHECKED, f"Checked results ({n:,})", n > 0, "" if n else "No results are checked")]
+            (FILTERED, "Filtered result set", filt, "" if filt else "No filter is set in the results table")]
 
 
 def run_changed(c, run_id) -> None:
@@ -217,7 +216,6 @@ class ScopeBar(QWidget):
         # bound methods only: they disconnect themselves when this widget is deleted
         controller.state_changed.connect(self._on_state)
         controller.runs_changed.connect(self.refresh)
-        controller.checked_changed.connect(self.refresh)
         controller.data_ready.connect(self._on_data)
         self.refresh()
 
@@ -449,8 +447,7 @@ class CollectionContent(QWidget):
             it = lay.takeAt(0)
             if it.widget():
                 _w = it.widget()
-                _w.setParent(None)
-                _w.deleteLater()
+                retire(_w)
         if i == 1:
             self.plot = None
         widget = self._build(i)
@@ -509,8 +506,8 @@ class CollectionContent(QWidget):
             metrics = tuple(st.stats_metrics)
             group = st.stats_group
             self.c.run_query("stats", lambda sq: sq.statistics(list(metrics)), params=metrics)
-            if self.size_class == "W":
-                focus = st.stats_focus
+            if self.size_class == "W" and st.stats_focus:
+                focus = st.stats_focus              # the user's selected metric (none -> nothing to query)
                 self.c.run_query("hist", lambda sq: sq.histogram(focus), params=(focus,))
                 g = group if group != "none" else DIM_FAMILY
                 self.c.run_query("box", lambda sq: sq.statistics([focus], group=g), params=(focus, g))
@@ -615,14 +612,9 @@ class CollectionContent(QWidget):
         sc = st.scope
         if st.stale:
             note = ActionableNotification()
-            if st.stale == S.STALE_FILTER:
-                body = (f"This collection still uses the filter {filter_text(sc.filters) or '(none)'} "
-                        f"({st.resolved.n:,} results). The results table now uses a different filter.")
-                note.show_message("warning", "Results filter changed", body, "Update collection")
-            else:
-                body = (f"The collection uses {sc.snapshot_count:,} checked results; {self.c.checked.count:,} are "
-                        "checked now.")
-                note.show_message("warning", "Checked results changed", body, "Update collection")
+            body = (f"This collection still uses the filter {filter_text(sc.filters) or '(none)'} "
+                    f"({st.resolved.n:,} results). The results table now uses a different filter.")
+            note.show_message("warning", "Results filter changed", body, "Update collection")
             note.action.connect(self.c.update_collection)
             lay.addWidget(note)
         info = self.c.run_info(sc.run_id) if sc else None
@@ -704,8 +696,7 @@ class CollectionContent(QWidget):
             it = lay.takeAt(0)
             w = it.widget()
             if w is not None:
-                w.setParent(None)
-                w.deleteLater()
+                retire(w)
             elif it.layout() is not None:
                 _clear_layout(it.layout())
         cls = self.size_class
@@ -845,9 +836,10 @@ class CollectionContent(QWidget):
                                                                                      align="right"),
                          Cell(med("delta"), align="right"), Cell(med("dhmix"), align="right"),
                          Cell(med("vec"), align="right")])
-        c.add(DataTable([("Family", None), ("Results", 80, "right"), ("Share", 90, "right"),
-                         ("δ median (%)", 110, "right"), ("ΔH<sub>mix</sub> median (kJ mol⁻¹)", 200, "right"),
-                         ("VEC median", 110, "right")], rows, ROW_SM))
+        c.add(SectionHeading("Results and medians by family"))
+        c.add(hscroll(DataTable([("Family", None), ("Results", None, "right"), ("Share", None, "right"),
+                                 ("δ (%)", None, "right"), ("ΔH<sub>mix</sub> (kJ mol⁻¹)", None, "right"),
+                                 ("VEC", None, "right")], rows, ROW_SM)))
         c.add(SectionHeading("Source"))
         c.add(label(source_text(info, pop), "body", wrap=True))
         specs = (info.source or {}).get("specs") if info else None
@@ -1035,8 +1027,7 @@ class CollectionContent(QWidget):
         sb.setSpacing(4)
         self.sel_text = label("", "label")
         sb.addWidget(self.sel_text)
-        for text, fn in (("Check results", self._check_selection), ("Show in results table", self._show_selection),
-                         ("Create collection", self._collection_from_selection), ("Clear", self._clear_selection)):
+        for text, fn in (("Show in results table", self._show_selection), ("Clear", self._clear_selection)):
             b = button(text, "ghost", "sm")
             b.clicked.connect(fn)
             sb.addWidget(b)
@@ -1153,25 +1144,10 @@ class CollectionContent(QWidget):
             except RuntimeError:
                 pass
 
-    def _check_selection(self):
-        ids = sorted(self.c.state.selection)
-        if ids:
-            self.c.check_results.emit(ids)
-
     def _show_selection(self):
         ids = sorted(self.c.state.selection)
         if ids:
             self.c.show_in_table.emit(ids)
-
-    def _collection_from_selection(self):
-        ids = sorted(self.c.state.selection)
-        if not ids:
-            return
-        sc = self.c.state.scope
-        self.c.checked.clear()
-        self.c.checked.set(ids, True)
-        self.c.table_checked_changed()
-        self.c.scope_for(sc.run_id, CHECKED)
 
     def _clear_selection(self):
         self.c.apply(S.clear_selection)
@@ -1235,10 +1211,6 @@ class CollectionContent(QWidget):
         b.clicked.connect(lambda: self.c.show_in_table.emit([rid]))
         acts.addWidget(a)
         acts.addWidget(b)
-        if full:
-            c = button("Check result", "ghost", "sm")
-            c.clicked.connect(lambda: self.c.check_results.emit([rid]))
-            acts.addWidget(c)
         lay.addLayout(acts)
         return w
 
@@ -1446,8 +1418,8 @@ class CollectionContent(QWidget):
         lay.addLayout(bar)
         self.stats_loading = InlineLoading("Calculating statistics…")
         self.stats_loading.cancel.connect(lambda: self.c.cancel("stats"))
-        self.stats_loading.setVisible(self.c.busy("stats"))
         lay.addWidget(self.stats_loading)
+        self.stats_loading.setVisible(self.c.busy("stats"))
         content = QWidget()
         sa, cl = scroll_page(content, (0, 0, 0, 16))
         cl.setSpacing(8)
@@ -1538,7 +1510,9 @@ class CollectionContent(QWidget):
             table.activatable = True
             table.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             keys = [k for k in metrics if k in stats["metrics"]]
-            table.row_tips = [f"Plot histogram of {plain_text(DESCRIPTORS[k].symbol)}" for k in keys]
+            table.selected = keys.index(st.stats_focus) if st.stats_focus in keys else -1
+            table.row_tips = [f"Plot the distribution of {plain_text(DESCRIPTORS[k].symbol)} "
+                              f"({plain_text(DESCRIPTORS[k].name)})" for k in keys]
             table.activated.connect(lambda i, ks=keys: self._plot_histogram(ks[i]))
             lay.addWidget(table)
         cap = QHBoxLayout()
@@ -1549,8 +1523,21 @@ class CollectionContent(QWidget):
         lay.addLayout(cap)
 
     def _plot_histogram(self, key: str) -> None:
+        """Activating a statistics row selects that metric (kept for the session) and shows its distribution."""
+        self.c.apply(S.update, stats_focus=key)
         self.c.apply(S.set_plot, self.c.state.plot.with_(type=HISTOGRAM, x=key))
         self.c.apply(S.set_tab, "plots")
+
+    def _focus_selector(self) -> QWidget:
+        """Compact metric dropdown driving the distribution (histogram / box plot) - any statistics-eligible
+        descriptor, in registry order; no default descriptor."""
+        items = [(k, DESCRIPTORS[k].selector_text(), True, "", f"{DESCRIPTORS[k].symbol} — {DESCRIPTORS[k].name}")
+                 for k in METRIC_KEYS]
+        dd = Dropdown(items, self.c.state.stats_focus or None, prefix="Distribution of", inline=True,
+                      accessible="Distribution metric", placeholder="Select a descriptor")
+        dd.setMinimumWidth(360)
+        dd.changed.connect(lambda k: self.c.apply(S.update, stats_focus=k))
+        return dd
 
     def _build_statistics_ws(self, info) -> QWidget:
         st = self.c.state
@@ -1571,7 +1558,10 @@ class CollectionContent(QWidget):
             if dd.group != last:
                 rail.add(label(GROUP_SHORT.get(dd.group, dd.group), "label"))
                 last = dd.group
-            cb = QCheckBox(plain_text(f"{dd.plain} ({dd.unit or '–'}) {dd.name}"))
+            # symbol and unit in the 320 px rail; the full scientific name (e.g. which radius set) in the Tooltip
+            cb = QCheckBox(f"{dd.plain} ({dd.unit_plain})")
+            cb.setToolTip(plain_text(dd.name))
+            cb.setAccessibleName(plain_text(f"{dd.plain} — {dd.name}"))
             cb.setChecked(dd.key in st.stats_metrics)
             cb.toggled.connect(lambda on, k=dd.key: self._toggle_metric(k, on))
             rail.add(cb)
@@ -1583,15 +1573,24 @@ class CollectionContent(QWidget):
         right = QVBoxLayout()
         right.setSpacing(20)
         self.ws_stats = _Region(scroll=True)
-        self.ws_stats.setFixedHeight(420)
-        right.addWidget(self.ws_stats)
+        # the table region shares the height with the distribution plots (no fixed height that could clip
+        # either); it scrolls inside when the metric list is long
+        self.ws_stats.setMinimumHeight(220)
+        right.addWidget(self.ws_stats, 5)
+        dist = QHBoxLayout()
+        dist.setSpacing(8)
+        dist.addWidget(self._focus_selector())
+        dist.addStretch(1)
+        right.addLayout(dist)
         low = QHBoxLayout()
         low.setSpacing(20)
         self.ws_hist = _Region()
         self.ws_box = _Region()
+        for reg in (self.ws_hist, self.ws_box):
+            reg.setMinimumHeight(260)
         low.addWidget(self.ws_hist, 1)
         low.addWidget(self.ws_box, 1)
-        right.addLayout(low, 1)
+        right.addLayout(low, 4)
         row.addLayout(right, 1)
         self._fill_statistics_ws()
         return host
@@ -1624,9 +1623,12 @@ class CollectionContent(QWidget):
             for r, k in zip(table.rows, [m for m in st.stats_metrics if m in stats["metrics"]]):
                 r[0] = Cell(DESCRIPTORS[k].symbol)
             table.activatable = True
-            table.selected = list(st.stats_metrics).index(st.stats_focus) if st.stats_focus in st.stats_metrics else -1
-            table.activated.connect(lambda i: self.c.apply(S.update, stats_focus=st.stats_metrics[i]))
-            table.set_rows(table.rows)
+            shown = [m for m in st.stats_metrics if m in stats["metrics"]]
+            table.selected = shown.index(st.stats_focus) if st.stats_focus in shown else -1
+            table.row_tips = [f"Show the distribution of {plain_text(DESCRIPTORS[k].symbol)} "
+                              f"({plain_text(DESCRIPTORS[k].name)})" for k in shown]
+            table.activated.connect(lambda i, ks=shown: self.c.apply(S.update, stats_focus=ks[i]))
+            table.set_rows(table.rows, row_tips=table.row_tips)
             self.ws_stats.add(table)
             cap = QHBoxLayout()
             exact = "exact" if stats["exact"] else "Approximate (binned)"
@@ -1638,6 +1640,14 @@ class CollectionContent(QWidget):
             self.ws_stats.add(InlineLoading("Calculating statistics…"))
         self.ws_stats.lay.addStretch(1)
         focus = st.stats_focus
+        if not focus or focus not in DESCRIPTORS:
+            # no metric chosen: a neutral prompt - no descriptor is shown by default
+            for reg, what in ((self.ws_hist, "histogram"), (self.ws_box, "box plot")):
+                reg.clear()
+                reg.add(EmptyBlock("Select a descriptor",
+                                   f"Choose a metric in “Distribution of” or activate a statistics row to see its "
+                                   f"{what}.", "magnifier", centred=True), 1)
+            return
         dd = DESCRIPTORS[focus]
         hist = self._current("hist")
         self.ws_hist.clear()
@@ -1881,13 +1891,24 @@ def _fill(w, color, hatch: bool = False):
     p.end()
 
 
+def hscroll(table: QWidget) -> QWidget:
+    """A table in a horizontal-only scroll strip: the table keeps its content-based minimum width (no clipped
+    column) and the strip scrolls sideways only when the region is narrower than that."""
+    from ..widgets.scroll import inner_scroll_area
+    sa = inner_scroll_area(table, horizontal=True)
+    sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    sa.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    sa.setFixedHeight(table.height() + 12)        # room for the 12 px hit target of the thin bar
+    sa.setMinimumWidth(120)
+    return sa
+
+
 def _clear_layout(lay) -> None:
     while lay.count():
         it = lay.takeAt(0)
         if it.widget() is not None:
             _w = it.widget()
-            _w.setParent(None)
-            _w.deleteLater()
+            retire(_w)
         elif it.layout() is not None:
             _clear_layout(it.layout())
 
@@ -1920,7 +1941,7 @@ def source_text(info, pop) -> str:
         return "—"
     src = info.source or {}
     if info.mode == "sweep":
-        unit = "at. ratio" if src.get("unit") != "at" else "at.%"
+        unit = {"at": "at.%", "wt": "wt.%", "mass": "mass (g)"}.get(src.get("unit"), "at. ratio")
         req = [s for s in src.get("specs", []) if s.get("required")]
         opt = [s for s in src.get("specs", []) if not s.get("required")]
         parts = [f"Composition space · {unit}"]

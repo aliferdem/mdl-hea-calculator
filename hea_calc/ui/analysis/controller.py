@@ -23,10 +23,9 @@ from collections import OrderedDict
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from ...core.analysis import state as S
-from ...core.analysis.checked import CheckedSet
 from ...core.analysis.plotting import default_config
 from ...core.analysis.queries import QueryCancelled, ScopeQuery
-from ...core.analysis.scope import CHECKED, FILTERED, FULL, CollectionScope, ResolvedScope, freeze_filters
+from ...core.analysis.scope import FILTERED, FULL, CollectionScope, ResolvedScope, freeze_filters
 from ...core.repository import user_message
 
 CACHE_SIZE = 48
@@ -126,14 +125,13 @@ class AnalysisController(QObject):
     loading = Signal(str, bool)                           # slot, busy
     failed = Signal(str, str)                             # slot, message
     runs_changed = Signal()
-    checked_changed = Signal()
     composition_changed = Signal()                        # the active composition's record (re)loaded
     report_requested = Signal(str)                        # "composition" | "collection"
     expand_requested = Signal(bool)
     show_in_table = Signal(object)                        # result ids
     help_requested = Signal(str)                          # Help page id
     export_requested = Signal(str)                        # stats_csv | plot_csv | plot_svg | plot_png
-    check_results = Signal(object)                        # result ids to check in the table
+    batch_mass_changed = Signal(float)                    # Total mass preference (g): Mass (… g batch) column
 
     def __init__(self, repo, table_model=None, engine=None, parent=None):
         super().__init__(parent)
@@ -141,7 +139,8 @@ class AnalysisController(QObject):
         self.model = table_model                          # ResultsModel (the table's view; may be None in tests)
         self.engine = engine
         self.state = S.AnalysisState()
-        self.checked = table_model.checked if table_model is not None else CheckedSet(repo)
+        from ..preferences import DEFAULT_TOTAL_MASS
+        self.batch_mass = DEFAULT_TOTAL_MASS              # display preference only (never a model input)
         self.runner = QueryRunner(repo, self)
         self.runner.finished.connect(self._on_finished)
         self.cache: OrderedDict = OrderedDict()
@@ -172,6 +171,12 @@ class AnalysisController(QObject):
 
     def apply(self, fn, *args, **kw) -> None:
         self.set_state(fn(self.state, *args, **kw))
+
+    def set_batch_mass(self, grams: float) -> None:
+        """The Total mass preference changed: views redraw their Mass column; nothing is re-queried."""
+        if grams and grams > 0 and grams != self.batch_mass:
+            self.batch_mass = float(grams)
+            self.batch_mass_changed.emit(self.batch_mass)
 
     def close(self) -> None:
         self._poll.stop()
@@ -250,27 +255,19 @@ class AnalysisController(QObject):
         if self.model is not None:
             self.apply(S.table_filter_changed, freeze_filters(self.model.filters))
 
-    def table_checked_changed(self) -> None:
-        self.apply(S.checked_changed, self.checked.version)
-        self.checked_changed.emit()
-
     def results_removed(self, ids) -> None:
         ids = list(ids)
-        self.checked.remove_ids(ids)
         self.cache.clear()
         self.apply(S.results_removed, ids)
-        self.checked_changed.emit()
         self.refresh_runs()
         self._requery_scope()
 
     def table_cleared(self, recalculated: bool = False, lo: int | None = None, hi: int | None = None) -> None:
-        if lo is not None and hi is not None and hi >= lo:
-            self.checked.remove_range(lo, hi)
+        _ = (lo, hi)
         self.cache.clear()
         if self.state.active is not None:
             self.record = self.row = None
         self.apply(S.table_cleared, recalculated)
-        self.checked_changed.emit()
         self.refresh_runs()
 
     def rows_committed(self, run_id: int | None) -> None:
@@ -306,14 +303,13 @@ class AnalysisController(QObject):
         """Resolve a scope explicitly (creation, Update collection, run / population / restriction change)."""
         info = self.run_info(scope.run_id)
         filt = scope.filters if scope.base == FILTERED else ()
-        version = self.checked.version
 
         def count(sq):
             return sq.count()
 
         def done(n):
-            resolved = ResolvedScope(scope, n, _dt.datetime.now().strftime("%H:%M:%S"), filt, version,
-                                     self.state.data_version)
+            resolved = ResolvedScope(scope, n, _dt.datetime.now().strftime("%H:%M:%S"), filt,
+                                     data_version=self.state.data_version)
             old = self.state
             new = S.update_collection(old, resolved)
             if not keep_plot or old.resolved is None or old.scope.run_id != scope.run_id:
@@ -326,27 +322,16 @@ class AnalysisController(QObject):
         self.run_query("resolve", count, scope=scope, use_cache=False, on_done=done)
 
     def scope_for(self, run_id: int, base: str, families=None, sizes=None, blocks=None, on_ready=None) -> None:
-        """Build and resolve a scope; a checked-results scope first snapshots the checked set."""
+        """Build and resolve a scope (full or filtered result set of one run, with optional restrictions)."""
         if base == FILTERED:
             scope = CollectionScope(run_id, FILTERED, filters=freeze_filters(self.model.filters if self.model else ()))
-        elif base == CHECKED:
-            name, task = self.checked.snapshot()
-            self._await(task, lambda: self._finish_checked(run_id, name, families, sizes, blocks))
-            return
         else:
             scope = CollectionScope(run_id, FULL)
         scope = scope.with_restrictions(families, sizes, blocks)
         self.resolve(scope)
 
-    def _finish_checked(self, run_id, name, families, sizes, blocks):
-        old = self.state.scope
-        scope = CollectionScope(run_id, CHECKED, snapshot=name, snapshot_count=self.checked.count)
-        self.resolve(scope.with_restrictions(families, sizes, blocks))
-        if old is not None and old.base == CHECKED and old.snapshot and old.snapshot != name:
-            self.checked.drop_snapshot(old.snapshot)
-
     def update_collection(self) -> None:
-        """The stale notice's "Update collection": re-resolve with the current filter / checked set."""
+        """The stale notice's "Update collection": re-resolve with the current table filter."""
         sc = self.state.scope
         if sc is None:
             return

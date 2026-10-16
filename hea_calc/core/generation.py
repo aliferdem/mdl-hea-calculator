@@ -242,14 +242,31 @@ def _on_grid_range(g: list[int], v: int) -> bool:
     return g[0] <= v <= g[-1] and _on_grid(g, v)
 
 
+# Range bases of a composition space (the Composition setup "Range basis" menu).  The values a space yields are
+# in the entered basis; recipes.SweepRecipe.atomic converts wt.% and mass to atomic amounts with the shared
+# composition.to_fractions (the Single-composition conversion) before anything is calculated.
+#   * sum-constrained bases - at.% and wt.%: a composition is one grid value per element summing to 100;
+#   * free (proportional) bases - at. ratio and mass (g): any positive grid values; a mass vector, like Single
+#     composition's Mass column, describes a batch whose total is the sum of its masses, so proportional mass
+#     vectors are the same alloy and only the first of each ray is kept (as for ratios).
+SPACE_UNITS = ("ratio", "at", "wt", "mass")
+SUM_UNITS = ("at", "wt")
+
+
+def check_unit(unit: str) -> str:
+    if unit not in SPACE_UNITS:
+        raise RangeError(f"Unknown range basis {unit!r}.")
+    return unit
+
+
 def iter_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | None = None,
                total: float = 100.0):
-    """Yield compositions of the space.
+    """Yield compositions of the space (values in the entered basis ``unit``).
 
-    ``unit="ratio"``: every element of a system takes each positive value of its grid independently
-    (cartesian product); proportional duplicates are removed (the first of each ray is kept,
-    :func:`_ray_first`). ``unit="at"``: as above but only combinations summing to ``total`` at.%
-    are valid.
+    ``unit="ratio"`` / ``"mass"``: every element of a system takes each positive value of its grid
+    independently (cartesian product); proportional duplicates are removed (the first of each ray is kept,
+    :func:`_ray_first`). ``unit="at"`` / ``"wt"``: as above but only combinations summing to ``total``
+    (100 %) are valid.
 
     Duplicates can only occur inside one system: every value is positive, so two systems never
     share an element set.  In at.% every combination of a system has the same sum, so two
@@ -257,6 +274,7 @@ def iter_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | No
     combinations are enumerated directly (``_sum_combos``) instead of filtering the product.
     The generator holds no per-composition state: it can enumerate millions in constant memory.
     """
+    check_unit(unit)
     scale, target = _space_grids(specs, total)
     from itertools import product
     for system in systems(specs, sizes):
@@ -264,7 +282,7 @@ def iter_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | No
         if any(not g for g in grids):
             continue
         names = [s.element for s in system]
-        if unit == "at":
+        if unit in SUM_UNITS:
             for combo in _sum_combos(grids, target):
                 yield {el: v / scale for el, v in zip(names, combo)}
             continue
@@ -332,13 +350,14 @@ def count_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | N
                 stop_after: int = DEFAULT_LIMIT, total: float = 100.0, cancelled=None) -> SpaceCount:
     """Number of compositions :func:`iter_space` yields, without materialising them.
 
-    at.%: exact, per system, by :func:`_count_sum` (no duplicates exist, see :func:`iter_space`).
-    Ratio: a system's product of ``P`` tuples holds at least ``P / min |gridᵢ|`` distinct directions
+    at.% / wt.%: exact, per system, by :func:`_count_sum` (no duplicates exist, see :func:`iter_space`).
+    Ratio / mass: a system's product of ``P`` tuples holds at least ``P / min |gridᵢ|`` distinct directions
     (a ray meets each grid at most ``|gridᵢ|`` times), so a system that alone proves the count
     exceeds ``stop_after`` stops immediately; otherwise the product is walked with the same duplicate
     rule as ``iter_space`` and stopped once ``stop_after`` is exceeded.
     ``cancelled()`` (optional) is polled while walking a product; a cancelled count returns early.
     """
+    check_unit(unit)
     scale, target = _space_grids(specs, total)
     syst = systems(specs, sizes)
     cap = stop_after + 1
@@ -349,7 +368,7 @@ def count_space(specs: list[SweepSpec], unit: str = "ratio", sizes: set[int] | N
         grids = [_positive_grid(s, scale) for s in system]
         if any(not g for g in grids):
             continue
-        if unit == "at":
+        if unit in SUM_UNITS:
             n += _count_sum(grids, target, cap - n)
         else:
             sizes_ = [len(g) for g in grids]

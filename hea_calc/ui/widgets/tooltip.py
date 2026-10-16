@@ -29,7 +29,9 @@ Visual specification (Carbon tooltip specs, HEA design where it customises them)
   to stay on screen; the caret is computed from the trigger's screen position, independently of
   the body, so it keeps pointing at the trigger after any shift (Carbon: "align the caret tip
   center with the trigger button"), limited only by the rounded corners;
-* timing: Carbon React defaults, enter 100 ms, leave 300 ms; immediate on keyboard focus.
+* timing: enter 100 ms (Carbon React default), immediate on keyboard focus.  Closing is immediate (HEA
+  product decision, release reconciliation): a tooltip is visible only while its trigger is hovered or keeps
+  keyboard focus - no post-hover grace period, no fade.  Toggletips are unaffected (explicitly dismissed).
 """
 
 from __future__ import annotations
@@ -40,8 +42,8 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPolygonF, QTextDocumentFragment
-from PySide6.QtWidgets import (QAbstractButton, QAbstractItemView, QApplication, QHeaderView, QLabel, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QAbstractButton, QAbstractItemView, QApplication, QHBoxLayout, QHeaderView, QLabel,
+                               QVBoxLayout, QWidget)
 
 from .. import icons
 from ..theme import BODY_COMPACT_01, FOCUS_WIDTH, THEME, TOOLTIP_RADIUS, font, t
@@ -50,7 +52,7 @@ CARET_W, CARET_H = 12, 6
 CARET_GAP = 4
 START_CARET_INSET = 22      # start-aligned body: caret centre 22 px from its edge (Group 241.png, 66/3)
 ENTER_DELAY_MS = 100
-LEAVE_DELAY_MS = 300
+LEAVE_DELAY_MS = 0          # no linger: hide as soon as the pointer leaves the trigger
 
 
 def _wrap(line: str, fm: QFontMetrics, width: int) -> list[str]:
@@ -280,8 +282,8 @@ def _header_tip(header: QHeaderView, pos: QPoint) -> tuple[str, QRect] | None:
 class ToolTipController(QObject):
     """Application-wide event filter that shows :class:`CarbonToolTip` instead of Qt's tooltip.
 
-    * plain widgets with ``toolTip()``: Enter starts the 100 ms enter delay, Leave the 300 ms leave
-      delay; keyboard focus (Tab / Backtab / Shortcut) shows it at once, focus-out hides it;
+    * plain widgets with ``toolTip()``: Enter starts the 100 ms enter delay, Leave hides at once (no linger);
+      keyboard focus (Tab / Backtab / Shortcut) shows it at once, focus-out hides it;
     * item views and headers: the per-cell / per-section tooltip, anchored to that cell, refreshed
       as the pointer moves to another cell;
     * ``Esc`` and any mouse press elsewhere dismiss it; Qt's own ``QEvent.ToolTip`` is swallowed.
@@ -301,6 +303,7 @@ class ToolTipController(QObject):
         self._leave.setSingleShot(True)
         self._leave.setInterval(LEAVE_DELAY_MS)
         self._leave.timeout.connect(self.hide)
+        self._focus_shown = False         # the visible tip was opened by keyboard focus
 
     # ---------------------------------------------------------------- showing / hiding
     def _bubble(self) -> CarbonToolTip:
@@ -315,6 +318,7 @@ class ToolTipController(QObject):
         screen = QApplication.screenAt(anchor.center()) or self.app.primaryScreen()
         below = str(widget.property("tip_align") or "") == "bottom"
         self._leave.stop()
+        self._focus_shown = False
         self._source = widget
         self._bubble().show_for(anchor, text, screen.availableGeometry(), below)
 
@@ -323,6 +327,7 @@ class ToolTipController(QObject):
         self._leave.stop()
         self._pending = None
         self._source = None
+        self._focus_shown = False
         if self.tip is not None:
             self.tip.hide()
 
@@ -354,8 +359,8 @@ class ToolTipController(QObject):
             if obj is self._pending:
                 self._enter.stop()
                 self._pending = None
-            if obj is self._source:
-                self._leave.start()
+            if obj is self._source and not (self._focus_shown and obj.hasFocus()):
+                self.hide()             # no linger after hover (a keyboard-focus tip stays with the focus)
         elif et == QEvent.Type.MouseMove and self._source is obj and self.tip is not None \
                 and isinstance(obj.parent(), (QAbstractItemView, QHeaderView)):
             # left the cell the tip belongs to
@@ -367,6 +372,7 @@ class ToolTipController(QObject):
             if obj.toolTip() and reason in (Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason,
                                             Qt.FocusReason.ShortcutFocusReason):
                 self.show_tip(obj, obj.toolTip())
+                self._focus_shown = True
         elif et == QEvent.Type.FocusOut:
             if obj is self._source:
                 self.hide()
@@ -417,6 +423,27 @@ def controller() -> ToolTipController | None:
 
 
 # ==================================================================================== toggletip
+class _ToggletipIconRow(QWidget):
+    """One toggletip row: a 16 px vector icon (inverse tokens, painted at the device pixel ratio) + text."""
+
+    def __init__(self, icon_name: str, text: QLabel):
+        super().__init__()
+        self.icon_name = icon_name
+        self.label = text
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(24, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(text, 0, Qt.AlignmentFlag.AlignTop)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        fm = QFontMetrics(self.label.font())
+        y = max(0.0, (min(18, fm.height()) - 16) / 2 + 1)          # centred on the first text line
+        icons.paint(p, self.icon_name, QRectF(0, y, 16, 16), inverse=True)
+        p.end()
+
+
 class Toggletip(QWidget):
     """Carbon toggletip popover: inverse surface, 16 px padding, 2 px corners, caret on the trigger.
 
@@ -430,27 +457,47 @@ class Toggletip(QWidget):
 
     PAD = 16
     MAX_W = 288
+    ROW_GAP = 4
 
-    def __init__(self, anchor: QWidget, html: str, title: str = "", width: int | None = None):
+    def __init__(self, anchor: QWidget, html, title: str = "", width: int | None = None, on_link=None):
+        """``html``: rich text, or a list of blocks - a paragraph string, or ``("icon", name, html)`` for a
+        row led by a 16 px status / Carbon icon.  Icons are vector-painted in device pixels from the *inverse*
+        tokens (crisp at every DPR; never a raster ``<img>``).  ``on_link(href)`` handles link activation."""
         super().__init__(anchor.window(), Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint
                          | Qt.WindowType.NoDropShadowWindowHint)
         self.anchor = anchor
+        self.on_link = on_link
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setAccessibleName(title or "More information")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.max_w = width or self.MAX_W
         lay = QVBoxLayout(self)
-        self.label = QLabel(html)
-        self.label.setObjectName("ToggletipText")
-        self.label.setTextFormat(Qt.TextFormat.RichText)
-        self.label.setWordWrap(True)
-        self.label.setFont(font(BODY_COMPACT_01))
-        self.label.setStyleSheet(f"color: {t('text-inverse')}; background: transparent; font-size: 14px;")
-        self.label.setAccessibleDescription(QTextDocumentFragment.fromHtml(html).toPlainText())
-        self.label.setFixedWidth(self.max_w - 2 * self.PAD)
-        lay.addWidget(self.label)
-        body_h = self.label.heightForWidth(self.label.width())
+        lay.setSpacing(self.ROW_GAP)
+        blocks = [html] if isinstance(html, str) else list(html)
+        inner = self.max_w - 2 * self.PAD
+        self.labels: list[QLabel] = []
+        body_h = 0
+        plain = []
+        for i, b in enumerate(blocks):
+            if isinstance(b, tuple) and b and b[0] == "icon":
+                row = _ToggletipIconRow(b[1], self._text(b[2], inner - 24))
+                lay.addWidget(row)
+                self.labels.append(row.label)
+                h = row.label.heightForWidth(inner - 24)
+                row.setFixedHeight(max(16, h))
+                body_h += max(16, h)
+                plain.append(QTextDocumentFragment.fromHtml(b[2]).toPlainText())
+            else:
+                lab = self._text(str(b), inner)
+                lay.addWidget(lab)
+                self.labels.append(lab)
+                body_h += lab.heightForWidth(inner)
+                plain.append(QTextDocumentFragment.fromHtml(str(b)).toPlainText())
+            if i:
+                body_h += self.ROW_GAP
+        self.label = self.labels[0] if self.labels else QLabel()
+        self.setAccessibleDescription(" ".join(plain))
         body = QSize(self.max_w, body_h + 2 * self.PAD)
         g = anchor.mapToGlobal(QPoint(0, 0))
         screen = (QApplication.screenAt(g) or QApplication.primaryScreen()).availableGeometry()
@@ -462,6 +509,36 @@ class Toggletip(QWidget):
                                self.PAD + (CARET_H if side == "top" else 0))
         self.setFixedSize(popover_size(body, side))
         self.move(self.placement.pos)
+
+    def _text(self, html: str, width: int) -> QLabel:
+        lab = QLabel(html)
+        lab.setObjectName("ToggletipText")
+        lab.setTextFormat(Qt.TextFormat.RichText)
+        lab.setWordWrap(True)
+        lab.setFont(font(BODY_COMPACT_01))
+        # inverse surface: text-inverse, link-inverse (Carbon), never the main surface's tokens
+        lab.setStyleSheet(f"color: {t('text-inverse')}; background: transparent; font-size: 14px;")
+        pal = lab.palette()
+        pal.setColor(pal.ColorRole.Link, QColor(t("link-inverse")))
+        pal.setColor(pal.ColorRole.LinkVisited, QColor(t("link-inverse")))
+        lab.setPalette(pal)
+        lab.setOpenExternalLinks(False)
+        lab.linkActivated.connect(self._link)
+        lab.setFixedWidth(width)
+        return lab
+
+    def _link(self, href: str) -> None:
+        cb = self.on_link
+        self.close()
+        if cb is not None:
+            cb(href)
+        elif href.startswith(("http://", "https://")):
+            from PySide6.QtGui import QDesktopServices
+            from PySide6.QtCore import QUrl
+            QDesktopServices.openUrl(QUrl(href))
+        else:
+            from .. import help_router
+            help_router.open(href, self.anchor)
 
     @property
     def _below(self) -> bool:

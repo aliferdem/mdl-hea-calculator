@@ -7,14 +7,15 @@ not part of v1), one base population and optional conjunctive restrictions:
 
 * ``full``     - every alive result of the run;
 * ``filtered`` - the run's results passing a *copy* of the Results-table filter taken when the scope
-  was resolved (same SQL semantics as the table, ``repository.filter_sql``);
-* ``checked``  - a *snapshot* of the checked results (``vw.<snapshot>`` id table) taken when the scope
-  was resolved.
+  was resolved (same SQL semantics as the table, ``repository.filter_sql``).
 
-Stored results never change after they are written - removal deletes them - so a scope is a predicate
-(plus, for checked results, a snapshot table): removed results leave every population at once and
-nothing else can change it.  Table interactions (sort, page, hover, double-click, filter edits,
-checking rows) never re-resolve a scope; the state holder only flags it *stale*.
+(A "checked results" population existed briefly with a Results-table checkbox column; the product decision of
+the release reconciliation removed both.  Selected plot points reach the table only through the explicit id
+filter of "Show in results table" - ``idsets.py``.)
+
+Stored results never change after they are written - removal deletes them - so a scope is a predicate:
+removed results leave every population at once and nothing else can change it.  Table interactions (sort,
+page, hover, double-click, filter edits) never re-resolve a scope; the state holder only flags it *stale*.
 """
 
 from __future__ import annotations
@@ -24,12 +25,12 @@ import json
 import uuid
 from dataclasses import dataclass, field, replace
 
-from ..repository import filter_sql, q
+from ..repository import filter_sql
 from ..results import IdSetFilter, ModelFilter, RangeFilter
 
-FULL, FILTERED, CHECKED = "full", "filtered", "checked"
-BASES = (FULL, FILTERED, CHECKED)
-BASE_LABELS = {FULL: "Full result set", FILTERED: "Filtered result set", CHECKED: "Checked results"}
+FULL, FILTERED = "full", "filtered"
+BASES = (FULL, FILTERED)
+BASE_LABELS = {FULL: "Full result set", FILTERED: "Filtered result set"}
 
 
 def freeze_filters(filters) -> tuple:
@@ -89,8 +90,6 @@ class CollectionScope:
     run_id: int
     base: str = FULL
     filters: tuple = ()                      # frozen filter copy (base = filtered)
-    snapshot: str | None = None              # vw table of checked ids (base = checked)
-    snapshot_count: int = 0                  # checked results when the snapshot was taken
     families: tuple[str, ...] | None = None
     sizes: tuple[int, ...] | None = None
     blocks: tuple[int, ...] | None = None
@@ -99,13 +98,10 @@ class CollectionScope:
     def __post_init__(self):
         if self.base not in BASES:
             raise ValueError(f"Unknown population {self.base!r}")
-        if self.base == CHECKED and not self.snapshot:
-            raise ValueError("A checked-results scope needs a snapshot table")
 
     # -------------------------------------------------------------- identity
     def definition(self) -> dict:
         return {"run": self.run_id, "base": self.base, "filters": [list(f) for f in self.filters],
-                "snapshot": self.snapshot if self.base == CHECKED else None,
                 "families": sorted(self.families) if self.families else None,
                 "sizes": sorted(self.sizes) if self.sizes else None,
                 "blocks": sorted(self.blocks) if self.blocks else None}
@@ -134,8 +130,6 @@ class CollectionScope:
         from the table (and are being deleted), so they are never part of a collection."""
         r = alias
         frm = f"results {r}"
-        if self.base == CHECKED:
-            frm += f" JOIN vw.{q(self.snapshot)} s_ ON s_.rid = {r}.result_id"
         where = [f"{r}.run_id = ?", f"{r}.result_id >= ?"]
         params: list = [int(self.run_id), int(workspace_lo)]
         if self.base == FILTERED and self.filters:
@@ -173,10 +167,9 @@ class CollectionScope:
 @dataclass(frozen=True)
 class ResolvedScope:
     """A scope with the population size it had when resolved (``n``) and the state it was resolved
-    from (filter copy / checked-set version) - the basis of the stale notices."""
+    from (the filter copy) - the basis of the stale notice."""
     scope: CollectionScope
     n: int
     resolved_at: str
     filter_snapshot: tuple = ()
-    checked_version: int = 0
     data_version: int = 0

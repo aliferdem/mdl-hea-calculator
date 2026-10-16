@@ -36,9 +36,11 @@ from itertools import islice
 from . import composition as C
 from .expression import (Expression, ExpressionSpace, VariableRange, block_variables, composition_key,
                          count_blocks, count_combinations, expression_elements, generate_blocks)
-from .generation import DEFAULT_LIMIT, RangeError, SweepSpec, count_space, generate_space, iter_space
+from .generation import (DEFAULT_LIMIT, SUM_UNITS, RangeError, SweepSpec, check_unit, count_space, generate_space,
+                         iter_space)
 
 NAN = float("nan")
+UNIT_LABELS = {"ratio": "at. ratio", "at": "at.%", "wt": "wt.%", "mass": "g"}
 COPY_GENERATED_MAX = 1_048_575          # one Excel worksheet below its header row
 
 
@@ -51,11 +53,14 @@ class SweepRecipe:
     limit: int = DEFAULT_LIMIT
     kind = "sweep"
 
+    def __post_init__(self):
+        check_unit(self.unit)
+
     def estimate(self) -> int:
-        """Cheap upper bound of the batch size: exact for at.% (DP, < 1 ms even for 10⁸ alloys), the
-        grid product for ratios."""
+        """Cheap upper bound of the batch size: exact for at.% / wt.% (DP, < 1 ms even for 10⁸ alloys), the
+        grid product for ratios and masses."""
         sizes = set(self.sizes) if self.sizes else None
-        if self.unit == "at":
+        if self.unit in SUM_UNITS:
             return count_space(list(self.specs), self.unit, sizes, stop_after=10 ** 15).count
         from math import prod
         from .generation import _positive_grid, _space_grids, systems
@@ -68,18 +73,29 @@ class SweepRecipe:
         return count_space(list(self.specs), self.unit, sizes, stop_after=10 ** 15).count
 
     def iterate(self):
+        """Grid compositions in the entered basis (see :meth:`atomic` for what is calculated)."""
         sizes = set(self.sizes) if self.sizes else None
         return iter_space(list(self.specs), self.unit, sizes)
 
+    def atomic(self, grid: dict) -> dict:
+        """The composition calculated for one grid point: atomic amounts.  at. ratio / at.% are atomic
+        already; wt.% and mass are converted with the shared Single-composition conversion
+        (``composition.to_fractions``, standard atomic weights) and expressed in at.%."""
+        if self.unit in ("ratio", "at"):
+            return grid
+        x = C.to_fractions(grid, self.unit)
+        return {el: 100.0 * v for el, v in x.items()}
+
     def name(self, comp: dict) -> str:
-        return C.percent_name(comp) if self.unit == "at" else C.alloy_name(comp)
+        """Alloy name from the *atomic* composition (``atomic(grid)``)."""
+        return C.percent_name(comp) if self.unit in SUM_UNITS else C.alloy_name(comp)
 
     @property
     def elements(self) -> list[str]:
         return [s.element for s in self.specs]
 
     def run_meta(self) -> dict:
-        unit = "at.%" if self.unit == "at" else "at. ratio"
+        unit = UNIT_LABELS[self.unit]
         return {"mode": "sweep", "elements": self.elements,
                 "axes": [{"name": el, "col": f"c{i}", "kind": "element", "unit": unit}
                          for i, el in enumerate(self.elements)],
@@ -87,27 +103,35 @@ class SweepRecipe:
                            "specs": [{"element": s.element, "min": s.minimum, "max": s.maximum, "step": s.step,
                                       "required": s.required} for s in self.specs]}}
 
-    def design(self, comps, envs=None, results=None) -> array:
-        """Sweep coordinates (the generating grid values; 0 for an absent optional element)."""
+    def design(self, grid, envs=None, results=None) -> array:
+        """Sweep coordinates: the generating grid values in the entered basis (0 for an absent optional
+        element) - for wt.% / mass these are the entered wt.% / grams, not the converted at.%."""
         els = self.elements
-        return array("d", (float(c.get(el, 0.0)) for c in comps for el in els))
+        return array("d", (float(c.get(el, 0.0)) for c in grid for el in els))
+
+    def _generate(self) -> tuple[list[dict], list[dict]]:
+        sizes = set(self.sizes) if self.sizes else None
+        grid = generate_space(list(self.specs), self.unit, sizes, limit=self.limit)
+        if not grid:
+            raise RangeError("No valid compositions for these ranges"
+                             + (f" ({UNIT_LABELS[self.unit]} values must sum to 100 %)." if self.unit in SUM_UNITS
+                                else "."))
+        return grid, [self.atomic(g) for g in grid]
 
     def __call__(self):
-        sizes = set(self.sizes) if self.sizes else None
-        comps = generate_space(list(self.specs), self.unit, sizes, limit=self.limit)
-        if not comps:
-            raise RangeError("No valid compositions for these ranges"
-                             + (" (at.% values must sum to 100 %)." if self.unit == "at" else "."))
+        _grid, comps = self._generate()
         names = [self.name(c) for c in comps]
         return "sweep", names, comps, [{} for _ in comps]
 
     def materialise(self) -> dict:
-        _src, names, comps, envs = self()
-        return {"sources": "sweep", "names": names, "comps": comps, "variables": None, "blocks": None}
+        grid, comps = self._generate()
+        return {"sources": "sweep", "names": [self.name(c) for c in comps], "comps": comps, "grid": grid,
+                "variables": None, "blocks": None}
 
 
 class SweepCursor:
-    """Sequential slices of a sweep (one per worker and job): never re-generates what it passed."""
+    """Sequential slices of a sweep (one per worker and job): never re-generates what it passed.  Slices are
+    grid compositions in the entered basis; the chunk calculation converts them (``SweepRecipe.atomic``)."""
 
     def __init__(self, recipe: SweepRecipe):
         self.recipe = recipe

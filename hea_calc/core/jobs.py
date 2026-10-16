@@ -123,9 +123,10 @@ def _sweep_chunk(key, recipe, start: int, stop: int, options: dict, deliver=None
     if cur is None:
         from .recipes import SweepCursor
         cur = st["cursor"] = SweepCursor(recipe)
-    comps = cur.take(start, stop)
+    grid = cur.take(start, stop)
+    comps = [recipe.atomic(g) for g in grid]
     return _deliver(calculate_recipe_chunk(_ENGINE, recipe, comps, None, None, None, "sweep", options,
-                                           _CANCEL.is_set), deliver)
+                                           _CANCEL.is_set, design_rows=grid), deliver)
 
 
 def _expression_plan(recipe, path: str, block: int):         # pragma: no cover - runs in a child
@@ -179,13 +180,15 @@ def calculate_chunk(engine, compositions: Sequence[dict], options: dict,
 
 
 def calculate_recipe_chunk(engine, recipe, comps, names, envs, blocks, source: str, options: dict,
-                           cancelled: Callable[[], bool] = lambda: False) -> dict:
+                           cancelled: Callable[[], bool] = lambda: False, design_rows=None) -> dict:
+    """``design_rows``: the generating coordinates when they differ from the calculated compositions (a
+    wt.% / mass composition space calculates converted atomic amounts but keeps the entered values)."""
     chunk = calculate_chunk(engine, comps, options, cancelled)
     results = chunk.pop("_results")
     n = chunk["n"]
     if names is None:
         names = [recipe.name(c) for c in comps[:n]]
-    design = recipe.design(comps[:n], (envs or [])[:n], results)
+    design = recipe.design((design_rows if design_rows is not None else comps)[:n], (envs or [])[:n], results)
     return with_metadata(chunk, names, source, envs, blocks, design)
 
 
@@ -498,8 +501,10 @@ class CalculationJob:
                 sl = slice(start, start + step)
                 envs = m["variables"][sl] if m["variables"] is not None else None
                 blocks = m["blocks"][sl] if m["blocks"] is not None else None
+                grid = m.get("grid")
                 chunk = calculate_recipe_chunk(engine, recipe, part, m["names"][sl], envs, blocks, recipe.kind,
-                                               d.options, self._cancel.is_set)
+                                               d.options, self._cancel.is_set,
+                                               design_rows=grid[sl] if grid is not None else None)
             if not self._emit(start, chunk) or chunk["cancelled"]:
                 return
             if self.delivery is not None and self.delivery.failed():
@@ -535,12 +540,13 @@ class CalculationJob:
                                                      self._deliver_arg(i)))
                          for a in range(lo, hi + 1, size))
             else:
-                # at.%: exact DP, milliseconds; ratio: a duplicate-aware walk - in a worker
-                n = recipe.count() if recipe.unit == "at" else self._wait(pool.submit(_recipe_count, recipe))
+                # at.% / wt.%: exact DP, milliseconds; ratio / mass: a duplicate-aware walk - in a worker
+                from .generation import SUM_UNITS, RangeError
+                summed = recipe.unit in SUM_UNITS
+                n = recipe.count() if summed else self._wait(pool.submit(_recipe_count, recipe))
                 if not n:
-                    from .generation import RangeError
                     raise RangeError("No valid compositions for these ranges"
-                                     + (" (at.% values must sum to 100 %)." if recipe.unit == "at" else "."))
+                                     + (" (values must sum to 100 %)." if summed else "."))
                 self.total = n
                 size = self._chunk_size(n)
                 tasks = ((lambda i, s=s: pool.submit(_sweep_chunk, key, recipe, s, min(s + size, n), options,

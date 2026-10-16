@@ -17,81 +17,23 @@ No widget holds result objects: tables receive plain rows (text / tags), the vie
 
 from __future__ import annotations
 
-import html as _html
 import time
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QTextDocument
-from PySide6.QtWidgets import (QAbstractButton, QApplication, QCheckBox, QFrame, QHBoxLayout, QLabel, QScrollArea,
-                               QSizePolicy, QVBoxLayout, QWidget)
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath
+from PySide6.QtWidgets import (QAbstractButton, QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout,
+                               QWidget)
 
 from .. import crisp, icons
-from ..theme import (BODY_COMPACT_01, CORNER_RADIUS, FOCUS_WIDTH, HAIRLINE, HEADING_COMPACT_01, LABEL_01, THEME,
-                     font, t)
-from ..widgets.common import button, paint_tag, sup_html
-from ..widgets.menu import CarbonMenu
+from ..theme import BODY_COMPACT_01, CORNER_RADIUS, FOCUS_WIDTH, HAIRLINE, HEADING_COMPACT_01, LABEL_01, font, t
+from ..widgets.common import button, paint_tag, retire
+# The selection controls are shared application primitives (widgets/dropdown.py); re-exported for Analysis.
+from ..widgets.dropdown import (Dropdown, MultiSelect, Popover, RichMenu, html_width,  # noqa: F401
+                                open_popover, paint_html, plain_text, rich, text_doc)
 from ..widgets.scroll import inner_scroll_area
-from ..widgets.tooltip import CARET_H, CARET_W, InfoButton, body_rect, bubble_path, place_popover, popover_size
+from ..widgets.tooltip import CARET_W, InfoButton
 
 ROW_XS, ROW_SM = 24, 32
-
-
-# ====================================================================== rich text painting
-def rich(text: str) -> str:
-    """HTML with Unicode superscripts as <sup> (IBM Plex lacks ⁻ ¹ glyphs at small sizes)."""
-    return sup_html(text or "")
-
-
-_DOCS: dict = {}
-
-
-def text_doc(html: str, typo=BODY_COMPACT_01, color: str = "text-primary", width: float = -1) -> QTextDocument:
-    """A cached laid-out document for a short rich-text label (theme-aware)."""
-    key = (html, typo, t(color), width, THEME.name)
-    doc = _DOCS.get(key)
-    if doc is None:
-        if len(_DOCS) > 4000:
-            _DOCS.clear()
-        doc = QTextDocument()
-        doc.setDocumentMargin(0)
-        doc.setDefaultFont(font(typo))
-        doc.setDefaultStyleSheet(f"body {{ color: {t(color)}; }} sub, sup {{ font-size: 70%; }}")
-        doc.setHtml(f"<body>{rich(html)}</body>")
-        if width > 0:
-            doc.setTextWidth(width)
-        _DOCS[key] = doc
-    return doc
-
-
-def html_width(html: str, typo=BODY_COMPACT_01) -> float:
-    return text_doc(html, typo).idealWidth()
-
-
-def paint_html(p: QPainter, rect: QRectF | QRect, html: str, typo=BODY_COMPACT_01, color: str = "text-primary",
-               align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignLeft, elide: bool = True) -> float:
-    """Paint one line of rich text vertically centred in ``rect``; returns the width painted."""
-    rect = QRectF(rect)
-    doc = text_doc(html, typo, color)
-    w = doc.idealWidth()
-    h = doc.size().height()
-    x = rect.left()
-    if align & Qt.AlignmentFlag.AlignRight:
-        x = rect.right() - w
-    elif align & Qt.AlignmentFlag.AlignHCenter:
-        x = rect.left() + (rect.width() - w) / 2
-    y = rect.top() + (rect.height() - h) / 2
-    p.save()
-    if elide and w > rect.width():
-        p.setClipRect(rect)
-    p.translate(x, y)
-    doc.drawContents(p)
-    p.restore()
-    return min(w, rect.width())
-
-
-def plain_text(html: str) -> str:
-    from ...core.analysis.models import plain
-    return _html.unescape(plain(html))
 
 
 def label(text: str, role: str = "body", wrap: bool = False, selectable: bool = False) -> QLabel:
@@ -248,188 +190,6 @@ class ContentSwitcher(QWidget):
         p.end()
 
 
-# ====================================================================== rich menu (shared Carbon menu)
-class RichMenu(CarbonMenu):
-    """:class:`CarbonMenu` whose items may carry rich text (``action.setProperty("html", ...)``) and
-    section headers (``action.setProperty("section", True)``, disabled, not focusable)."""
-
-    def content_width(self) -> int:
-        w = super().content_width()
-        lead = 24 if any(a.isCheckable() for a in self.actions()) else 0
-        for a in self.actions():
-            h = a.property("html")
-            if h:
-                w = max(w, int(html_width(h)) + 32 + lead + 8)
-        return w
-
-    def paintEvent(self, e):
-        rich_acts = [a for a in self.actions() if a.property("html") or a.property("section")]
-        if not rich_acts:
-            return super().paintEvent(e)
-        # paint the plain items through the base, then over-paint rich / section items
-        saved = {}
-        for a in rich_acts:
-            saved[a] = a.text()
-            a.setText("")
-        super().paintEvent(e)
-        for a, txt in saved.items():
-            a.setText(txt)
-        p = QPainter(self)
-        check_col = any(a.isCheckable() for a in self.actions())
-        active = self.activeAction()
-        for a in rich_acts:
-            if not a.isVisible():
-                continue
-            r = self.actionGeometry(a)
-            x = 16 + (24 if check_col else 0)
-            if a.property("section"):
-                p.setFont(font(LABEL_01))
-                p.setPen(QColor(t("text-helper")))
-                p.drawText(QRectF(16, r.top(), self.width() - 32, r.height()),
-                           int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), a.text())
-                continue
-            hot = a.isEnabled() and a is active
-            color = "text-disabled" if not a.isEnabled() else ("text-primary" if hot else "text-secondary")
-            paint_html(p, QRectF(x, r.top(), self.width() - x - 16, r.height()), a.property("html"),
-                       BODY_COMPACT_01, color)
-        p.end()
-
-
-# ====================================================================== dropdown
-class Dropdown(QAbstractButton):
-    """Carbon dropdown, sm (32 px).  ``inline`` = transparent field with a leading label ("X", "Colour");
-    otherwise the field style (``field-02`` fill, 1 px bottom rule).  Items: ``(value, html)`` tuples, a
-    ``("--section--", title)`` header, or ``(value, html, enabled, tooltip)``."""
-
-    changed = Signal(object)
-
-    def __init__(self, items=(), value=None, prefix: str = "", inline: bool = False, accessible: str = "",
-                 parent=None, width: int | None = None, placeholder: str = ""):
-        super().__init__(parent)
-        self.prefix = prefix
-        self.inline = inline
-        self.placeholder = placeholder
-        self.items: list[tuple] = []
-        self.value = None
-        self.invalid = False
-        self._hover = False
-        self._open = False
-        self.setFixedHeight(32)
-        if width:
-            self.setFixedWidth(width)
-        else:
-            self.setMinimumWidth(96)
-            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
-        self.setAccessibleName(accessible or prefix or "Dropdown")
-        self.clicked.connect(self.open_menu)
-        self.set_items(items, value)
-
-    # -------------------------------------------------------------- data
-    def set_items(self, items, value=None) -> None:
-        self.items = [tuple(i) for i in items]
-        values = [i[0] for i in self.items if i[0] != "--section--"]
-        self.value = value if value in values else (self.value if self.value in values else
-                                                    (values[0] if values and value is None and not self.placeholder
-                                                     else value if value in values else None))
-        self.update()
-
-    def set_value(self, value, emit: bool = False) -> None:
-        if value == self.value:
-            return
-        self.value = value
-        self.update()
-        if emit:
-            self.changed.emit(value)
-
-    def current_html(self) -> str:
-        """Field text: the item's short form (5th element) when it has one, else its list text."""
-        for it in self.items:
-            if it[0] == self.value and it[0] != "--section--":
-                return it[4] if len(it) > 4 and it[4] else it[1]
-        return self.placeholder
-
-    def set_invalid(self, on: bool) -> None:
-        self.invalid = on
-        self.update()
-
-    # -------------------------------------------------------------- menu
-    def open_menu(self) -> None:
-        menu = RichMenu(parent=self)
-        menu.trigger_width = self.width()
-        for it in self.items:
-            if it[0] == "--section--":
-                act = menu.add_action(plain_text(it[1]), enabled=False)
-                act.setProperty("section", True)
-                continue
-            enabled = it[2] if len(it) > 2 else True
-            act = menu.add_action(plain_text(it[1]), lambda v=it[0]: self.set_value(v, emit=True),
-                                  enabled=enabled, checkable=True, checked=it[0] == self.value)
-            act.setProperty("html", it[1])
-            if len(it) > 3 and it[3]:
-                act.setToolTip(it[3])
-        self._open = True
-        self.update()
-        menu.exec(self.mapToGlobal(QPoint(0, self.height())))
-        menu.deleteLater()
-        self._open = False
-        self.update()
-
-    def keyPressEvent(self, e):
-        if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space, Qt.Key.Key_Down):
-            self.open_menu()
-            return
-        super().keyPressEvent(e)
-
-    # -------------------------------------------------------------- painting
-    def enterEvent(self, e):
-        self._hover = True
-        self.update()
-
-    def leaveEvent(self, e):
-        self._hover = False
-        self.update()
-
-    def sizeHint(self) -> QSize:
-        w = 16 + (html_width(self.prefix) + 8 if self.prefix else 0) + html_width(self.current_html()) + 40
-        return QSize(int(w), 32)
-
-    def paintEvent(self, _e):
-        p = QPainter(self)
-        r = self.rect()
-        enabled = self.isEnabled()
-        if self.inline:
-            if enabled and (self._hover or self._open):
-                crisp.fill_rect(p, r, t("layer-hover-01"))
-        else:
-            crisp.fill_rect(p, r, t("field-hover-02" if enabled and self._hover else "field-02"))
-            crisp.hline_bottom(p, r, t("border-strong-02" if enabled else "border-disabled"), HAIRLINE)
-        x = 16.0
-        if self.prefix:
-            x += paint_html(p, QRectF(x, 0, r.width() - x - 40, r.height()), self.prefix, BODY_COMPACT_01,
-                            "text-secondary" if enabled else "text-disabled") + 8
-        html = self.current_html()
-        empty = self.value is None and not isinstance(self, MultiSelect)
-        color = "text-disabled" if not enabled else ("text-placeholder" if empty else
-                                                     ("link-primary" if getattr(self, "link", False) else "text-primary"))
-        paint_html(p, QRectF(x, 0, r.width() - x - 40, r.height()), html, BODY_COMPACT_01, color)
-        name = "chevron_down"
-        p.save()
-        if self._open:
-            p.translate(r.width() - 24, r.height() / 2)
-            p.rotate(180)
-            p.translate(-(r.width() - 24), -r.height() / 2)
-        icons.paint(p, name, QRectF(r.width() - 32, (r.height() - 16) / 2, 16, 16),
-                    "icon-primary" if enabled else "icon-disabled")
-        p.restore()
-        if self.invalid:
-            crisp.frame(p, r, FOCUS_WIDTH, t("support-error"))
-        elif self.hasFocus():
-            crisp.frame(p, r, FOCUS_WIDTH, t("focus"))
-        p.end()
-
-
 class LabeledField(QWidget):
     """A visible label (label-01) above a control (workspace rails, popovers)."""
 
@@ -442,140 +202,6 @@ class LabeledField(QWidget):
         lay.addWidget(self.caption)
         lay.addWidget(control)
         self.control = control
-
-
-# ====================================================================== popover
-class Popover(QWidget):
-    """Carbon popover: ``layer-02`` surface, 2 px corners (HEA tooltip radius), caret on the trigger, 16 px
-    padding.  Closes on Esc, on an outside click or on the trigger; focus returns to the trigger."""
-
-    closed = Signal()
-
-    def __init__(self, anchor: QWidget, content: QWidget, width: int = 320, prefer: str = "bottom",
-                 align: str = "start", title: str = ""):
-        super().__init__(anchor.window(), Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint
-                         | Qt.WindowType.NoDropShadowWindowHint)
-        self.anchor = anchor
-        self.setObjectName("AnaPopover")
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        self.setAccessibleName(title or "Popover")
-        lay = QVBoxLayout(self)
-        content.setParent(self)
-        content.setFixedWidth(width - 32)
-        lay.addWidget(content)
-        content.adjustSize()
-        body = QSize(width, content.sizeHint().height() + 32)
-        g = anchor.mapToGlobal(QPoint(0, 0))
-        screen = (QApplication.screenAt(g) or QApplication.primaryScreen()).availableGeometry()
-        self.placement = place_popover(body, QRect(g, anchor.size()), screen, prefer, align)
-        side = self.placement.side
-        lay.setContentsMargins(16 + (CARET_H if side == "right" else 0), 16 + (CARET_H if side == "bottom" else 0),
-                               16 + (CARET_H if side == "left" else 0), 16 + (CARET_H if side == "top" else 0))
-        self.setFixedSize(popover_size(body, side))
-        self.move(self.placement.pos)
-
-    def paintEvent(self, _e):
-        from ..theme import TOOLTIP_RADIUS
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        body = body_rect(self.size(), self.placement.side)
-        path = bubble_path(body, TOOLTIP_RADIUS, self.placement.caret, self.placement.side)
-        p.fillPath(path, QColor(t("layer-02")))
-        p.end()
-
-    def keyPressEvent(self, e):
-        if e.key() == Qt.Key.Key_Escape:
-            self.close()
-            return
-        super().keyPressEvent(e)
-
-    def closeEvent(self, e):
-        super().closeEvent(e)
-        self.closed.emit()
-        a = self.anchor
-        if a is not None:
-            a.closed_at = time.monotonic()
-            a.setFocus(Qt.FocusReason.PopupFocusReason)
-
-
-def open_popover(anchor: QWidget, content: QWidget, width: int = 320, prefer: str = "bottom",
-                 align: str = "start", title: str = "") -> Popover | None:
-    """Open a popover unless the trigger was just used to close one (outside click replayed)."""
-    if time.monotonic() - getattr(anchor, "closed_at", 0.0) < 0.3:
-        return None
-    pop = Popover(anchor, content, width, prefer, align, title)
-    pop.show()
-    pop.setFocus(Qt.FocusReason.PopupFocusReason)
-    return pop
-
-
-# ====================================================================== multi-select
-class MultiSelect(Dropdown):
-    """Carbon MultiSelect (sm): the list is a checkbox popover; ``changed`` carries the selected values
-    (an empty tuple means "all").  Field text: "All families (4)" / "2 selected"."""
-
-    def __init__(self, noun: str, items=(), selected=(), parent=None, accessible: str = ""):
-        self.noun = noun
-        self.selected: tuple = tuple(selected)
-        super().__init__([], None, accessible=accessible or noun, parent=parent)
-        self.set_options(items, selected)
-
-    def set_options(self, items, selected=()) -> None:
-        self.options = [tuple(i) for i in items]        # (value, html)
-        values = [o[0] for o in self.options]
-        self.selected = tuple(v for v in selected if v in values)
-        self.update()
-
-    def current_html(self) -> str:
-        if not self.selected:
-            return f"All {self.noun} ({len(self.options)})"
-        if len(self.selected) == 1:
-            for v, h in self.options:
-                if v == self.selected[0]:
-                    return h
-        return f"{len(self.selected)} selected"
-
-    def open_menu(self) -> None:
-        content = QWidget()
-        lay = QVBoxLayout(content)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        boxes = []
-        for v, h in self.options:
-            cb = QCheckBox(plain_text(h))
-            cb.setChecked(v in self.selected)
-            cb.setFixedHeight(32)
-            cb.setProperty("value", v)
-            lay.addWidget(cb)
-            boxes.append(cb)
-        foot = QHBoxLayout()
-        clear = button("Clear", "ghost", "sm")
-        foot.addWidget(clear)
-        foot.addStretch(1)
-        done = button("Apply", "primary", "sm")
-        foot.addWidget(done)
-        lay.addSpacing(8)
-        lay.addLayout(foot)
-        pop = open_popover(self, content, max(self.width(), 280), title=self.noun)
-        if pop is None:
-            return
-
-        def apply():
-            sel = tuple(cb.property("value") for cb in boxes if cb.isChecked())
-            if len(sel) == len(boxes):
-                sel = ()
-            self.selected = sel
-            self.update()
-            pop.close()
-            self.changed.emit(sel)
-
-        def clear_all():
-            for cb in boxes:
-                cb.setChecked(False)
-
-        clear.clicked.connect(clear_all)
-        done.clicked.connect(apply)
 
 
 # ====================================================================== section heading
@@ -593,8 +219,8 @@ class SectionHeading(QWidget):
         lay.addWidget(self.title)
         lay.addStretch(1)
         self.summary = label(summary, "label")
+        lay.addWidget(self.summary)                 # parent first: a parentless setVisible(True) opens a window
         self.summary.setVisible(bool(summary))
-        lay.addWidget(self.summary)
         self.link = None
         if link:
             self.link = button(link, "ghost", "sm")
@@ -710,8 +336,52 @@ class DataTable(QWidget):
         self.rows = [[C(c) for c in r] for r in rows]
         self.groups = dict(groups or {})
         self.row_tips = list(row_tips) if row_tips else []
+        self._natural = None
         self._layout_rows()
+        self._fit_minimum()
         self.update()
+
+    # -------------------------------------------------------------- column widths (nothing clipped)
+    PAD_TEXT = 20                 # 16 px start + 4 px end padding of a left-aligned cell
+    PAD_RIGHT = 24                # 8 px start + 16 px end padding of a right-aligned cell
+    FLEX_CAP = 360                # a flexible column never *needs* more than this (it may get more)
+
+    def _cell_width(self, cell: Cell, align: str) -> float:
+        if cell.tag:
+            f = font(LABEL_01)
+            f.setPixelSize(12)                      # paint_tag's font
+            return 16 + QFontMetrics(f).horizontalAdvance(cell.tag) + 16 + (20 if cell.status else 0) + 8
+        if cell.status and not cell.html:
+            return 16 + 16 + 8
+        if cell.bar is not None:
+            return 64
+        if not cell.html:
+            return 0
+        return html_width(cell.html) + (self.PAD_RIGHT if align == "right" else self.PAD_TEXT)
+
+    def natural_widths(self) -> list[tuple[float, float]]:
+        """(minimum, natural) width per column: the header text and the widest cell, never less than a fixed
+        column's specified width.  Cached per row set."""
+        if self._natural is not None:
+            return self._natural
+        out = []
+        for ci, c in enumerate(self.columns):
+            al = c[2] if len(c) > 2 else "left"
+            head = html_width(c[0], HEADING_COMPACT_01) + (self.PAD_RIGHT if al == "right" else self.PAD_TEXT) \
+                if c[0] else 0
+            content = max((self._cell_width(r[ci], r[ci].align) for r in self.rows if ci < len(r)), default=0)
+            need = max(head, content)
+            if c[1]:
+                mn = max(float(c[1]), need)
+                out.append((mn, mn))
+            else:
+                out.append((max(head, min(content, self.FLEX_CAP), 48.0), max(need, 48.0)))
+        self._natural = out
+        return out
+
+    def _fit_minimum(self) -> None:
+        mins = sum(mn for mn, _nat in self.natural_widths()) + (24 if self.activatable else 0)
+        self.setMinimumWidth(int(mins + 0.999))
 
     def _layout_rows(self) -> None:
         y = ROW_SM if self.show_header else 0
@@ -726,13 +396,28 @@ class DataTable(QWidget):
         self.setFixedHeight(max(y, 1))
 
     def column_rects(self) -> list[tuple[float, float]]:
-        fixed = sum(c[1] for c in self.columns if c[1])
-        flex = [c for c in self.columns if not c[1]]
-        free = max(0.0, self.width() - fixed)
-        each = free / len(flex) if flex else 0
+        """Fixed columns get their (content-aware) width; flexible columns share the rest in proportion to
+        their natural width, never below their minimum (``natural_widths``) - so no header or cell is clipped
+        at any width the table is given (its minimum width is the sum of the minimums)."""
+        nat = self.natural_widths()
+        avail = float(self.width()) - (24 if self.activatable else 0)
+        fixed = sum(mn for (mn, _n), c in zip(nat, self.columns) if c[1])
+        flex = [i for i, c in enumerate(self.columns) if not c[1]]
+        widths = [mn if c[1] else 0.0 for (mn, _n), c in zip(nat, self.columns)]
+        if flex:
+            free = max(0.0, avail - fixed)
+            mins = {i: nat[i][0] for i in flex}
+            weights = {i: max(nat[i][1], 1.0) for i in flex}
+            rest = free - sum(mins.values())
+            if rest >= 0:
+                tot = sum(weights.values())
+                for i in flex:
+                    widths[i] = mins[i] + rest * weights[i] / tot
+            else:
+                for i in flex:
+                    widths[i] = mins[i]
         out, x = [], 0.0
-        for c in self.columns:
-            w = c[1] if c[1] else each
+        for w in widths:
             out.append((x, w))
             x += w
         return out
@@ -872,27 +557,31 @@ class KVRows(QWidget):
             it = self.lay.takeAt(0)
             if it.widget():
                 _w = it.widget()
-                _w.setParent(None)
-                _w.deleteLater()
+                retire(_w)
         for r in rows:
             self.lay.addWidget(_KVRow(r, self.label_w, self.value_w, self.unit_w))
 
 
 class _KVRow(QWidget):
+    """One key-value row: 24 px when the label fits on one line; a label that needs more width wraps and the row
+    grows (nothing is clipped at 454 px, 805 px or in the workspace)."""
+
     def __init__(self, r, lw, vw, uw):
         super().__init__()
-        self.setFixedHeight(ROW_XS)
+        self.setMinimumHeight(ROW_XS)
+        # never taller than the (wrapped) content: rows must not spread out when the page has spare height
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         lab, val, unit = r[0], r[1], r[2]
         info = r[3] if len(r) > 3 else None
         tag = r[4] if len(r) > 4 else None
         self.tip = r[5] if len(r) > 5 else ""
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setContentsMargins(0, 3, 0, 3)
         lay.setSpacing(0)
-        self.k = label(lab, "secondary")
+        self.k = label(lab, "secondary", wrap=True)
         self.k.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.k.setMinimumWidth(min(lw, 120))
-        self.k.setToolTip(plain_text(lab))
+        self.k.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         lay.addWidget(self.k, 1)
         if tag:
             from ..widgets.common import TagLabel
@@ -994,8 +683,8 @@ class InlineLoading(QWidget):
         lay.addWidget(self.text)
         self.cancel_btn = button("Cancel", "ghost", "sm")
         self.cancel_btn.clicked.connect(self.cancel.emit)
-        self.cancel_btn.setVisible(cancellable)
         lay.addWidget(self.cancel_btn)
+        self.cancel_btn.setVisible(cancellable)
         lay.addStretch(1)
         self.setFixedHeight(32)
 
@@ -1131,7 +820,14 @@ def scroll_page(widget: QWidget, margins=(20, 16, 20, 16)) -> tuple[QScrollArea,
     lay = QVBoxLayout(widget)
     lay.setContentsMargins(*margins)
     lay.setSpacing(16)
-    sa = inner_scroll_area(widget)
+    # The vertical bar floats over the 20 px right padding (OverlayScrollArea), so a tall page never loses width;
+    # horizontal scrolling only as the last resort: content whose minimum width (tables size their columns to
+    # their header and content) exceeds the page is reachable instead of clipped.
+    from ..widgets.scroll import OverlayScrollArea, own_wheel
+    sa = OverlayScrollArea()
+    sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    own_wheel(sa)
+    sa.setWidget(widget)
     return sa, lay
 
 

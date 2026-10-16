@@ -633,6 +633,8 @@ def test_storage_failure_during_a_calculation_never_leaves_the_ui_calculating(wi
     win.composition.unit_box.setCurrentIndex(1)
     for r in win.composition.sweep.rows.values():
         r.min.setText("5"), r.max.setText("50"), r.step.setText("5")
+    from conftest import settle_composition
+    settle_composition(win, app)
     win.composition.calc_btn.click()
     t0 = time.perf_counter()
     while win.worker is not None and time.perf_counter() - t0 < 60:
@@ -688,15 +690,20 @@ def test_sweep_summary_reports_large_sets_instead_of_refusing_them(win, app, lo,
     sw = win.composition.sweep
     for r in sw.rows.values():
         r.min.setText(str(lo)), r.max.setText(str(hi)), r.step.setText("1")
+    sw._timer.stop()
     sw._update_summary()
     t0 = time.perf_counter()
     while sw._counter.busy and time.perf_counter() - t0 < 30:
         app.processEvents()
     app.processEvents()
     assert sw.summary_data.compositions == count and not sw.summary_data.truncated
-    text, tip = sw.summary.text(), sw.summary.toolTip()
-    assert f"{count:,} valid compositions" in text and "more than" not in text
-    assert tip.startswith(tier) and "Estimated on this computer" in tip
+    text = sw.workload.count.text()
+    assert f"{count:,}</span>" in text and "&gt;" not in text                # workload summary: the exact count
+    # the tier and the measured estimates are the footer's "Large workload" Toggletip
+    st = win.composition.footer.status.status
+    assert st.kind == "info" and st.text == "Large workload"
+    assert st.info[0].startswith(tier) and "Estimated on this computer" in st.info[0]
+    assert win.composition.calc_btn.isEnabled()
     assert sw.recipe().estimate() == count, "no longer refused at 200 000"
 
 
@@ -708,13 +715,17 @@ def test_beyond_the_largest_tested_batch_is_refused_plainly(win, app):
     sw = win.composition.sweep
     for r in sw.rows.values():
         r.min.setText("1"), r.max.setText("40"), r.step.setText("1")      # 41 659 248 alloys
+    sw._timer.stop()
     sw._update_summary()
     t0 = time.perf_counter()
     while sw._counter.busy and time.perf_counter() - t0 < 30:
         app.processEvents()
     app.processEvents()
-    assert sw.summary_data.truncated and "more than 10,000,000" in sw.summary.text()
-    win.composition.calc_btn.click()
+    assert sw.summary_data.truncated and "&gt;10,000,000" in sw.workload.count.text()
+    st = win.composition.footer.status.status
+    assert st.kind == "error" and st.text == "Workload too large" and "largest tested batch" in st.info
+    assert not win.composition.calc_btn.isEnabled()
+    win.composition.calculate()                       # even a direct request is refused plainly
     app.processEvents()
     assert win.worker is None and "largest tested batch" in win.notification.body.text()
 
@@ -767,6 +778,8 @@ def test_closing_during_a_calculation_leaves_no_process_and_no_file(app):
     w.composition.unit_box.setCurrentIndex(1)
     for r in w.composition.sweep.rows.values():
         r.min.setText("2"), r.max.setText("40"), r.step.setText("2")
+    from conftest import settle_composition
+    settle_composition(w, app)
     w.composition.calc_btn.click()
     t0 = time.perf_counter()
     while w.table.model.total_count() < 1000 and time.perf_counter() - t0 < 60:

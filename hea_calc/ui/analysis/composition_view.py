@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import html as _html
 
-from PySide6.QtCore import QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QLineEdit, QSizePolicy, QStackedWidget, QVBoxLayout,
                                QWidget)
@@ -26,6 +26,7 @@ from ...core.family import family_key
 from .. import crisp, icons
 from ..theme import BODY_COMPACT_01, HAIRLINE, LABEL_01, font, t
 from ..widgets.common import IconButton, TagLabel
+from ..widgets.common import retire
 from ..widgets.tooltip import InfoButton, Toggletip
 from .widgets import (ROW_SM, ROW_XS, ActionableNotification, Cell, DataTable, Divider, Dropdown, EmptyBlock,
                       KVRows, SectionHeading, StatusIcon, label, paint_html, plain_text, rich, scroll_page)
@@ -165,31 +166,78 @@ class PairWindow(QWidget):
 
 
 class ModelStrip(QWidget):
-    """Overview "Model predictions" strip: M1-M8 cells (key + tag), clickable (-> Model details)."""
+    """Overview "Model predictions" strip: M1-M8 cells (key + tag + status), clickable (-> Model details).
+
+    Cells are as wide as the widest cell's content (never clipped) and the strip reflows to 8, 4, 2 or 1 cells
+    per row - at most ``per_row`` - to fit the width it is given (no fixed width that overflows the page)."""
 
     activated = Signal(str)
+    GAP = 8
 
     def __init__(self, outcomes: dict, per_row: int = 8, cell_w: int = 88, parent=None):
         super().__init__(parent)
-        lay = QGridLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setHorizontalSpacing(8)
-        lay.setVerticalSpacing(8)
-        for i, k in enumerate(MODEL_KEYS):
-            o = outcomes.get(k)
-            cell = _ModelCell(k, o, cell_w)
+        self.max_per_row = per_row
+        self.cells = []
+        for k in MODEL_KEYS:
+            cell = _ModelCell(k, outcomes.get(k), cell_w, self)
             cell.clicked.connect(self.activated.emit)
-            lay.addWidget(cell, i // per_row, i % per_row)
-        lay.setColumnStretch(per_row, 1)
+            self.cells.append(cell)
+        self.cell_w = max(c.width() for c in self.cells)
+        for c in self.cells:
+            c.setFixedWidth(self.cell_w)
+        self.per_row = 0
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._arrange(per_row)
+
+    def _fit(self, width: int) -> int:
+        for n in (8, 4, 2, 1):
+            if n <= self.max_per_row and n * self.cell_w + (n - 1) * self.GAP <= width:
+                return n
+        return 1
+
+    def _arrange(self, n: int) -> None:
+        if n == self.per_row:
+            return
+        self.per_row = n
+        rows = -(-len(self.cells) // n)
+        for i, c in enumerate(self.cells):
+            c.move((i % n) * (self.cell_w + self.GAP), (i // n) * (24 + self.GAP))
+        self.setFixedHeight(rows * 24 + (rows - 1) * self.GAP)
+        self.updateGeometry()
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(self.cell_w, 24)
+
+    def sizeHint(self) -> QSize:
+        n = self.max_per_row
+        return QSize(n * self.cell_w + (n - 1) * self.GAP, self.height())
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, w: int) -> int:
+        n = self._fit(w)
+        rows = -(-len(self.cells) // n)
+        return rows * 24 + (rows - 1) * self.GAP
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._arrange(self._fit(self.width()))
 
 
 class _ModelCell(QWidget):
     clicked = Signal(str)
 
-    def __init__(self, key, o, width):
-        super().__init__()
+    def __init__(self, key, o, width, parent=None):
+        super().__init__(parent)
         self.key, self.o = key, o
-        self.setFixedSize(width, 24)
+        lab = o.label if o else NA
+        f = font(LABEL_01)
+        f.setPixelSize(12)
+        from PySide6.QtGui import QFontMetrics
+        need = 26 + QFontMetrics(f).horizontalAdvance(lab) + 16 + \
+            (20 if verdict_status(o) and verdict_status(o) != "na" else 0) + 4
+        self.setFixedSize(max(width, need), 24)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         lab = o.label if o else NA
@@ -274,6 +322,8 @@ class CompositionContent(QStackedWidget):
         self.model = "M1"
         self.search = ""
         self.full_precision = False
+        from ..preferences import DEFAULT_TOTAL_MASS
+        self.batch_mass = DEFAULT_TOTAL_MASS        # Mass (… g batch) column: the Total mass preference
         self.pages: list[QWidget] = []
         for _ in PAGES:
             holder = QWidget()
@@ -330,8 +380,7 @@ class CompositionContent(QStackedWidget):
             it = lay.takeAt(0)
             if it.widget():
                 _w = it.widget()
-                _w.setParent(None)
-                _w.deleteLater()
+                retire(_w)
         if self.row is None or self.empty is not None:
             title, body = self.empty or ("No composition selected",
                                          "Double-click a row in the results table to analyse that composition here.")
@@ -368,14 +417,30 @@ class CompositionContent(QStackedWidget):
         return w, lay
 
     def composition_table(self, ws: bool = False) -> DataTable:
+        """Normalised composition with the element masses of the user's batch (``batch_mass``, the persisted
+        Total mass preference).  The masses are derived here from the stored atomic fractions with the shared
+        conversion - for every result, whatever basis it was entered in - and are never stored per result;
+        changing the batch mass changes this column only, never a calculated value."""
+        from ..preferences import format_mass
         res = self.row.result
-        reps = {rep: CMP.from_fractions(dict(res.composition), rep) for rep in ("ratio", "at", "wt")}
-        widths = {"S": (80, 104, 104, None), "M": (80, 96, 96, None)}.get(self.size_class, (80, None, None, None))
-        cols = [("Element", widths[0]), ("at.%", widths[1], "right"), ("At. ratio", widths[2], "right"),
-                ("wt.%", widths[3], "right")]
+        x = dict(res.composition)
+        reps = {rep: CMP.from_fractions(x, rep) for rep in ("ratio", "at", "wt")}
+        reps["mass"] = CMP.from_fractions(x, "mass", total_mass=self.batch_mass)
+        cols = [("Element", 72), ("at.%", None, "right"), ("At. ratio", None, "right"), ("wt.%", None, "right"),
+                (f"Mass ({format_mass(self.batch_mass)} g batch)", None, "right")]
         rows = [[el, Cell(f"{reps['at'][el]:.2f}", align="right"), Cell(f"{reps['ratio'][el]:.3f}", align="right"),
-                 Cell(f"{reps['wt'][el]:.2f}", align="right")] for el in res.composition]
+                 Cell(f"{reps['wt'][el]:.2f}", align="right"),
+                 Cell(f"{reps['mass'][el]:.4f}", align="right", tip=f"{reps['mass'][el]:.6g} g")]
+                for el in res.composition]
         return DataTable(cols, rows, ROW_SM if ws else ROW_XS)
+
+    def set_batch_mass(self, grams: float) -> None:
+        """The batch mass preference changed: only the composition tables (Overview) are redrawn."""
+        if grams and grams > 0 and grams != self.batch_mass:
+            self.batch_mass = float(grams)
+            if 0 in self._built:
+                self._built.discard(0)
+                self.ensure(self.currentIndex())
 
     def key_descriptor_rows(self, d: dict, extra=()) -> list:
         rows = []
@@ -574,7 +639,7 @@ class CompositionContent(QStackedWidget):
         mp, ml = self._region()
         n_eval, summary = MD.summary_line({k: res.models[k].label for k in MODEL_KEYS})
         ml.addWidget(SectionHeading("Model predictions", f"{n_eval} of 8 evaluated · {summary}"))
-        table = self._models_table(("model", "pred", "status", "value"))
+        table = self._models_table(("model", "predstatus", "value"))
         ml.addWidget(table)
         ml.addWidget(label("Data quality", "heading"))
         for icon, token, text in self.quality_lines():
@@ -712,10 +777,13 @@ class CompositionContent(QStackedWidget):
         d = descriptor_values(self.row)
         cls = self.size_class
         if columns is None:
+            # M (805 px): prediction and status share one column so the five columns fit without scrolling
             columns = ("model", "value", "pred", "status") if cls == "S" else \
+                ("model", "predstatus", "value", "threshold") if cls == "M" else \
                 ("model", "pred", "status", "value", "threshold", *(("ref",) if cls == "L" else ()))
-        spec = {"model": ("Model", 148 if cls == "S" else 196), "pred": ("Prediction", 80),
-                "status": ("Status", 52 if cls != "S" else 40), "value": ("Criterion value", 200 if cls != "S" else None),
+        spec = {"model": ("Model", 148 if cls == "S" else None), "pred": ("Prediction", 80),
+                "predstatus": ("Prediction", None),
+                "status": ("Status", 52 if cls != "S" else 40), "value": ("Criterion value", None),
                 "threshold": ("Threshold", None), "ref": ("Reference", 260)}
         if cls == "W" and "threshold" not in columns:
             spec["value"] = ("Key value", None)
@@ -727,9 +795,14 @@ class CompositionContent(QStackedWidget):
             cells = []
             for c in columns:
                 if c == "model":
-                    cells.append(MD.title(k, short=cls == "S"))
+                    # S, M (805 px) and the narrow workspace column use the short title; the year is in Model
+                    # details and the row Tooltip
+                    cells.append(MD.title(k, short=cls in ("S", "M") or "threshold" not in columns))
                 elif c == "pred":
                     cells.append(Cell(tag=o.label))
+                elif c == "predstatus":
+                    cells.append(Cell(tag=o.label, status=st if st and st != "na" else None,
+                                      tip=MD.STATUS_LABELS.get(o.status) if st and st != "na" else ""))
                 elif c == "status":
                     cells.append(Cell(status=st, tip=MD.STATUS_LABELS.get(o.status) if st else ""))
                 elif c == "value":
@@ -740,20 +813,31 @@ class CompositionContent(QStackedWidget):
                 elif c == "ref":
                     cells.append(Cell(_html.escape(MODELS[k].short) + f" ({MD.YEARS[k]})", color="text-secondary"))
             rows.append(cells)
-            tips.append(f"Threshold: {plain_text(MD.threshold_text(k, d))}" if cls == "S"
+            tips.append(f"{MD.title(k)} · threshold: {plain_text(MD.threshold_text(k, d))}" if cls == "S"
                         else f"Open details for {MD.title(k)}")
         table = DataTable(cols, rows, ROW_SM, activatable=True, row_tips=tips)
         status_col = list(columns).index("status") if "status" in columns else -1
+        combined_col = list(columns).index("predstatus") if "predstatus" in columns else -1
 
         def click(e, tbl=table):
             i = tbl.row_at(int(e.position().y()))
             if i < 0:
                 return
+            o = res.models[MODEL_KEYS[i]]
             if status_col >= 0:
                 x0, w = tbl.column_rects()[status_col]
-                o = res.models[MODEL_KEYS[i]]
                 if x0 <= e.position().x() <= x0 + w and verdict_status(o):
                     open_cell_tip(tbl, QRect(int(x0 + 12), tbl.row_y[i] + 4, 24, 24), status_tip(MODEL_KEYS[i], o),
+                                  MD.title(MODEL_KEYS[i]))
+                    return
+            if combined_col >= 0 and verdict_status(o) not in (None, "na"):
+                x0, w = tbl.column_rects()[combined_col]
+                f = font(LABEL_01)
+                f.setPixelSize(12)
+                from PySide6.QtGui import QFontMetrics
+                ix = x0 + 16 + QFontMetrics(f).horizontalAdvance(o.label) + 16 + 4      # the status icon
+                if ix - 4 <= e.position().x() <= ix + 20:
+                    open_cell_tip(tbl, QRect(int(ix), tbl.row_y[i] + 4, 16, 24), status_tip(MODEL_KEYS[i], o),
                                   MD.title(MODEL_KEYS[i]))
                     return
             tbl.focus_row = i

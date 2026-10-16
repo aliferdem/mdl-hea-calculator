@@ -36,6 +36,29 @@ def sup_html(text: str) -> str:
     return "".join(out)
 
 
+_GRAVEYARD: list[QWidget] = []
+
+
+def retire(w: QWidget) -> None:
+    """Remove ``w`` from its layout and widget tree and delete it later - without ever making it a window.
+
+    ``setParent(None)`` turns a child into a top-level window; a later ``setVisible(True)`` (a deferred update,
+    a late background result) then flashes it on screen as a transient window while the main window is resized
+    (release reconciliation, resize regression).  Retired widgets are moved under one hidden holder instead.
+    """
+    parent = w.parentWidget()
+    if parent is not None and parent.layout() is not None:
+        parent.layout().removeWidget(w)
+    w.hide()
+    if not _GRAVEYARD:
+        holder = QWidget()
+        holder.setObjectName("RetiredWidgets")
+        holder.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        _GRAVEYARD.append(holder)
+    w.setParent(_GRAVEYARD[0])
+    w.deleteLater()
+
+
 def refresh_style(w: QWidget) -> None:
     """Re-polish after a dynamic property change so QSS selectors re-evaluate."""
     st = w.style()

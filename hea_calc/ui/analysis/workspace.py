@@ -110,6 +110,9 @@ class AnalysisWorkspace(QWidget):
         self.composition = CompositionContent("W")
         self.composition_details = CompositionContent("W")
         self.composition_details.setCurrentIndex(3)
+        for content in (self.composition, self.composition_details):
+            content.batch_mass = controller.batch_mass
+            controller.batch_mass_changed.connect(content.set_batch_mass)
         self.model_list = DataTable([("Model", None)], [], 48, activatable=True)
         self._build_comp_pages()
         self.collection = CollectionContent(controller, "W")

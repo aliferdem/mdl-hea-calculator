@@ -1,4 +1,4 @@
-"""Main window (Figma 'DARK MODE FULLSCREEN', node 170:11154)."""
+"""Main window (Figma 'DARK MODE FULLSCREEN', node 341:33323 - formerly 170:11154)."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
 from PySide6.QtGui import QActionGroup, QGuiApplication, QIcon, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-                               QProgressBar, QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QFileDialog, QMainWindow, QMessageBox, QScrollArea, QStackedWidget,
+                               QVBoxLayout, QWidget)
 
 from ..core.engine import DEFAULT_TCRIT_FRACTION, Engine, default_engine
 from ..core.export import CLIPBOARD_MAX_ROWS, XLSX_MAX_ROWS, write_records, write_tsv
@@ -18,10 +18,12 @@ from ..core.repository import RepositoryError, ResultRecord, ResultRepository, u
 from ..core.results import DEFAULT_COLUMNS, COLUMN_BY_KEY, ResultRow, table_tsv
 from ..core.spreadsheet import SpreadsheetError, read_compositions
 from . import icons
-from .theme import (COMPOSITION_PANEL_MIN, COMPOSITION_PANEL_WIDTH, CONTENT_MARGIN_BOTTOM, CONTENT_MARGIN_TOP,
-                    CONTENT_MARGIN_X, DETAILS_PANEL_MIN, DETAILS_PANEL_WIDTH, ELEMENT_PANEL_MIN, ELEMENT_PANEL_WIDTH,
+from .theme import (ANALYSIS_WIDE_MIN, COMPOSITION_PANEL_MIN, COMPOSITION_PANEL_WIDTH, CONTENT_MARGIN_BOTTOM,
+                    CONTENT_MARGIN_TOP, CONTENT_MARGIN_X, DETAILS_PANEL_WIDTH, ELEMENT_PANEL_MIN, ELEMENT_PANEL_WIDTH,
                     PANEL_GAP, THEME, TOP_ROW_HEIGHT, stylesheet)
-from .widgets.common import InlineNotification, button
+from .widgets.common import InlineNotification
+from . import system_theme, win_titlebar
+from .preferences import Preferences
 from ..core.analysis import state as AS
 from .analysis.controller import AnalysisController
 from .analysis.panel import AnalysisPanel
@@ -39,30 +41,7 @@ from .widgets.scroll import MainScrollArea
 from .worker import ExportTask, JobRunner
 
 APP_ICON = Path(__file__).resolve().parent / "icons" / "logo_icon.ico"
-
-
-class ProgressBanner(QWidget):
-    """Inline loading banner shown above the table while a batch is calculated."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("InlineNotification")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(16, 0, 0, 0)
-        lay.setSpacing(16)
-        self.label = QLabel("")
-        self.bar = QProgressBar()
-        self.bar.setTextVisible(False)
-        self.bar.setFixedWidth(320)
-        self.cancel = button("Cancel", "ghost", "sm")
-        lay.addWidget(self.label)
-        lay.addWidget(self.bar)
-        lay.addStretch(1)
-        lay.addWidget(self.cancel)
-        self.setFixedHeight(48)
-        self.hide()
-
+THEME_LABELS = (("system", "System default"), ("light", "Light"), ("dark", "Dark"))
 
 _SHEET_CACHE: dict[str, str] = {}
 
@@ -72,6 +51,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.engine = engine or default_engine()
         self.settings = settings or QSettings("MDL", "HEA Calculator")
+        self.prefs = Preferences(self.settings, self)
+        self.os_theme = system_theme.SystemThemeWatcher(self)
+        self.os_theme.changed.connect(self._os_scheme_changed)
         self.annealing: float | None = self.settings.value("annealing", None, float) if self.settings.contains(
             "annealing") else None
         self.fraction = float(self.settings.value("tcrit_fraction", DEFAULT_TCRIT_FRACTION))
@@ -103,7 +85,10 @@ class MainWindow(QMainWindow):
         root.setSpacing(0)
         self.header = AppHeader(self.file_menu, self.theme_menu)
         self.header.about_requested.connect(self.show_about)
+        self.header.help_requested.connect(lambda: self.show_help("home"))
         root.addWidget(self.header)
+        # calculation / export progress lives in the UI shell header (stable geometry)
+        self.progress = self.header.progress
         content_w = QWidget()
         content_w.setObjectName("AppBody")
         content_w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -115,27 +100,30 @@ class MainWindow(QMainWindow):
         # Calculation details on wider ones (responsive.distribute).  Once the three no longer fit at
         # their minimum widths, Details moves below the other two (widgets/layouts.UpperPanels).
         self.elements = ElementPanel(self.engine)
-        self.composition = CompositionPanel(self.engine.data)
+        self.composition = CompositionPanel(self.engine.data, engine=self.engine)
+        self.composition.set_total_mass(self.prefs.total_mass)
         # Analysis (replaces Calculation details): one controller shared by the embedded panel and the
         # in-window workspace (docs/analysis-redesign/ANALYSIS_RESPONSIVE_LAYOUT.md section 5).
         self.analysis_ctl = AnalysisController(self.repo, None, self.engine, self)
+        self.analysis_ctl.batch_mass = self.prefs.total_mass             # Mass (… g batch) in Analysis
+        self.prefs.total_mass_changed.connect(self.analysis_ctl.set_batch_mass)
+        self._restore_analysis_tabs()
+        self.analysis_ctl.state_changed.connect(self._remember_analysis_tabs)
         self.analysis = AnalysisPanel(self.analysis_ctl)
         self.details = self.analysis                 # former name, kept for tools and tests
         top_w = UpperPanels([(self.elements, ELEMENT_PANEL_WIDTH, ELEMENT_PANEL_MIN, ELEMENT_PANEL_WIDTH),
                              (self.composition, COMPOSITION_PANEL_WIDTH, COMPOSITION_PANEL_MIN,
                               COMPOSITION_PANEL_WIDTH),
-                             (self.details, DETAILS_PANEL_WIDTH, DETAILS_PANEL_MIN, None)],
+                             (self.details, DETAILS_PANEL_WIDTH, ANALYSIS_WIDE_MIN, None)],
                             TOP_ROW_HEIGHT, PANEL_GAP)
         self.top_row = top_w
         content.addWidget(top_w)
         table_col = QVBoxLayout()
         table_col.setSpacing(0)
         self.notification = InlineNotification()
-        self.progress = ProgressBanner()
         self.progress.cancel.clicked.connect(self.cancel_calculation)
         self.table = ResultsTable(engine=self.engine, repo=self.repo)
         self.analysis_ctl.model = self.table.model
-        self.analysis_ctl.checked = self.table.model.checked
         self.runner = JobRunner(self.jobs, self.table.model, self)
         self.exporter = ExportTask(self)
         self.exporter.progress.connect(self._export_progress)
@@ -143,7 +131,6 @@ class MainWindow(QMainWindow):
         self.runner.progress.connect(self._progress)
         self.runner.finished.connect(self._done)
         table_col.addWidget(self.notification)
-        table_col.addWidget(self.progress)
         table_col.addWidget(self.table, 1)
         content.addLayout(table_col, 1)
         # One primary vertical scrolling context below the fixed header.  The results section
@@ -192,6 +179,10 @@ class MainWindow(QMainWindow):
         self.composition.calculate_requested.connect(self.calculate)
         self.composition.message.connect(self.notify)
         self.composition.copy_compositions.connect(self._copy_generated)
+        self.composition.copy_text.connect(self._copy_text)
+        self.composition.cancel_requested.connect(self.cancel_calculation)
+        self.composition.total_mass_committed.connect(self.prefs.set_total_mass)
+        self.prefs.total_mass_changed.connect(self.composition.set_total_mass)
         self.composition.set_service(self.jobs)
         # Batch modes calculate in the worker pool: start it in the background as soon as one is chosen
         # (measured: a cold pool start overlapping the first batch raised its longest event-loop gap
@@ -203,14 +194,12 @@ class MainWindow(QMainWindow):
         self.table.view.window_requested.connect(self.open_details)
         self.table.view.rows_removed.connect(self._check_details)
         self.table.view.removed_ids.connect(self.analysis_ctl.results_removed)
-        self.table.model.checked_changed.connect(self.analysis_ctl.table_checked_changed)
         # Analysis wiring
         ctl = self.analysis_ctl
         self.analysis.expand_requested.connect(lambda: self.set_expanded(True))
         ctl.expand_requested.connect(self.set_expanded)
         self.workspace.back_requested.connect(lambda: self.set_expanded(False))
         ctl.show_in_table.connect(self.show_in_table)
-        ctl.check_results.connect(self._check_results)
         ctl.report_requested.connect(self.export_report)
         ctl.export_requested.connect(self.export_analysis)
         ctl.help_requested.connect(self.show_help)
@@ -233,7 +222,10 @@ class MainWindow(QMainWindow):
         if size in PAGE_SIZES:
             self.table.pagination.size_box.setCurrentIndex(PAGE_SIZES.index(size))
         carbonize_popups(self)       # text-field context menus and dropdown lists use the Carbon popups
+        win_titlebar.install(QApplication.instance(), lambda: THEME.name, lambda: THEME.tokens)
         THEME.changed.connect(self.apply_theme)
+        # the effective theme was resolved at start-up (app.py) from this preference; from now on it follows
+        # the user's choice and - with System default - the OS colour scheme
         self.apply_theme()
         self._update_status()
 
@@ -288,22 +280,46 @@ class MainWindow(QMainWindow):
         c = self.file_menu.add_action("Copy table", self.copy_table, shortcut="Ctrl+Shift+C")
         self.file_menu.addSeparator()
         self.file_menu.add_action("Calculation settings…", self.edit_settings)
-        hlp = self.file_menu.add_action("Help…", lambda: self.show_help("workload"), shortcut="F1")
+        self.file_menu.addSeparator()
+        # one Help action (the header's Help icon and F1 run the same command: Documentation Home)
+        hlp = self.file_menu.add_action("Help", lambda: self.show_help("home"), shortcut="F1")
+        self.file_menu.add_action("About HEA Calculator", self.show_about)
         self.file_menu.addSeparator()
         q = self.file_menu.add_action("Exit", self.close, shortcut="Ctrl+Q")
         for act in (a, c, q, hlp):
             self.addAction(act)
+        # Theme: only in the header's Theme action (no duplicate in File)
         self.theme_menu = CarbonMenu(parent=self)
         group = QActionGroup(self)
-        for name, label in (("dark", "Dark (Gray 100)"), ("light", "Light (Gray 10)")):
+        group.setExclusive(True)
+        pref = self.prefs.theme
+        for name, label in THEME_LABELS:
             act = self.theme_menu.add_action(label, lambda n=name: self.set_theme(n), checkable=True,
-                                             checked=THEME.name == name)
+                                             checked=pref == name)
+            act.setData(name)
             group.addAction(act)
         self.theme_actions = group
 
     def set_theme(self, name: str):
-        THEME.set_theme(name)
-        self.settings.setValue("theme", name)
+        """Store the theme *preference* (system / light / dark) and apply the effective theme."""
+        if name not in ("system", "light", "dark"):
+            return
+        self.prefs.set_theme(name)
+        self._resolve_theme()
+
+    def _resolve_theme(self, os_value: str | None = None):
+        THEME.set_theme(system_theme.resolve(self.prefs.theme, os_value))
+        self._sync_theme_actions()
+
+    def _os_scheme_changed(self, scheme: str):
+        """Windows switched light / dark: follow it only under System default (the preference is untouched)."""
+        if self.prefs.theme == "system":
+            self._resolve_theme(scheme)
+
+    def _sync_theme_actions(self):
+        pref = self.prefs.theme
+        for act in self.theme_actions.actions():
+            act.setChecked(act.data() == pref)
 
     def apply_theme(self, *_):
         # The sheet is scoped to this window rather than to QApplication.  Qt re-polishes every
@@ -321,8 +337,11 @@ class MainWindow(QMainWindow):
             sheet = stylesheet(lambda name, token: icons.file_url(name, token)) + analysis_rules(THEME.tokens)
             _SHEET_CACHE[THEME.name] = sheet
         self.setStyleSheet(sheet)
-        for act in self.theme_actions.actions():
-            act.setChecked(act.text().lower().startswith(THEME.name))
+        self._sync_theme_actions()
+        self.header.set_effective_theme(THEME.name)
+        themer = win_titlebar.themer()
+        if themer is not None:
+            themer.apply_all()                  # every native caption follows the effective theme
         self.update()
 
     # ------------------------------------------------------------------ feedback
@@ -412,7 +431,8 @@ class MainWindow(QMainWindow):
 
     def _start_job(self, data: JobInput, rm: dict, expected: int | None, label: str) -> bool:
         recipe = data.compositions if callable(data.compositions) else None
-        exact = recipe is None or getattr(recipe, "unit", None) == "at"     # ratio / expression: upper bounds
+        # at.% / wt.% sweeps count exactly; ratio / mass sweeps and expressions give upper bounds
+        exact = recipe is None or getattr(recipe, "unit", None) in ("at", "wt")
         n = expected or 0
         problem = capacity_problem(n if exact else min(n, HARD_LIMIT), self.repo.session_dir)
         if problem:
@@ -426,8 +446,9 @@ class MainWindow(QMainWindow):
             self.notify("error", user_message(exc))
             self._finish_batch(cancelled=True)
             return False
-        self.progress.bar.setRange(0, 0)
-        self.progress.label.setText(label)
+        self._cancelling = False
+        self.progress.set_cancellable(False)          # a calculation is cancelled in Composition setup
+        self.progress.set_progress(label.rstrip("…"), 0, 0, None)
         self.progress.cancel.setEnabled(True)
         self.progress.show()
         self.composition.set_calculating(True)
@@ -435,13 +456,9 @@ class MainWindow(QMainWindow):
         return True
 
     def _progress(self, done: int, total: int, eta: float):
-        if self.progress.bar.maximum() != total:
-            self.progress.bar.setRange(0, total)
-        self.progress.bar.setValue(min(done, total))
-        left = f" — about {eta:,.0f} s left" if done else ""
-        if self.progress.cancel.isEnabled():
+        if not getattr(self, "_cancelling", False):
             verb = "Recalculating" if self._pending_delete else "Calculating"
-            self.progress.label.setText(f"{verb} {done:,} / {total:,}{left}")
+            self.progress.set_progress(verb, done, total, eta)
 
     def _done(self, job):
         r = self.runner
@@ -499,8 +516,10 @@ class MainWindow(QMainWindow):
             return
         if self.runner.running:
             self._job_queue = []
+            self._cancelling = True
             self.progress.cancel.setEnabled(False)
             self.progress.label.setText("Cancelling…")
+            self.composition.clear_btn.setEnabled(False)
             self.runner.cancel()
 
     def _add_rows(self, rows: list[ResultRow], select_first: bool):
@@ -617,6 +636,10 @@ class MainWindow(QMainWindow):
         QGuiApplication.clipboard().setText(table_tsv(rows, m.keys))
         self.notify("success", f"Copied {len(rows):,} visible row(s) × {len(m.keys)} columns.", 4000)
 
+    def _copy_text(self, tsv: str, what: str):
+        QGuiApplication.clipboard().setText(tsv)
+        self.notify("success", f"Copied the {what} (paste into Excel).", 4000)
+
     def _copy_generated(self, tsv: str):
         QGuiApplication.clipboard().setText(tsv)
         n = max(len(tsv.strip().splitlines()) - 1, 0)
@@ -675,9 +698,9 @@ class MainWindow(QMainWindow):
 
     def _start_export(self, spec: dict, path: str, kind: str, payload: dict, total: int, label: str, job: dict):
         self._export_job = {**job, "path": path, "total": total}
-        self.progress.bar.setRange(0, max(1, total))
-        self.progress.bar.setValue(0)
-        self.progress.label.setText(label)
+        verb = "Copying" if job["kind"] == "copy" else "Exporting"
+        self.progress.set_cancellable(True)           # exports have no other cancel control
+        self.progress.set_progress(verb, 0, max(1, total), None)
         self.progress.cancel.setEnabled(True)
         self.progress.show()
         self.exporter.start(spec, path, kind, payload)
@@ -686,9 +709,8 @@ class MainWindow(QMainWindow):
         job = self._export_job
         if job is None or not self.progress.cancel.isEnabled():
             return
-        self.progress.bar.setValue(min(n, job["total"]))
         verb = "Copying" if job["kind"] == "copy" else "Exporting"
-        self.progress.label.setText(f"{verb} {n:,} / {job['total']:,} rows…")
+        self.progress.set_progress(verb, n, job["total"], None)
 
     def _export_done(self, status: str, value):
         job, self._export_job = self._export_job, None
@@ -809,6 +831,24 @@ class MainWindow(QMainWindow):
             dlg.deleteLater()
 
     # ------------------------------------------------------------------ Analysis
+    def _restore_analysis_tabs(self) -> None:
+        """The last viewed Composition / Collection tabs and Model details model (preferences).  A tab whose
+        content is unavailable (no results yet) keeps the preference and shows its empty state."""
+        p = self.prefs
+        comp = str(p.get("analysis/composition_tab", "overview"))
+        coll = str(p.get("analysis/collection_tab", "overview"))
+        model = str(p.get("analysis/model", "M1"))
+        from ..core.engine import MODEL_KEYS
+        self.analysis_ctl.apply(AS.update, comp_tab=comp if comp in AS.COMP_TABS else "overview",
+                                coll_tab=coll if coll in AS.COLL_TABS else "overview",
+                                model=model if model in MODEL_KEYS else "M1")
+
+    def _remember_analysis_tabs(self, old, new) -> None:
+        if old is None or (old.comp_tab, old.coll_tab, old.model) != (new.comp_tab, new.coll_tab, new.model):
+            self.prefs.put("analysis/composition_tab", new.comp_tab)
+            self.prefs.put("analysis/collection_tab", new.coll_tab)
+            self.prefs.put("analysis/model", new.model)
+
     def set_expanded(self, on: bool):
         """Expand analysis / Back to calculation: a page swap, nothing else (state is shared)."""
         if on and not self.table.model.total_count():
@@ -833,9 +873,10 @@ class MainWindow(QMainWindow):
             self._jump_to(ids[0], analyse=False)
             return
         # several: an explicit, visible id filter (removable in the Filter dialog), never a silent change
+        from ..core.analysis.idsets import id_table
         from ..core.results import IdSetFilter
         try:
-            name = self.table.model.checked.id_table(ids)
+            name = id_table(self.repo, ids)
         except Exception as exc:                      # noqa: BLE001 - storage problem, reported
             self.notify("error", user_message(exc))
             return
@@ -848,10 +889,6 @@ class MainWindow(QMainWindow):
         self.notify("info", f"The table shows the {len(ids):,} results selected in Analysis. Clear the filter in "
                             "Filter results to show all results.", 8000)
 
-    def _check_results(self, ids):
-        self.table.model.set_checked(ids, True)
-        self.analysis_ctl.table_checked_changed()
-
     def export_report(self, kind: str):
         from .analysis.report_ui import export_report, print_composition
         if kind == "print":
@@ -863,9 +900,10 @@ class MainWindow(QMainWindow):
         from .analysis.report_ui import export_analysis_data
         export_analysis_data(self, kind)
 
-    def show_help(self, page: str):
+    def show_help(self, page: str, anchor: str = ""):
         from .analysis.help import open_help
-        open_help(page, self)
+        legacy = {"model-coverage": "models", "collection-analysis": "collections"}
+        open_help(legacy.get(page, page), self)
 
     def show_about(self):
         dlg = AboutDialog(self)

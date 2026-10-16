@@ -74,6 +74,17 @@ class Descriptor:
     def plain_title(self) -> str:
         return f"{self.plain} ({self.unit or '-'})"
 
+    @property
+    def unit_plain(self) -> str:
+        """The unit without superscript minus signs (for controls that cannot render rich text)."""
+        return UNIT_PLAIN.get(self.unit, self.unit) or "–"
+
+
+# Units written with a solidus for plain-text controls (check boxes, native titles): IBM Plex lacks the
+# superscript minus glyph at small sizes.
+UNIT_PLAIN = {"kJ mol⁻¹": "kJ/mol", "J mol⁻¹ K⁻¹": "J/(mol·K)", "meV atom⁻¹": "meV/atom", "g cm⁻³": "g/cm³",
+              "g mol⁻¹": "g/mol"}
+
 
 _D = Descriptor
 DESCRIPTORS_LIST: list[Descriptor] = [
@@ -92,11 +103,13 @@ DESCRIPTORS_LIST: list[Descriptor] = [
        "Ω = T<sub>m</sub>ΔS<sub>mix</sub>/|ΔH<sub>mix</sub>|", DATA_TAKEUCHI,
        "Undefined when ΔH<sub>mix</sub> = 0.", "r.dhmix = 0"),
     # ---- atomic size
-    _D("delta", "Size mismatch, Guo & Liu radii", "δ", "δ", "%", G_SIZE, 2,
-       "Atomic-size mismatch with the Guo & Liu (2011) radii. Used by M2, M4 and M5.",
+    _D("delta", "Size mismatch — Guo & Liu radii", "δ", "δ", "%", G_SIZE, 2,
+       "Atomic-size mismatch with the Guo & Liu (2011) radii. Used by M2, M4 and M5. Not the same quantity as "
+       "δ<sub>CN12</sub> (Kittel radii, used by M1).",
        "δ = 100 √(Σ c<sub>i</sub> (1 − r<sub>i</sub>/r̄)²)", DATA_GUO_LIU, source_note="Guo & Liu radii"),
-    _D("delta_cn12", "Size mismatch, Kittel CN12 radii", "δ<sub>CN12</sub>", "δCN12", "%", G_SIZE, 2,
-       "Atomic-size mismatch with Kittel's 12-coordination radii. Used by M1.",
+    _D("delta_cn12", "Size mismatch — Kittel CN12 radii", "δ<sub>CN12</sub>", "δCN12", "%", G_SIZE, 2,
+       "Atomic-size mismatch with Kittel's 12-coordination radii. Used by M1 (and King's δ screen). Not the "
+       "same quantity as δ (Guo & Liu radii, used by M2, M4, M5).",
        "δ<sub>CN12</sub> = 100 √(Σ c<sub>i</sub> (1 − r<sub>i</sub>/r̄)²)", DATA_KITTEL, source_note="Kittel CN12 radii"),
     _D("gamma", "Solid-angle ratio", "γ", "γ", "", G_SIZE, 4,
        "Ratio of the solid angles of the smallest and the largest atom. Used by M3.",
@@ -176,11 +189,16 @@ DESCRIPTORS: dict[str, Descriptor] = {d.key: d for d in DESCRIPTORS_LIST}
 # Key descriptors of the Composition Overview (Frame 2), in order, with the frame's short row labels.
 KEY_DESCRIPTORS = ("dhmix", "dsmix", "tm", "omega", "delta", "vec")
 KEY_LABELS = {"dhmix": "Mixing enthalpy", "dsmix": "Mixing entropy", "tm": "Melting temperature",
-              "omega": "Entropy–enthalpy ratio", "delta": "Size mismatch", "vec": "Valence electron conc."}
+              "omega": "Entropy–enthalpy ratio", "delta": "Size mismatch — Guo & Liu radii",
+              "vec": "Valence electron conc."}
 
-# Numeric metrics available for collections (stored columns), in selector order.
+# Numeric metrics available for collections (stored columns), in selector order: every one of them is
+# statistics-eligible (Statistics table, histogram, box plot) - no descriptor is privileged.
 METRIC_KEYS: tuple[str, ...] = tuple(d.key for d in DESCRIPTORS_LIST if d.stored and d.key in NUM_KEYS)
-STATS_DEFAULT = ("dhmix", "dsmix", "delta", "vec", "omega", "phi_king")
+STATISTICS_ELIGIBLE = METRIC_KEYS
+# The Statistics table's initial rows (the user chooses any of METRIC_KEYS).  Both size-mismatch descriptors are
+# listed: δ (Guo & Liu radii) and δCN12 (Kittel radii) are different quantities, neither stands for the other.
+STATS_DEFAULT = ("dhmix", "dsmix", "omega", "delta", "delta_cn12", "vec", "phi_king")
 
 
 def descriptor(key: str) -> Descriptor:

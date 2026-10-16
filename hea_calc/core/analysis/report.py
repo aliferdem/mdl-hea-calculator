@@ -155,8 +155,14 @@ def _header(title: str, subtitle: str, created: str) -> str:
 
 
 # ====================================================================== composition report
-def composition_report_html(row, info=None, created: str | None = None) -> str:
-    """Complete Composition report for one engine result (``ResultRow``)."""
+def _grams(g: float) -> str:
+    s = f"{g:.4f}".rstrip("0").rstrip(".")
+    return s or f"{g:.4g}"
+
+
+def composition_report_html(row, info=None, created: str | None = None, batch_mass: float = 2.0) -> str:
+    """Complete Composition report for one engine result (``ResultRow``).  ``batch_mass`` (g) is the user's Total
+    mass preference: the element masses of that batch are derived from the atomic fractions (display only)."""
     created = created or now_text()
     res = row.result
     parts = [f"<html><head><style>{CSS}</style></head><body>"]
@@ -167,15 +173,20 @@ def composition_report_html(row, info=None, created: str | None = None) -> str:
     d = res.descriptors
     comp = res.composition
     reps = {rep: from_fractions(dict(comp), rep) for rep in ("ratio", "at", "wt")}
+    batch = batch_mass if batch_mass and batch_mass > 0 else 2.0
+    reps["mass"] = from_fractions(dict(comp), "mass", total_mass=batch)
     parts.append("<h2>Composition</h2>")
     parts.append(kv_table([("Alloy", name_html(row.name)), ("Element family", _e(family_key(comp))),
                            ("Number of elements", str(len(comp)))] +
                           ([("Expression variables", ", ".join(f"<i>{_e(k)}</i> = {v:g}"
                                                                 for k, v in row.variables.items()))]
                            if getattr(row, "variables", None) else [])))
-    parts.append(table(["Element", "at.%", "At. ratio", "wt.%"],
-                       [[el, f"{reps['at'][el]:.2f}", f"{reps['ratio'][el]:.3f}", f"{reps['wt'][el]:.2f}"]
-                        for el in comp], [25, 25, 25, 25], num_cols=(1, 2, 3)))
+    parts.append(table(["Element", "at.%", "At. ratio", "wt.%", f"Mass ({_grams(batch)} g batch)"],
+                       [[el, f"{reps['at'][el]:.2f}", f"{reps['ratio'][el]:.3f}", f"{reps['wt'][el]:.2f}",
+                         f"{reps['mass'][el]:.4f}"] for el in comp], [16, 18, 18, 18, 30], num_cols=(1, 2, 3, 4)))
+    parts.append(f"<p class='note'>Masses: the element masses of a {_grams(batch)} g batch of this composition "
+                 "(standard atomic weights; the batch mass is a display preference and does not affect any "
+                 "calculated value).</p>")
     parts.append("<h2>Calculation and provenance</h2>")
     prov = _provenance_rows(info)
     if res.temperature is not None:
@@ -277,8 +288,6 @@ def collection_report_html(ctx: dict, created: str | None = None) -> str:
     rows = [("Calculation run", _e(title)), ("Population", _e(BASE_LABELS[sc.base]))]
     if sc.base == "filtered":
         rows.append(("Results-table filter (copy)", _e(ctx.get("filters_text") or "none")))
-    if sc.base == "checked":
-        rows.append(("Checked results (snapshot)", f"{sc.snapshot_count:,}"))
     if sc.families:
         rows.append(("Restriction: element family", _e(", ".join(sc.families))))
     if sc.sizes:
@@ -326,6 +335,11 @@ def collection_report_html(ctx: dict, created: str | None = None) -> str:
                           f(m["q1"]), f(m["median"]), f(m["q3"]), f(m["max"])])
         parts.append(table(["Metric", "N valid", "N missing", "Mean", "SD", "Min", "Q1", "Median", "Q3", "Max"], srows,
                            [19, 8, 9, 9, 8, 9, 9, 10, 9, 10], num_cols=tuple(range(1, 10))))
+        focus = ctx.get("focus")
+        if focus and focus in DESCRIPTORS:
+            fd = DESCRIPTORS[focus]
+            parts.append(f"<p class='note'>Selected distribution metric in Analysis: {fd.symbol} — {_e(fd.name)} "
+                         f"({sup(fd.unit) or '–'}).  No metric is singled out by the calculator itself.</p>")
         exact = "exact" if stats.get("exact") else "approximate (binned; error at most one bin width)"
         parts.append(f"<p class='note'>N = {stats['n']:,} results in scope. N/A values are excluded and counted under "
                      "N missing (missing data, undefined and not evaluable). Sample standard deviation (n − 1); "

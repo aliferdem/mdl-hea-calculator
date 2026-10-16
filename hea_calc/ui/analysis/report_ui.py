@@ -125,8 +125,19 @@ class ReportTask(QObject):
 
 
 # ====================================================================== composition
-def _composition_job(task: ReportTask, row, info, path: str) -> dict:
-    html = R.composition_report_html(row, info)
+def _batch_mass(win) -> float:
+    """The Total mass preference of the window (Mass column of composition reports)."""
+    while win is not None:
+        prefs = getattr(win, "prefs", None)
+        if prefs is not None:
+            return prefs.total_mass
+        win = win.parent() if hasattr(win, "parent") else None
+    from ..preferences import DEFAULT_TOTAL_MASS
+    return DEFAULT_TOTAL_MASS
+
+
+def _composition_job(task: ReportTask, row, info, path: str, batch_mass: float = 2.0) -> dict:
+    html = R.composition_report_html(row, info, batch_mass=batch_mass)
     task.check()
     pages = render_pdf(html, path, title=f"Composition report – {row.name}")
     return {"path": path, "pages": pages}
@@ -140,12 +151,13 @@ def export_composition_snapshot(parent, row, info) -> None:
                                           "PDF (*.pdf)")
     if not path:
         return
-    render_pdf(R.composition_report_html(row, info), path, title=f"Composition report – {row.name}")
+    render_pdf(R.composition_report_html(row, info, batch_mass=_batch_mass(parent)), path,
+               title=f"Composition report – {row.name}")
 
 
 # ====================================================================== collection
 def _collection_job(task: ReportTask, repo, scope, info, workspace_lo: int, metrics, plot, stale, run_count,
-                    filters_text, path: str) -> dict:
+                    filters_text, path: str, focus: str = "") -> dict:
     from ...core.analysis.queries import ScopeQuery
     con = repo.reader_connection()
     try:
@@ -161,7 +173,7 @@ def _collection_job(task: ReportTask, repo, scope, info, workspace_lo: int, metr
         task._sq = None
         con.close()
     ctx = {"scope": scope, "info": info, "population": pop, "stats": stats, "distribution": dist,
-           "plot": plot, "stale": stale, "run_count": run_count, "filters_text": filters_text}
+           "plot": plot, "stale": stale, "run_count": run_count, "filters_text": filters_text, "focus": focus}
     html = R.collection_report_html(ctx)
     task.check()
     resources = {plot["image"]: plot.pop("qimage")} if plot and "qimage" in plot else {}
@@ -234,7 +246,7 @@ def export_report(win, kind: str) -> None:
                                               "PDF (*.pdf)")
         if not path:
             return
-        args = (_composition_job, row, info, path)
+        args = (_composition_job, row, info, path, _batch_mass(win))
         label = "Preparing the composition report…"
     else:
         sc = st.scope
@@ -250,11 +262,9 @@ def export_report(win, kind: str) -> None:
         stale = None
         if st.stale == "filter":
             stale = "The results-table filter changed after this collection was resolved."
-        elif st.stale == "checked":
-            stale = "The checked results changed after this collection was resolved."
         plot = plot_context(win)
         args = (_collection_job, c.repo, sc, info, c.workspace_lo, metrics, plot, stale, c.run_count(sc.run_id),
-                filter_text(sc.filters), path)
+                filter_text(sc.filters), path, st.stats_focus)
         label = "Preparing the analysis report…"
     task = ReportTask(win)
     win._report_task = task
@@ -267,8 +277,8 @@ def show_progress(win, label: str, task: ReportTask) -> None:
     if win.runner.running or win.exporter.running:
         win.notify("info", label)
         return
-    win.progress.bar.setRange(0, 0)
-    win.progress.label.setText(label)
+    win.progress.set_cancellable(True)          # header progress: a report has no other cancel control
+    win.progress.set_progress(label.rstrip("…"), 0, 0, None)
     win.progress.cancel.setEnabled(True)
     try:
         win.progress.cancel.clicked.disconnect(win.cancel_calculation)
@@ -311,7 +321,7 @@ def print_composition(win) -> None:
     if dlg.exec():
         doc = QTextDocument()
         doc.setDefaultFont(QFont("IBM Plex Sans", 9))
-        doc.setHtml(R.composition_report_html(row, info))
+        doc.setHtml(R.composition_report_html(row, info, batch_mass=_batch_mass(win)))
         doc.print_(printer)
 
 

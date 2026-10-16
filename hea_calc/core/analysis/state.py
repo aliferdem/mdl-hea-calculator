@@ -7,7 +7,7 @@ variable changes unless the event's rule lists it:
 1. double-click a row => active := its result_id; nothing else changes;
 2. single click, hover, sort, page, column change => no change (no event exists for them);
 3. table filter changed => if the scope's population is "filtered", the scope becomes stale (filter);
-4. checked set changed => if the population is "checked", the scope becomes stale (checked);
+4. (removed with the Results checkbox column: there is no checked set)
 5. results removed => the active composition is marked removed if it was one of them; the selection and
    inspector lose them; statistics become stale (data version);
 6. rows committed to the scope's run => statistics stale (data version);
@@ -21,14 +21,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 
 from .plotting import PlotConfiguration
-from .scope import CHECKED, FILTERED, ResolvedScope
+from .scope import FILTERED, ResolvedScope
 
 COMPOSITION, COLLECTION = "composition", "collection"
 COMP_TABS = ("overview", "descriptors", "models", "model_details")
 COLL_TABS = ("overview", "plots", "statistics", "models")
 COMP_TAB_LABELS = ("Overview", "Descriptors", "Models", "Model details")
 COLL_TAB_LABELS = ("Overview", "Plots", "Statistics", "Models")
-STALE_FILTER, STALE_CHECKED = "filter", "checked"
+STALE_FILTER = "filter"
 REMOVED, RECALCULATED = "removed", "recalculated"
 
 
@@ -47,10 +47,12 @@ class AnalysisState:
     plot: PlotConfiguration = field(default_factory=PlotConfiguration)
     selection: frozenset = frozenset()         # PlotSelection result ids (visual only)
     inspector: int | None = None               # plot point shown in the inspector
-    stats_metrics: tuple = ("dhmix", "dsmix", "delta", "vec", "omega", "phi_king")
+    stats_metrics: tuple = ("dhmix", "dsmix", "omega", "delta", "delta_cn12", "vec", "phi_king")
     stats_group: str = "none"
     stats_all: bool = False                    # "All measures"
-    stats_focus: str = "delta"                 # metric of the workspace histogram / box plot
+    stats_focus: str = ""                      # metric of the distribution (histogram / box plot); "" = none
+                                               # chosen yet - a neutral "Select a descriptor" state, never a
+                                               # default descriptor presented as more important
     denominator: str = "evaluated"             # model distributions: evaluated | population
     split_status: bool = True
     dist_group: str = "none"
@@ -109,16 +111,6 @@ def table_filter_changed(s: AnalysisState, frozen_filters: tuple) -> AnalysisSta
     return replace(s, stale=None) if s.stale == STALE_FILTER else s
 
 
-def checked_changed(s: AnalysisState, version: int) -> AnalysisState:
-    """Rule 4."""
-    r = s.resolved
-    if r is None or r.scope.base != CHECKED:
-        return s
-    if version != r.checked_version:
-        return replace(s, stale=STALE_CHECKED)
-    return replace(s, stale=None) if s.stale == STALE_CHECKED else s
-
-
 def results_removed(s: AnalysisState, ids) -> AnalysisState:
     """Rule 5 (S-35 / S-36)."""
     ids = set(ids)
@@ -173,8 +165,7 @@ def inspect(s: AnalysisState, rid: int | None) -> AnalysisState:
 
 def analyse_point(s: AnalysisState, rid: int) -> AnalysisState:
     """Rule 9: the inspector's explicit "Analyse composition"."""
-    return replace(s, active=int(rid), active_gone=None, context=COMPOSITION, comp_tab="overview",
-                   composition_badge=False)
+    return replace(s, active=int(rid), active_gone=None, context=COMPOSITION, composition_badge=False)
 
 
 def set_expanded(s: AnalysisState, expanded: bool) -> AnalysisState:

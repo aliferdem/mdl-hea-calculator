@@ -5,24 +5,23 @@ from __future__ import annotations
 import html
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-                               QScrollArea, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
+                               QVBoxLayout, QWidget)
 
 from ... import __version__
 from ...core.composition import parse_number
 from ...core.engine import DEFAULT_TCRIT_FRACTION, MODEL_KEYS, MODELS
 from ...core.results import COLUMNS, COLUMN_BY_KEY, DEFAULT_COLUMNS, IdSetFilter, ModelFilter, RangeFilter
 from .scroll import inner_scroll_area
-from .common import IconButton, button, refresh_style, set_prop
+from .common import button, refresh_style, set_prop
 
 
 class Modal(QDialog):
-    """Carbon modal: 20 px title, label, scrollable body, footer of 64 px buttons."""
+    """Carbon modal: 20 px title, label, scrollable body, footer of 64 px buttons.
 
-    def showEvent(self, e):
-        from .menu import carbonize_popups
-        carbonize_popups(self)       # content is added after __init__: done when first shown
-        super().showEvent(e)
+    The window keeps the native Windows caption (themed by ``ui/win_titlebar.py``), whose Close button closes
+    it; there is no second, in-content close control (release reconciliation).  Footer buttons are workflow
+    actions only (Apply, Cancel, Export …)."""
 
     def __init__(self, title: str, label: str = "", parent=None, width: int = 640):
         super().__init__(parent)
@@ -33,7 +32,7 @@ class Modal(QDialog):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         head = QHBoxLayout()
-        head.setContentsMargins(16, 16, 0, 0)
+        head.setContentsMargins(16, 16, 16, 0)
         col = QVBoxLayout()
         col.setSpacing(4)
         if label:
@@ -44,10 +43,6 @@ class Modal(QDialog):
         t.setObjectName("ModalTitle")
         col.addWidget(t)
         head.addLayout(col, 1)
-        close = IconButton("close", "Close")
-        set_prop(close, "square", "48")
-        close.clicked.connect(self.reject)
-        head.addWidget(close, 0, Qt.AlignmentFlag.AlignTop)
         root.addLayout(head)
         self.body = QVBoxLayout()
         self.body.setContentsMargins(16, 16, 16, 24)
@@ -61,10 +56,14 @@ class Modal(QDialog):
         foot.setFixedHeight(64)
         foot.setLayout(self.footer)
         root.addWidget(foot)
+        self.footer_widget = foot
+        foot.hide()                  # shown by the first workflow button (informational dialogs have none)
 
     def showEvent(self, e):
+        from .menu import carbonize_popups
+        carbonize_popups(self)       # content is added after __init__: done when first shown
         super().showEvent(e)
-        # initial focus: first text field, otherwise the dialog itself (no stray focus ring on Close)
+        # initial focus: first text field, otherwise the dialog itself (no stray focus ring)
         from PySide6.QtWidgets import QLineEdit
         fields = [w for w in self.findChildren(QLineEdit) if w.isVisible() and w.isEnabled()]
         if fields:
@@ -77,6 +76,7 @@ class Modal(QDialog):
         set_prop(b, "tall", "64")
         b.clicked.connect(slot)
         self.footer.addWidget(b, stretch)
+        self.footer_widget.show()
         return b
 
 
@@ -166,19 +166,21 @@ class FilterDialog(Modal):
         lab = QLabel("Model predictions")
         lab.setStyleSheet("font-weight: 600; padding-top: 12px;")
         g.addWidget(lab, r, 0, 1, 3)
-        self.models: dict[str, QComboBox] = {}
+        self.models: dict = {}
+        from .dropdown import Dropdown
+        options = ["Any", "SS", "MP", "IM", "SS+IM", "MG", "N/A", "SS (any SS)"]
         for i, k in enumerate(MODEL_KEYS):
             g.addWidget(QLabel(f"{k} — {MODELS[k].short}"), r + 1 + i, 0)
-            cb = QComboBox()
-            cb.setProperty("field", True)
-            cb.addItems(["Any", "SS", "MP", "IM", "SS+IM", "MG", "N/A", "SS (any SS)"])
+            # the shared Carbon dropdown (no wheel changes, no text shift, Carbon menu list)
+            value = "Any"
             f = current_m.get(k)
             if f:
                 labels = f.labels
                 if labels == {"SS", "SS+IM"}:
-                    cb.setCurrentText("SS (any SS)")
+                    value = "SS (any SS)"
                 elif len(labels) == 1:
-                    cb.setCurrentText(next(iter(labels)))
+                    value = next(iter(labels))
+            cb = Dropdown([(o, o) for o in options], value, accessible=f"{k} prediction filter")
             g.addWidget(cb, r + 1 + i, 1, 1, 2)
             self.models[k] = cb
         g.setColumnStretch(0, 1)
@@ -303,6 +305,9 @@ class AlloyDetailsDialog(Modal):
         self.row, self.info = row, info
         self.tabs = LineTabs(["Overview", "Descriptors", "Models", "Model details"])
         self.content = CompositionContent("L")
+        prefs = getattr(parent, "prefs", None)
+        if prefs is not None:
+            self.content.batch_mass = prefs.total_mass
         self.content.set_result(row, info)
         wrap = QWidget()
         tl = QHBoxLayout(wrap)
@@ -314,8 +319,7 @@ class AlloyDetailsDialog(Modal):
         self.tabs.changed.connect(self.content.setCurrentIndex)
         self.content.open_tab.connect(self._open_tab)
         self.content.model_selected.connect(lambda m: self.content.set_model(m))
-        self.add_footer_button("Export report…", "secondary", self.export_report)
-        self.add_footer_button("Close", "primary", self.accept)
+        self.add_footer_button("Export report…", "secondary", self.export_report)   # the native caption closes
 
     def _open_tab(self, tab: str):
         i = ("overview", "descriptors", "models", "model_details").index(tab)
@@ -345,8 +349,7 @@ class ImportReportDialog(Modal):
         if len(errors) > 500:
             v.addWidget(QLabel(f"… and {len(errors) - 500} more"))
         v.addStretch(1)
-        self.body.addWidget(scroll(inner), 1)
-        self.add_footer_button("Close", "primary", self.accept)
+        self.body.addWidget(scroll(inner), 1)        # informational: the native caption closes it
 
 
 class AboutDialog(Modal):

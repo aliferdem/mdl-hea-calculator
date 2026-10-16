@@ -53,6 +53,19 @@ _INLINE = {
     "box_select": '<svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M2,2h3v1H3v2H2V2z M11,2h3v3h-1V3h-2V2z M2,11h1v2h2v1H2V11z M13,11h1v3h-3v-1h2V11z M6,2h4v1H6V2z M6,13h4v1H6V13z M2,6h1v4H2V6z M13,6h1v4h-1V6z"/></svg>',
     "lasso": '<svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M8,2C4.1,2,1,3.8,1,6c0,1.6,1.6,3,4,3.6V11c0,0.6,0.4,1,1,1s1-0.4,1-1v-1.1c0.3,0,0.7,0.1,1,0.1c3.9,0,7-1.8,7-4S11.9,2,8,2z M8,9C4.7,9,2,7.7,2,6s2.7-3,6-3s6,1.3,6,3S11.3,9,8,9z"/></svg>',
     "pan": '<svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><polygon points="8,1 10.5,3.5 9.8,4.2 8.5,2.9 8.5,7.5 13.1,7.5 11.8,6.2 12.5,5.5 15,8 12.5,10.5 11.8,9.8 13.1,8.5 8.5,8.5 8.5,13.1 9.8,11.8 10.5,12.5 8,15 5.5,12.5 6.2,11.8 7.5,13.1 7.5,8.5 2.9,8.5 4.2,9.8 3.5,10.5 1,8 3.5,5.5 4.2,6.2 2.9,7.5 7.5,7.5 7.5,2.9 6.2,4.2 5.5,3.5"/></svg>',
+    # Carbon "help", "light", "asleep" (32, @carbon/icons v11.117.0): UI shell header actions
+    "help": '<svg viewBox="0 0 32 32" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M16,2A14,14,0,1,0,30,16,14,14,0,0,0,16,2Zm0,26A12,12,0,1,1,28,16,12,12,0,0,1,16,28Z"/><circle cx="16" cy="23.5" r="1.5"/><path d="M17,8H15.5A4.49,4.49,0,0,0,11,12.5V13h2v-.5A2.5,2.5,0,0,1,15.5,10H17a2.5,2.5,0,0,1,0,5H15v4.5h2V17a4.5,4.5,0,0,0,0-9Z"/></svg>',
+    "light": '<svg viewBox="0 0 32 32" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><rect x="15" y="2" width="2" height="5"/><rect x="21.6675" y="6.8536" width="4.958" height="1.9998" transform="translate(1.5191 19.3744) rotate(-45)"/><rect x="25" y="15" width="5" height="2"/><rect x="23.1466" y="21.6675" width="1.9998" height="4.958" transform="translate(-10.0018 24.1465) rotate(-45)"/><rect x="15" y="25" width="2" height="5"/><rect x="5.3745" y="23.1466" width="4.958" height="1.9998" transform="translate(-14.7739 12.6256) rotate(-45)"/><rect x="2" y="15" width="5" height="2"/><rect x="6.8536" y="5.3745" width="1.9998" height="4.958" transform="translate(-3.253 7.8535) rotate(-45)"/><path d="M16,12a4,4,0,1,1-4,4,4.0045,4.0045,0,0,1,4-4m0-2a6,6,0,1,0,6,6,6,6,0,0,0-6-6Z"/></svg>',
+    "asleep": '<svg viewBox="0 0 32 32" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M13.5025,5.4136A15.0755,15.0755,0,0,0,25.096,23.6082a11.1134,11.1134,0,0,1-7.9749,3.3893c-.1385,0-.2782.0051-.4178,0A11.0944,11.0944,0,0,1,13.5025,5.4136M14.98,3a1.0024,1.0024,0,0,0-.1746.0156A13.0959,13.0959,0,0,0,16.63,28.9973c.1641.006.3282,0,.4909,0a13.0724,13.0724,0,0,0,10.702-5.5556,1.0094,1.0094,0,0,0-.7833-1.5644A13.08,13.08,0,0,1,15.8892,4.38,1.0149,1.0149,0,0,0,14.98,3Z"/></svg>',
+    # Carbon "time" (32) and "file--storage" (32, Carbon MCP, @carbon/icons v11.117.0): workload summary
+    "time": '<svg viewBox="0 0 32 32" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M16,30A14,14,0,1,1,30,16,14,14,0,0,1,16,30ZM16,4A12,12,0,1,0,28,16,12,12,0,0,0,16,4Z"/><polygon points="20.59 22 15 16.41 15 7 17 7 17 15.58 22 20.59 20.59 22"/></svg>',
+    "file_storage": '<svg viewBox="0 0 32 32" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M28,20H26v2h2v6H4V22H6V20H4a2.0024,2.0024,0,0,0-2,2v6a2.0024,2.0024,0,0,0,2,2H28a2.0024,2.0024,0,0,0,2-2V22A2.0024,2.0024,0,0,0,28,20Z"/><circle cx="7" cy="25" r="1"/><path d="M22.707,7.293l-5-5A1,1,0,0,0,17,2H11A2.0023,2.0023,0,0,0,9,4V20a2.0023,2.0023,0,0,0,2,2H21a2.0023,2.0023,0,0,0,2-2V8A1,1,0,0,0,22.707,7.293ZM20.5857,8H17V4.4141ZM11,20V4h4V8a2.0023,2.0023,0,0,0,2,2h4V20Z"/></svg>',
+    # Carbon notification status icons (16): filled glyph + the inner mark as its own role (Carbon colours the
+    # inner path explicitly in notifications, so it stays legible on any surface)
+    "notify_warning": '<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path fill="{inner}" d="M7.4 3.9h1.2v5.3H7.4z M8 10.5a0.85 0.85 0 1 0 0.001 0z"/><path fill="{primary}" fill-rule="evenodd" d="M8,1C4.2,1,1,4.2,1,8s3.2,7,7,7s7-3.1,7-7S11.9,1,8,1z M7.5,4h1v5h-1C7.5,9,7.5,4,7.5,4z M8,12.2c-0.4,0-0.8-0.4-0.8-0.8s0.3-0.8,0.8-0.8c0.4,0,0.8,0.4,0.8,0.8S8.4,12.2,8,12.2z"/></svg>',
+    "notify_info": '<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path fill="{inner}" d="M7.25 4.75a0.8 0.8 0 1 0 1.5 0a0.8 0.8 0 1 0 -1.5 0z M6 7h2.6v4.1H10v1.1H6v-1.1h1.4V8.1H6z"/><path fill="{primary}" fill-rule="evenodd" d="M8,1a7,7,0,1,0,7,7A7,7,0,0,0,8,1Zm0,3a.8.8,0,1,1-.8.8A.8.8,0,0,1,8,4Zm2,8.1H6V11h1.4V8.1H6.5V7H8.6v4H10Z"/></svg>',
+    "notify_error": '<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path fill="{inner}" d="M4.5 5.28L5.28 4.5 11.5 10.72 10.72 11.5z"/><path fill="{primary}" fill-rule="evenodd" d="M8,1C4.1,1,1,4.1,1,8s3.1,7,7,7s7-3.1,7-7S11.9,1,8,1z M10.7,11.5L4.5,5.3l0.8-0.8l6.2,6.2L10.7,11.5z"/></svg>',
+    "notify_success": '<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path fill="{inner}" d="M7 10.8L4.5 8.3 5.3 7.5 7 9.2 10.7 5.5 11.5 6.3z"/><path fill="{primary}" fill-rule="evenodd" d="M8,1C4.1,1,1,4.1,1,8s3.1,7,7,7s7-3.1,7-7S11.9,1,8,1z M7,10.8L4.5,8.3l0.8-0.8L7,9.2l3.7-3.7l0.8,0.8L7,10.8z"/></svg>',
     "checkbox_indeterminate": '<svg viewBox="0 0 32 32" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M26,4H6A2,2,0,0,0,4,6V26a2,2,0,0,0,2,2H26a2,2,0,0,0,2-2V6A2,2,0,0,0,26,4ZM22,18H10V14H22Z"/></svg>',
 }
 
@@ -62,6 +75,25 @@ STATUS_ROLES = {
     "status_pair": {"primary": "status-gray"},
     "status_none": {"primary": "status-red"},
     "status_pending": {"primary": "status-gray"},   # Carbon pending--filled (03_element_empty)
+    # Carbon notification icons: $support-* glyph, black inner mark on warning, white elsewhere
+    "notify_warning": {"primary": "support-warning", "inner": "status-inner"},
+    "notify_info": {"primary": "support-info", "inner": "text-on-color"},
+    "notify_error": {"primary": "support-error", "inner": "text-on-color"},
+    "notify_success": {"primary": "support-success", "inner": "text-on-color"},
+}
+# The same icons on an inverse surface (tooltip / toggletip): Carbon's $support-*-inverse / $icon-inverse
+# tokens, resolved in the *current* theme - a light application has a dark popup and vice versa.  Never an
+# image inversion.
+STATUS_ROLES_INVERSE = {
+    "status_ok": {"primary": "support-success-inverse"},
+    "status_warn": {"primary": "support-warning-inverse", "inner": "status-inner"},
+    "status_pair": {"primary": "status-gray-inverse"},
+    "status_none": {"primary": "support-error-inverse"},
+    "status_pending": {"primary": "status-gray-inverse"},
+    "notify_warning": {"primary": "support-warning-inverse", "inner": "status-inner"},
+    "notify_info": {"primary": "support-info-inverse", "inner": "text-on-color"},
+    "notify_error": {"primary": "support-error-inverse", "inner": "text-on-color"},
+    "notify_success": {"primary": "support-success-inverse", "inner": "text-on-color"},
 }
 
 
@@ -73,14 +105,14 @@ def _source(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def svg_text(name: str, color: str | None = None) -> str:
+def svg_text(name: str, color: str | None = None, inverse: bool = False) -> str:
     src = _source(name)
     tokens = THEME.tokens
     if name in STATUS_ROLES:
-        for role, token in STATUS_ROLES[name].items():
+        for role, token in (STATUS_ROLES_INVERSE if inverse else STATUS_ROLES)[name].items():
             src = src.replace("{" + role + "}", tokens[token])
         return src
-    return src.replace("currentColor", color or tokens["icon-primary"])
+    return src.replace("currentColor", color or tokens["icon-inverse" if inverse else "icon-primary"])
 
 
 _pixmaps: dict[tuple, QPixmap] = {}
@@ -111,8 +143,13 @@ def icon(name: str, token: str = "icon-primary", size: int = 16, disabled_token:
     return ic
 
 
-def paint(painter: QPainter, name: str, rect, token: str = "icon-primary", color: str | None = None) -> None:
-    renderer = QSvgRenderer(QByteArray(svg_text(name, color or THEME.tokens.get(token, token)).encode("utf-8")))
+def paint(painter: QPainter, name: str, rect, token: str = "icon-primary", color: str | None = None,
+          inverse: bool = False) -> None:
+    """Render the vector icon straight into ``painter`` (crisp at any device pixel ratio).  ``inverse``: the
+    icon sits on an inverse surface (tooltip / toggletip) and takes the inverse tokens."""
+    col = color or (THEME.tokens.get(token, token) if not inverse or token != "icon-primary"
+                    else THEME.tokens["icon-inverse"])
+    renderer = QSvgRenderer(QByteArray(svg_text(name, col, inverse).encode("utf-8")))
     renderer.render(painter, QRectF(rect))
 
 

@@ -130,6 +130,8 @@ class AnalysisPanel(QFrame):
         # ---- content
         self.content_stack = QStackedWidget()
         self.composition = CompositionContent("M")
+        self.composition.batch_mass = controller.batch_mass
+        controller.batch_mass_changed.connect(self.composition.set_batch_mass)
         self.collection = CollectionContent(controller, "M")
         self.content_stack.addWidget(self.composition)
         self.content_stack.addWidget(self.collection)
@@ -174,6 +176,9 @@ class AnalysisPanel(QFrame):
             self.composition.set_size_class(cls)
             self.collection.set_size_class(cls)
             self.scope_bar.set_size_class(cls)
+            # at S the header has room only for the title, the switcher and the two icon buttons: the alloy
+            # name moves to the context bar (frame 13)
+            self.suffix.setVisible(self.c.state.context == S.COMPOSITION and cls != "S")
             self._composition_changed()
 
     def sizeHint(self) -> QSize:

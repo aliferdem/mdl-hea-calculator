@@ -12,7 +12,7 @@ from hea_calc.core.analysis import state as S
 from hea_calc.core.analysis.plotting import (BINNED, HEATMAP, LINE, RAW, SAMPLED, SCATTER, PlotConfiguration,
                                              available_types, default_config, representation_text, validate)
 from hea_calc.core.analysis.queries import QueryCancelled, ScopeQuery, nice_bin_width, run_metrics
-from hea_calc.core.analysis.scope import (CHECKED, FILTERED, CollectionScope, ResolvedScope, filter_text,
+from hea_calc.core.analysis.scope import (FILTERED, CollectionScope, ResolvedScope, filter_text,
                                           freeze_filters)
 from hea_calc.core.analysis.stats import describe, quantile_type7
 from hea_calc.core.engine import NA_ERROR, NA_MISSING_DATA, NA_UNDEFINED
@@ -177,23 +177,27 @@ def test_family_size_and_block_restrictions(world):
     assert sq(world, multi.with_restrictions(blocks=[1])).count() == pop["blocks"][1]
 
 
-def test_checked_scope_uses_a_snapshot(world):
+def test_collection_populations_are_full_and_filtered_only(world):
+    """Release reconciliation: the Results checkbox column and the "Checked results" population are gone;
+    a collection is the full or the filtered result set of one run (plus restrictions)."""
+    from hea_calc.core.analysis import scope as SC
+    assert SC.BASES == (SC.FULL, SC.FILTERED)
+    assert set(SC.BASE_LABELS.values()) == {"Full result set", "Filtered result set"}
+    with pytest.raises(ValueError):
+        CollectionScope(world["c1"], "checked")
+
+
+def test_show_in_results_table_id_set_is_explicit(world):
+    """The one id-set mechanism left: an explicit id table for the table's id filter (Show in results table)."""
+    from hea_calc.core.analysis.idsets import drop_id_table, id_table
+    from hea_calc.core.results import IdSetFilter
     repo = world["repo"]
     ids = [r[0] for r in world["con"].execute("SELECT result_id FROM results WHERE run_id=? LIMIT 7", (world["c1"],))]
-    other = world["single_ids"].start                      # a checked result of another run
-    t = repo.builder.submit(ViewTask("exec", statements=[
-        ("DELETE FROM vw.checked", ()),
-        (f"INSERT INTO vw.checked(rid) VALUES {','.join('(?)' for _ in ids + [other])}", ids + [other]),
-        ("CREATE TABLE vw.snap_test(rid INTEGER PRIMARY KEY)", ()),
-        ("INSERT INTO vw.snap_test SELECT rid FROM vw.checked", ())]))
-    assert t.done.wait(10) and t.error is None
-    scope = CollectionScope(world["c1"], CHECKED, snapshot="snap_test", snapshot_count=8)
-    assert sq(world, scope).count() == 7                   # the other run's id is not mixed in
-    t = repo.builder.submit(ViewTask("exec", statements=[("DELETE FROM vw.checked", ())]))
-    assert t.done.wait(10)
-    assert sq(world, scope).count() == 7                   # the snapshot, not the live checked set
-    with pytest.raises(ValueError):
-        CollectionScope(world["c1"], CHECKED)
+    name = id_table(repo, ids)
+    flt = freeze_filters([IdSetFilter(name, frozenset(ids))])
+    scope = CollectionScope(world["c1"], FILTERED, filters=flt)
+    assert sq(world, scope).count() == 7
+    drop_id_table(repo, name)
 
 
 def test_scope_identity_ignores_scope_id(world):
@@ -322,8 +326,9 @@ def test_metric_registry_has_units_and_symbols(world):
 
 # ====================================================================== state machine
 def _resolved(base="full", filters=(), version=0):
-    scope = CollectionScope(3, base, filters=filters, snapshot="s1" if base == CHECKED else None)
-    return ResolvedScope(scope, 10, "now", filter_snapshot=filters, checked_version=version)
+    _ = version
+    scope = CollectionScope(3, base, filters=filters)
+    return ResolvedScope(scope, 10, "now", filter_snapshot=filters)
 
 
 def test_double_click_changes_only_the_active_composition():
@@ -333,7 +338,7 @@ def test_double_click_changes_only_the_active_composition():
     assert (t.context, t.coll_tab, t.resolved, t.plot) == (s.context, s.coll_tab, s.resolved, s.plot)
 
 
-def test_filter_and_checked_changes_only_flag_the_scope():
+def test_filter_changes_only_flag_the_scope():
     flt = freeze_filters([ModelFilter("M8", {"SS"})])
     s = S.AnalysisState(resolved=_resolved(FILTERED, flt))
     t = S.table_filter_changed(s, ())
@@ -341,9 +346,7 @@ def test_filter_and_checked_changes_only_flag_the_scope():
     assert S.table_filter_changed(t, flt).stale is None               # filter restored
     full = S.AnalysisState(resolved=_resolved())
     assert S.table_filter_changed(full, ()).stale is None             # full set: unaffected
-    chk = S.AnalysisState(resolved=_resolved(CHECKED, version=3))
-    assert S.checked_changed(chk, 4).stale == S.STALE_CHECKED
-    assert S.checked_changed(full, 4).stale is None
+    assert not hasattr(S, "checked_changed") and not hasattr(S, "STALE_CHECKED")
 
 
 def test_removal_rules():

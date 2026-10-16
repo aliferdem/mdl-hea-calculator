@@ -270,8 +270,12 @@ def test_upper_panels_fit_and_table_fills_width_at_each_scale(app, scale):
         rep = w.layout_report()
         assert not rep["horizontalOverflow"], rep
         e, c, d = rep["upperPanels"]
-        assert e + c + d + 4 * 20 == MATEBOOK_CLIENTS[scale][0], rep
-        assert e >= 506 and c >= 400 and d >= 454, rep
+        width = MATEBOOK_CLIENTS[scale][0]
+        if rep["detailsStacked"]:     # Analysis below Element + Composition (the row cannot hold 805 px)
+            assert e + c + 3 * 20 == width and d == width - 40, rep
+        else:
+            assert e + c + d + 4 * 20 == width, rep
+        assert e >= 506 and c == 457 and d >= 454, rep        # Composition setup is not responsive
         # results table spans the content width; default columns fill it exactly, no scroll bars
         assert rep["tableWidth"] == MATEBOOK_CLIENTS[scale][0] - 40, rep
         assert rep["tableColumnsSum"] == rep["tableViewportWidth"], rep
@@ -291,14 +295,16 @@ def test_upper_panels_fit_and_table_fills_width_at_each_scale(app, scale):
 
 
 def test_design_viewport_reproduces_reference_geometry(app):
-    """1920 px: panels at the approved positions (20 / 636 / 1095, Analysis 805 px, right edge 1900)."""
+    """1920 px: panels at the current Figma positions (20 / 618 / 1095: Elements 578, Composition setup 457,
+    Analysis 805 px, right edge 1900)."""
     w = make_window(app, (1920, 1000))
     try:
         xs = [p.mapTo(w, QPoint(0, 0)).x() for p in (w.elements, w.composition, w.details)]
-        assert xs == [20, 636, 1095]
+        assert xs == [20, 618, 1095]
+        assert w.elements.width() == 578 and w.composition.width() == 457
         assert w.details.width() == 805
         assert w.details.mapTo(w, QPoint(0, 0)).x() + w.details.width() == 1900
-        assert w.elements.table.tile_size == 29
+        assert w.elements.table.tile_size == 28        # 578 px panel: 18 × 28 px tiles + 2 px gaps (Figma)
         assert not w.layout_report()["mainScrollbarVisible"], "no unnecessary main scroll bar"
     finally:
         w.close()
@@ -415,13 +421,16 @@ def test_tooltip_hover_focus_and_escape(app, win):
     QTest.qWait(ENTER_DELAY_MS + 60)
     assert ctl.visible() and ctl.tip.text == "Clear table"
     QApplication.sendEvent(btn, QEvent(QEvent.Type.Leave))
-    assert ctl.visible(), "leave delay keeps it briefly"
-    QTest.qWait(LEAVE_DELAY_MS + 80)
-    assert not ctl.visible()
-    # keyboard focus shows it immediately, Esc dismisses
+    assert LEAVE_DELAY_MS == 0 and not ctl.visible(), "no post-hover linger: hidden the moment the pointer leaves"
+    # keyboard focus shows it immediately and keeps it while the trigger has focus; Esc dismisses
     QApplication.sendEvent(btn, QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.TabFocusReason))
     assert ctl.visible()
     QApplication.sendEvent(btn, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier))
+    assert not ctl.visible()
+    # focus loss hides a keyboard tooltip at once
+    QApplication.sendEvent(btn, QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.TabFocusReason))
+    assert ctl.visible()
+    QApplication.sendEvent(btn, QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.TabFocusReason))
     assert not ctl.visible()
     # Qt's own tooltip request is swallowed (no native QToolTip)
     from PySide6.QtGui import QHelpEvent
@@ -480,7 +489,11 @@ def test_model_support_is_a_keyboard_accessible_toggletip(app, win):
     assert trig.is_open()
     pop = trig.popup
     assert "Model support for the highlighted element" in pop.label.text()
-    assert pop.label.text().count("<img") == 4, "the four status icons are shown, not unicode symbols"
+    from hea_calc.ui.widgets.tooltip import _ToggletipIconRow
+    rows = pop.findChildren(_ToggletipIconRow)
+    # the four status icons are vector-painted rows (crisp at any DPR), never raster <img> or unicode symbols
+    assert [r.icon_name for r in rows] == ["status_ok", "status_warn", "status_pair", "status_none"]
+    assert not any("<img" in lab.text() for lab in pop.labels)
     assert pop.width() == 308
     QTest.keyClick(pop, Qt.Key.Key_Escape)
     QApplication.processEvents()
@@ -520,14 +533,14 @@ def test_theme_switch_with_sticky_header_active(app):
 
 
 def test_composition_panel_states_fit_at_150_percent(app):
-    """At 400 px (Windows 150 %): no clipped title, no overlapping radio labels, no overlapped
+    """At Windows 150 % (Composition setup keeps its 457 px design width): no clipped title, no overlapping radio labels, no overlapped
     helper in expression mode, and value fields wide enough for five-digit values."""
     from PySide6.QtGui import QFontMetrics
     from hea_calc.ui.theme import BODY_COMPACT_01, font
     w = make_window(app, MATEBOOK_CLIENTS[1.5])
     try:
         comp = w.composition
-        assert comp.width() == 400
+        assert comp.width() == 457
         for el in ("Cr", "Mn", "Fe", "Co", "Ni"):
             w.elements.table.tiles[el].click()
         QApplication.processEvents()

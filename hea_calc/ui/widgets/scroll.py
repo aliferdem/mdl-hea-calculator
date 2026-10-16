@@ -19,7 +19,8 @@ from ..theme import SCROLLBAR_HIT, SCROLLBAR_MIN_THUMB, SCROLLBAR_VISIBLE, THEME
 
 
 class ThinScrollBar(QScrollBar):
-    """Scroll bar with a 4 px visible thumb centred in a 12 px invisible hit target.
+    """Scroll bar with a 4 px visible pill thumb (radius = half its thickness) centred in a 12 px invisible
+    hit target.
 
     Painted and hit-tested here (not through the style), so the visible geometry and the
     interactive geometry are the same rectangle at every device pixel ratio; the thumb is filled
@@ -85,7 +86,7 @@ class ThinScrollBar(QScrollBar):
             return
         p = QPainter(self)
         token = "border-strong-02" if (self._hover or self._drag) else "border-strong-01"
-        crisp.fill_rect(p, self.thumb_rect(), t(token))
+        crisp.fill_pill(p, self.thumb_rect(), t(token))        # maximum roundness: a 4 px pill
         p.end()
 
     # ---------------------------------------------------------------- interaction
@@ -184,6 +185,46 @@ def own_wheel(area: QAbstractScrollArea) -> QAbstractScrollArea:
         _WHEEL_OWNER = _WheelOwner()
     area.viewport().installEventFilter(_WHEEL_OWNER)
     return area
+
+
+class OverlayScrollArea(QScrollArea):
+    """An inner scroll area whose vertical bar floats over the content's right padding (as
+    :class:`MainScrollArea` does for the window): the bar never takes width from the content, so a page that
+    fits its panel never needs a horizontal bar just because it is tall."""
+
+    OVERLAY_RIGHT = 4
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setHorizontalScrollBar(ThinScrollBar(Qt.Orientation.Horizontal))
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inner = self.verticalScrollBar()
+        self.overlay = ThinScrollBar(Qt.Orientation.Vertical, self)
+        inner.rangeChanged.connect(self._sync_range)
+        inner.valueChanged.connect(self.overlay.setValue)
+        self.overlay.valueChanged.connect(inner.setValue)
+        self._sync_range(inner.minimum(), inner.maximum())
+
+    def _sync_range(self, lo: int, hi: int):
+        inner = self.verticalScrollBar()
+        self.overlay.setRange(lo, hi)
+        self.overlay.setPageStep(inner.pageStep())
+        self.overlay.setSingleStep(inner.singleStep())
+        self.overlay.setValue(inner.value())
+        self.overlay.setVisible(hi > lo)
+        self._place()
+
+    def _place(self):
+        vp = self.viewport().geometry()
+        self.overlay.setGeometry(vp.right() + 1 - SCROLLBAR_HIT - self.OVERLAY_RIGHT, vp.top(), SCROLLBAR_HIT,
+                                 vp.height())
+        self.overlay.raise_()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._place()
 
 
 def inner_scroll_area(widget=None, horizontal: bool = False) -> QScrollArea:

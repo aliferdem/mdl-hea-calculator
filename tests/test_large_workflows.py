@@ -210,17 +210,20 @@ def test_model_exposes_only_the_page_and_no_qt_items(win, app, engine):
     assert m.rowCount() == 10
     after = len(m.findChildren(QObject)) + len(win.table.view.viewport().findChildren(QObject))
     assert after == before, "no QObject per row or cell"
-    pages = win.table.pagination.pages
-    assert pages.n == 10_000 and pages.rowCount() == pages.WINDOW, "a bounded window of the page list"
+    assert win.table.pagination.of_lbl.text() == "of 10,000 pages"
     assert win.table.view.indexWidget(m.index(0, 0)) is None
     t = time.perf_counter()
     m.set_page(5000)
     app.processEvents()
     assert time.perf_counter() - t < 0.5 and m.id_at(0) == m.view.lo + 50_000
-    box = win.table.pagination.page_box
-    assert box.currentText() == "5001" and pages.page_of(box.currentIndex()) == 5000
-    box.activated.emit(box.currentIndex() + 3)
-    assert m.page == 5003, "the window maps list rows back to page numbers"
+    field = win.table.pagination.page_field
+    assert field.text() == "5001"
+    field.setText("5004")
+    field.returnPressed.emit()                             # Enter commits a typed page number
+    assert m.page == 5003
+    field.setText("99999")
+    field.returnPressed.emit()                             # out of range: corrected to the last page, visibly
+    assert m.page == 9999 and field.text() == "10000" and field._invalid
 
 
 def test_table_has_no_selection_and_no_body_tooltips(win):
@@ -317,6 +320,16 @@ def test_sweep_calculation_runs_as_a_process_job_with_throttled_progress(win, ap
     win.composition.unit_box.setCurrentIndex(1)
     for r in win.composition.sweep.rows.values():
         r.min.setText("5"), r.max.setText("50"), r.step.setText("5")
+    # Calculate is enabled once the (debounced, background) pre-flight count has run ("Updating…" -> "Ready")
+    sw = win.composition.sweep
+    sw._timer.stop()
+    sw._update_summary()
+    t_count = time.perf_counter()
+    while sw._counter.busy and time.perf_counter() - t_count < 30:
+        app.processEvents()
+        time.sleep(0.005)
+    app.processEvents()
+    assert win.composition.calc_btn.isEnabled()
     progress = []
     win.runner.progress.connect(lambda d, t, e: progress.append(d))
     t0 = time.perf_counter()
@@ -334,30 +347,34 @@ def test_sweep_calculation_runs_as_a_process_job_with_throttled_progress(win, ap
 
 
 def test_details_move_below_when_the_three_panels_do_not_fit(app):
-    from hea_calc.ui.theme import COMPOSITION_PANEL_MIN, DETAILS_PANEL_MIN, ELEMENT_PANEL_MIN, PANEL_GAP
-    need = ELEMENT_PANEL_MIN + COMPOSITION_PANEL_MIN + DETAILS_PANEL_MIN + 2 * PANEL_GAP
-    w = make_window(app, (1440, 900))
+    from hea_calc.ui.theme import (ANALYSIS_WIDE_MIN, COMPOSITION_PANEL_WIDTH, CONTENT_MARGIN_X, ELEMENT_PANEL_MIN,
+                                   PANEL_GAP)
+    need = ELEMENT_PANEL_MIN + COMPOSITION_PANEL_WIDTH + ANALYSIS_WIDE_MIN + 2 * PANEL_GAP
+    boundary = need + 2 * CONTENT_MARGIN_X                    # window width at the breakpoint
+    w = make_window(app, (1920, 900))
     try:
         top = w.top_row
         assert top.wide_minimum() == need
         ids = (id(w.elements), id(w.composition), id(w.details))
-        assert not top.stacked and top.width() >= need          # 150 % on the target display: one row
-        w.resize(1300, 900)
+        assert not top.stacked and top.width() >= need          # 100 % on a 1920 px client: one row
+        w.resize(1440, 900)                                     # 150 % on the target display: stacked
         app.processEvents()
         assert top.stacked
         e, c, d = w.elements.geometry(), w.composition.geometry(), w.details.geometry()
         assert e.top() == c.top() == 0 and d.top() == e.bottom() + 1 + PANEL_GAP
-        assert d.width() == top.width() and d.left() == 0, "Details spans the full width"
+        assert d.width() == top.width() and d.left() == 0, "Analysis spans the full width"
         assert c.right() == top.width() - 1, "Element + Composition fill the first row"
+        assert c.width() == COMPOSITION_PANEL_WIDTH, "Composition setup keeps its design width"
         assert w.table.mapTo(w.content, QPoint(0, 0)).y() > w.details.mapTo(w.content, QPoint(0, 0)).y()
         assert not w.layout_report()["horizontalOverflow"]
-        # hysteresis: just at the boundary it stays stacked, a little wider it returns
-        w.resize(1440 + 10, 900)
+        # hysteresis: just past the boundary it stays stacked, a little wider it returns
+        w.resize(boundary + 10, 900)
         app.processEvents()
         assert top.stacked
-        w.resize(1440 + 40, 900)
+        w.resize(boundary + 40, 900)
         app.processEvents()
         assert not top.stacked
+        assert w.composition.width() == COMPOSITION_PANEL_WIDTH and w.details.width() >= ANALYSIS_WIDE_MIN
         assert ids == (id(w.elements), id(w.composition), id(w.details)), "panels repositioned, not rebuilt"
     finally:
         w.close()

@@ -68,6 +68,27 @@ def wait_task(task, app, timeout=30.0):
     assert not task.busy
 
 
+def settle_counts(win, app):
+    """Composition setup recounts after a pause (debounced, background): Calculate is disabled while the
+    footer says "Updating…" (Figma State=Recalculating).  Run the pending count now and wait for it."""
+    comp = win.composition
+    if comp.mode == "sweep":
+        comp.sweep._timer.stop()
+        comp.sweep._update_summary()
+        wait_task(comp.sweep._counter, app)
+    elif comp.mode == "expression":
+        e = comp.expr
+        e._parse_timer.stop()
+        e._count_timer.stop()
+        e.parse()
+        wait_task(e._counter, app)
+    app.processEvents()
+
+
+def menu_action(win, text):
+    return next(i for i in win.composition.footer.calc.menu_items if i[0] == text)
+
+
 def test_selection_order_and_rows(win):
     click_elements(win, "Cr", "Mn", "Fe")
     single = win.composition.single
@@ -96,18 +117,22 @@ def test_set_equal_and_normalize(win):
     click_elements(win, "Fe", "Co", "Ni", "Cr")
     s = win.composition.single
     s.radio_group.button(2).click()  # at.%
-    win.composition.equal_btn.click()
+    menu_action(win, "Set equal")[1]()                 # Calculate menu (Figma split button)
     assert all(v == pytest.approx(25.0) for v in s.values.values())
     s.rows["Fe"].fields["at"].setText("50")
     s._edited("Fe", "at")
-    assert win.composition.normalize_btn.isEnabled()
-    win.composition.normalize_btn.click()
+    # at.% no longer sums to 100: the footer says so and Calculate waits for Normalize
+    st = win.composition.footer.status.status
+    assert st.kind == "error" and "100%" in st.text and not win.composition.calc_btn.isEnabled()
+    assert menu_action(win, "Normalize")[2]
+    menu_action(win, "Normalize")[1]()
     assert sum(s.values.values()) == pytest.approx(100.0)
     assert s.values["Fe"] == pytest.approx(50 / 125 * 100)
+    assert win.composition.calc_btn.isEnabled()
     s.radio_group.button(1).click()  # ratio: normalize disabled
-    assert not win.composition.normalize_btn.isEnabled()
+    assert not menu_action(win, "Normalize")[2]
     s.radio_group.button(0).click()  # element column: set equal disabled
-    assert not win.composition.equal_btn.isEnabled()
+    assert not menu_action(win, "Set equal")[2]
 
 
 def test_invalid_input_blocks_calculation(win):
@@ -117,7 +142,12 @@ def test_invalid_input_blocks_calculation(win):
     s._edited("Fe", "ratio")
     assert s.rows["Fe"].fields["ratio"].property("invalid")
     n = len(win.table.model.rows)
+    # the explanation is in the Composition setup footer and Calculate is disabled (no calculation)
+    st = win.composition.footer.status.status
+    assert st.kind == "error" and "number" in st.text
+    assert not win.composition.calc_btn.isEnabled()
     win.composition.calc_btn.click()
+    win.composition.calculate()                        # even a direct request is refused
     assert len(win.table.model.rows) == n
     assert win.notification.isVisible()
 
@@ -160,9 +190,9 @@ def test_sweep_and_pagination(win, app):
         row.step.setText("10")
     sw.all_lock.click()  # unlock all -> optional elements: binaries and the ternary
     assert not any(r.lock.isChecked() for r in sw.rows.values())
-    sw._update_summary()
-    wait_task(sw._counter, app)
+    settle_counts(win, app)
     assert sw.summary_data.systems == 4 and sw.summary_data.compositions == 63  # 3 x 9 binaries + 36 ternaries
+    assert win.composition.calc_btn.isEnabled()
     win.composition.calc_btn.click()
     wait_worker(win, app)
     m = win.table.model
@@ -171,7 +201,8 @@ def test_sweep_and_pagination(win, app):
     assert m.page_size == 10 and m.page_count() == 7
     win.table.pagination.next_btn.click()
     assert m.page == 1 and len(m.page_rows()) == 10
-    win.table.pagination.page_box.activated.emit(m.page_count() - 1)
+    win.table.pagination.page_field.setText(str(m.page_count()))
+    win.table.pagination.page_field.returnPressed.emit()
     assert len(m.page_rows()) == 3
 
 
@@ -191,7 +222,7 @@ def test_sweep_ratio_space_figma_example(win, app):
     wait_task(sw._counter, app)
     s = sw.summary_data
     assert (s.selected, s.required, s.optional, s.systems, s.compositions) == (5, 5, 0, 1, 6655)
-    assert "6,655 valid compositions" in sw.summary.text()
+    assert "6,655</span><span style='font-size:12px'> valid compositions" in sw.workload.count.text()
     sw.all_max.setText("1.0")
     sw.all_max.editingFinished.emit()
     assert all(r.max.text() == "1.0" for r in sw.rows.values())
@@ -208,6 +239,7 @@ def test_expression_mode(win, app):
     row.min.setText("0")
     row.max.setText("0.5")
     row.step.setText("0.1")
+    settle_counts(win, app)
     assert win.composition.calc_btn.isEnabled()
     win.composition.calc_btn.click()
     wait_worker(win, app)
@@ -215,7 +247,7 @@ def test_expression_mode(win, app):
     assert names[0] == "FeCoNi" and "(FeCoNi)0.9Al0.1" in names and len(names) == 6
     assert win.table.model.rows[1].variables == {"x": 0.1}
     QApplication.clipboard().setText("")
-    win.composition.copy_btn.click()
+    win.composition._copy_compositions()             # Calculate menu: Copy table
     wait_task(win.composition._gen_task, app)
     text = QApplication.clipboard().text()
     assert text.startswith("Alloy\tFe (at.%)") and len(text.strip().split("\r\n")) == 7
@@ -229,6 +261,7 @@ def test_expression_blocks_in_ui(win, app):
     e.var_rows["x"].min.setText("0.5")
     e.var_rows["x"].max.setText("1")
     e.var_rows["x"].step.setText("0.5")
+    settle_counts(win, app)
     win.composition.calc_btn.click()
     wait_worker(win, app)
     assert [r.name for r in win.table.model.rows] == ["CoCrFeNi", "Al0.5CoCrFeNi", "AlCoCrFeNi"]
@@ -334,28 +367,28 @@ def test_button_sizes_follow_the_carbon_size_property(win, app):
 
     Regression: the selector used to be the Qt property ``size``, which QWidget already declares
     as a read-only QSize, so ``setProperty("size", "md")`` failed silently and every md button
-    rendered at the 32 px sm height.  The Figma footer puts a 40 px primary button flush with the
-    bottom of the 40 px footer bar, so this is measurable against the design.
+    rendered at the 32 px sm height.  The current Figma Composition setup footer is 32 px with sm buttons
+    (Calculate 141 × 32, flush with the panel edge), so this is measurable against the design.
     """
     from hea_calc.ui.theme import BUTTON_HEIGHT, CONTROL_HEIGHT
+    from hea_calc.ui.widgets.common import button
 
-    md = [win.composition.clear_btn, win.composition.calc_btn]
-    sm = [win.table.export_btn]
-    for b in md:
-        assert b.property("btnsize") == "md", b
-        assert (b.minimumHeight(), b.maximumHeight()) == (BUTTON_HEIGHT, BUTTON_HEIGHT), b
+    probe = button("Probe", "primary", "md", win)
+    probe.show()
+    app.processEvents()
+    assert (probe.minimumHeight(), probe.maximumHeight()) == (BUTTON_HEIGHT, BUTTON_HEIGHT)
+    sm = [win.composition.clear_btn, win.composition.calc_btn, win.table.export_btn]
     for b in sm:
         assert b.property("btnsize") == "sm", b
         assert (b.minimumHeight(), b.maximumHeight()) == (CONTROL_HEIGHT, CONTROL_HEIGHT), b
-    # and the rendered footer matches the export: Calculate is 141 x 40, flush with the bar
+    # the rendered footer matches the component: 32 px, Calculate 141 px wide, the split ends at the panel edge
     app.processEvents()
-    bar = win.composition.calc_btn.parentWidget()
-    assert win.composition.calc_btn.height() == BUTTON_HEIGHT == bar.height()
-    # Composition setup is 439 px at the 1920 px reference (approved Analysis layout, 457 -> 439), so the
-    # 141 px Figma button is compressed by the panel's existing rule (1 px per px below 457)
-    from hea_calc.ui.widgets.composition_panel import ColumnGrid
-    assert win.composition.width() == 439
-    assert win.composition.calc_btn.width() == 141 - (ColumnGrid.DESIGN_PANEL - 439)
+    comp = win.composition
+    assert comp.footer.height() == CONTROL_HEIGHT == comp.calc_btn.height()
+    assert comp.width() == 457 and comp.calc_btn.width() == 141
+    right = comp.footer.calc.mapTo(comp, comp.footer.calc.rect().topRight()).x()
+    assert right == comp.width() - 1
+    assert comp.footer.mapTo(comp, comp.footer.rect().topLeft()).y() == 465 - 32
 
 
 def test_empty_states_use_the_exported_illustrations(win, app):

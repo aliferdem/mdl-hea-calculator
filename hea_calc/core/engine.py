@@ -839,6 +839,22 @@ class Engine:
         return out
 
     # ================================================================== element support
+    def model_coverage(self, elements) -> dict[str, str | None]:
+        """Which models lack *data* for a set of elements: ``{model: reason}`` for every model that returns
+        N/A for missing data (``NA_MISSING_DATA``) on the equiatomic alloy of ``elements``, ``None`` for the
+        others.  It evaluates the engine itself (one composition, milliseconds), so the answer follows the
+        engine's own data rules exactly - nothing is re-implemented.  Data availability depends only on which
+        elements (and so which pairs) are present, not on the amounts, so the equiatomic alloy is
+        representative of every composition of the same element set.  Fewer than two elements: ``{}``."""
+        els = [e for e in dict.fromkeys(elements) if self.data.is_element(e)]
+        if len(els) < 2:
+            return {}
+        res = self.calculate({e: 1.0 for e in els})
+        if not res.ok:
+            return {}
+        return {k: (o.reason if o.label == NA and o.na_kind == NA_MISSING_DATA else None)
+                for k, o in res.models.items()}
+
     def model_support(self, element: str) -> dict[str, tuple[str, str]]:
         """Per-model data support for one element.
 

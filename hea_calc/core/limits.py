@@ -99,6 +99,20 @@ def fmt_duration(s: float) -> str:
     return f"about {s / 3600:,.1f} h"
 
 
+def fmt_short_duration(s: float) -> str:
+    """Compact form for the Composition setup workload summary (Figma "~1 s", "~3 min", "~9 min")."""
+    if s < 60:
+        return f"~{max(1, round(s)):,} s"
+    if s < 3600:
+        return f"~{round(s / 60):,} min"
+    return f"~{s / 3600:,.1f} h"
+
+
+def fmt_short_bytes(b: float) -> str:
+    """Compact form for the workload summary (Figma "~3.2 MB", "~1.5 GB")."""
+    return "~" + fmt_bytes(b)
+
+
 def describe(est: RunEstimate) -> tuple[str, str]:
     """(short tier label for the summary line - empty for a normal set, tooltip with the estimates)."""
     tip = f"Estimated on this computer: {fmt_duration(est.seconds)} of calculation, " \
