@@ -30,7 +30,7 @@ from .analysis.panel import AnalysisPanel
 from .analysis.widgets import stylesheet_rules as analysis_rules
 from .analysis.workspace import AnalysisWorkspace
 from .widgets.composition_panel import CompositionPanel
-from .widgets.dialogs import (AboutDialog, AlloyDetailsDialog, ChoiceDialog, ColumnsDialog, FilterDialog,
+from .widgets.dialogs import (AlloyDetailsDialog, ChoiceDialog, ColumnsDialog, FilterDialog,
                               ImportReportDialog, SettingsDialog)
 from .widgets.element_panel import ElementPanel
 from .widgets.header import AppHeader
@@ -223,6 +223,7 @@ class MainWindow(QMainWindow):
             self.table.pagination.size_box.setCurrentIndex(PAGE_SIZES.index(size))
         carbonize_popups(self)       # text-field context menus and dropdown lists use the Carbon popups
         win_titlebar.install(QApplication.instance(), lambda: THEME.name, lambda: THEME.tokens)
+        win_titlebar.watch(self)
         THEME.changed.connect(self.apply_theme)
         # the effective theme was resolved at start-up (app.py) from this preference; from now on it follows
         # the user's choice and - with System default - the OS colour scheme
@@ -900,16 +901,39 @@ class MainWindow(QMainWindow):
         from .analysis.report_ui import export_analysis_data
         export_analysis_data(self, kind)
 
-    def show_help(self, page: str, anchor: str = ""):
-        from .analysis.help import open_help
-        legacy = {"model-coverage": "models", "collection-analysis": "collections"}
-        open_help(legacy.get(page, page), self)
+    def show_help(self, page: str = "home", anchor: str = ""):
+        """Show the single Help window at ``page`` (an id, legacy alias or help:// URL) and ``anchor``."""
+        from .help_window import HelpWindow
+        win = getattr(self, "_help", None)
+        try:
+            if win is None or not win.isVisible():
+                if win is None:
+                    win = self._help = HelpWindow(self)
+                win.show()
+        except RuntimeError:                       # deleted with its parent during shutdown
+            win = self._help = HelpWindow(self)
+            win.show()
+        win.open(page, anchor)
+        if win.isMinimized():
+            win.showNormal()
+        win.raise_()
+        win.activateWindow()
+        return win
 
     def show_about(self):
-        dlg = AboutDialog(self)
-        dlg.exec()
-        dlg.deleteLater()
-
+        """Show (or raise) the single, non-modal About window."""
+        from .about_window import AboutWindow
+        win = getattr(self, "_about", None)
+        try:
+            if win is None:
+                win = self._about = AboutWindow(self)
+            win.show()
+        except RuntimeError:
+            win = self._about = AboutWindow(self)
+            win.show()
+        win.raise_()
+        win.activateWindow()
+        return win
     def shutdown(self):
         """Stop the calculation, the export process, every worker process and the session database
         (deleted).  Idempotent: called on close and on application quit."""
@@ -931,6 +955,15 @@ class MainWindow(QMainWindow):
         self.repo.close()
 
     def closeEvent(self, e):
+        # Help and About are top-level windows of their own: they close with the application, otherwise a visible
+        # one would keep the process alive after the main window has gone
+        for name in ("_help", "_about"):
+            w = getattr(self, name, None)
+            try:
+                if w is not None:
+                    w.close()
+            except RuntimeError:
+                pass
         self.shutdown()
         super().closeEvent(e)
 

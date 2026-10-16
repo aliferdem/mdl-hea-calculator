@@ -4,7 +4,7 @@
 
 Each scale runs in its own process (offscreen platform, ``QT_SCALE_FACTOR`` = scale, as tools/dpi_harness.py),
 builds the canonical states of ``docs/analysis-redesign/images`` from real engine results (S1-S4, C1, E1, E2),
-captures the Analysis panel (805 x 465 and 454 x 465 logical) or the window (expanded workspace) and checks
+captures the Analysis panel (805 x 465, and pinned to 454 x 465 logical for the S size class) or the window (expanded workspace) and checks
 what a design review checks - not font rasters:
 
 * geometry: panel size, header / context bar / tab row / content boundaries, size class;
@@ -248,8 +248,13 @@ def child(scale: float, theme: str) -> dict:
     finally:
         w.close()
         pump()
-    # ---------------------------------------------------------------- embedded 454 (1440 x 1000)
+    # ---------------------------------------------------------------- embedded 454 (S size class)
+    # Composition setup keeps its Figma width (457 px), so below 1920 px the main window stacks Analysis at full
+    # width and never lays it out at 454 px; the S state is still a supported width (narrow host windows), so the
+    # real panel of a real window is pinned to it here.
     w = make((1440, 1000))
+    w.analysis.setFixedWidth(454)
+    pump()
     try:
         c = w.analysis_ctl
         w.calculate("single", [alloy_name(samples.S1)], [samples.S1], [{}])

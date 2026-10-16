@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QEvent, QObject, QSettings, Qt
+from PySide6.QtCore import QPoint, QEvent, QObject, QSettings, Qt
 from PySide6.QtWidgets import QApplication, QWidget
 
 from hea_calc.core.analysis import samples
@@ -91,6 +91,11 @@ def test_resize_across_breakpoint_creates_no_top_level_windows(win, app):
         win.analysis_ctl.run_finished(run)
     settle(win, app)
     comp_width = win.composition.width()
+    # the pointer rests outside the window: content moving under a resting pointer is a hover, and its Carbon
+    # tooltip is a legitimate popup - this test is about windows the resize itself creates
+    from PySide6.QtGui import QCursor
+    QCursor.setPos(win.mapToGlobal(win.rect().topLeft()) - QPoint(200, 200))
+    pump(app)
     for ctx in (S.COMPOSITION, S.COLLECTION):
         win.analysis_ctl.apply(S.switch_context, ctx)
         settle(win, app)
@@ -104,7 +109,14 @@ def test_resize_across_breakpoint_creates_no_top_level_windows(win, app):
                 pump(app, 1)
                 stacked_seen |= win.top_row.stacked
                 wide_seen |= not win.top_row.stacked
-                assert len([w for w in app.topLevelWidgets() if w.isVisible()]) <= visible_before
+                tops = [w for w in app.topLevelWidgets() if w.isVisible()]
+                if len(tops) > visible_before:
+                    from hea_calc.ui.widgets.tooltip import install_tooltips
+                    ctl = install_tooltips(app)
+                    src = ctl._source
+                    raise AssertionError(f"extra top-level at width {wd}: {[type(w).__name__ for w in tops]}; "
+                                         f"tip source {type(src).__name__ if src else None} "
+                                         f"{src.objectName() if src else ''} {src.toolTip() if src else ''!r}")
             settle(win, app)
         finally:
             app.removeEventFilter(spy)

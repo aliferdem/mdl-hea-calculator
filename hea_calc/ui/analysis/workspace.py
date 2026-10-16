@@ -36,8 +36,9 @@ class BackButton(QPushButton):
         self.setFixedSize(200, 32)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
-        self.setToolTip("Back to calculation (Ctrl+Shift+E)")
+        # the label says what it does; no Tooltip repeating it (the shortcut is in the accessible description)
         self.setAccessibleName("Back to calculation")
+        self.setAccessibleDescription("Ctrl+Shift+E")
 
     def paintEvent(self, e):
         super().paintEvent(e)
@@ -130,7 +131,9 @@ class AnalysisWorkspace(QWidget):
         self.back.clicked.connect(self.back_requested.emit)
         self.overflow_btn.clicked.connect(self.open_overflow)
         controller.state_changed.connect(self._sync)
-        controller.composition_changed.connect(self._composition_changed)
+        controller.composition_changed.connect(self._composition_signal)
+        self._rendered_key = None
+        self._composition_dirty = False
         controller.data_ready.connect(lambda slot: self._identity() if slot == "population" else None)
         self.collection.set_has_results(True)
         self._sync(None, controller.state)
@@ -178,7 +181,26 @@ class AnalysisWorkspace(QWidget):
             self._composition_changed()
         self._identity()
 
+    def _composition_key(self):
+        return id(self.c.row), self.c.state.active, self.c.state.active_gone
+
+    def _composition_signal(self):
+        if self._composition_key() != self._rendered_key:
+            self._composition_changed()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if self._composition_dirty:
+            self._composition_changed()
+
     def _composition_changed(self):
+        # the expanded workspace is a hidden page most of the time: rebuilding it there cost ~0.3 s on the GUI
+        # thread for every activated result (release perf run 2026-10-16); it catches up when it is shown
+        if not self.isVisible():
+            self._composition_dirty = True
+            return
+        self._composition_dirty = False
+        self._rendered_key = self._composition_key()
         row = self.c.row if self.c.state.active_gone is None else None
         if row is None:
             self.composition.set_empty("No composition selected",

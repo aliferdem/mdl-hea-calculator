@@ -181,10 +181,12 @@ All workflows produce plain `{element: amount}` dictionaries that the single eng
   input column never changes the composition. *Set equal* sets equal values in the active column
   (ratio 1, percentages 100/n, mass total/n); *Normalize* rescales at.% or wt.% to 100 % and refuses blanks,
   invalid/negative values and zero totals.
-* **Composition sweep** (`core/generation.py: iter_space`, Figma 278:17008) — each element has Min / Max /
-  Step. Unit *At. ratio*: every element takes each positive grid value independently (cartesian product);
-  proportional duplicates are removed (e.g. 1:1 and 2:2). Unit *at.%*: only combinations summing to exactly
-  100 % are valid (integer arithmetic, no float drift). *Lock* on = required (always present, value > 0);
+* **Composition space** (formerly "Composition sweep"; `core/generation.py: iter_space`, Figma 278:17008) —
+  each element has Min / Max / Step in the chosen *Range basis*. *At. ratio* and *Mass*: every element takes each
+  positive grid value independently (cartesian product); proportional duplicates are removed (e.g. 1:1 and 2:2) —
+  masses are proportional amounts exactly like ratios. *at.%* and *wt.%*: only combinations summing to exactly
+  100 are valid (integer arithmetic, no float drift); wt.% and mass grid points are converted to atomic fractions
+  with `composition.to_fractions` (standard atomic weights) before they reach the engine (section 10). *Lock* on = required (always present, value > 0);
   off = optional — every subset of optional elements forms a system ("combinations"), filtered by
   *System size*. Points with fewer than two elements are never generated. Reproduces the Figma example
   (Cr/Mn/Ni 0.5–1.5, Fe 0.8–1.2, Co 1.0, step 0.1 → 6,655 compositions; 4 optional elements and sizes ≥ 4
@@ -265,3 +267,25 @@ model is unambiguous.
 Open scientific questions recorded by the Analysis audit (`docs/analysis-redesign/AUDIT_WORK_STATUS.md` items 1-7:
 Troparevsky suspect rule and causal flagging, M3 radius set, formula-group convention, density volume source,
 supplementary radii) are **unchanged**; Analysis displays CURRENT engine behaviour and its existing caution texts.
+
+---
+
+## 10. Release reconciliation (2026-10-16): workflow and presentation changes around the engine
+
+No equation, constant, threshold, dataset value, radius set or reason text changed. The scientific validator
+(the independent validator script) still gives 600 PASS / 8 FAIL / 5 UNSUPPORTED / 0 ERROR (the
+8 documented failures of section 8), before and after these changes.
+
+| Change | Kind | Why |
+|---|---|---|
+| `Engine.model_coverage(elements)` | read-only accessor: evaluates the equiatomic alloy of the element set and returns the reason of every model that is N/A for *missing data* | Composition setup warns "Partial model coverage" before calculating; the rule comes from the engine itself, so nothing is re-implemented in the UI (AGENTS.md section 3). Data availability depends only on the element set, not on the amounts |
+| Composition space range bases *wt.%* and *Mass* (`generation.SUM_UNITS = ("at", "wt")`, `recipes.SweepRecipe.atomic`) | workflow: enumeration and unit conversion | wt.% counts like at.% (sum = 100 on the grid); mass counts like At. ratio (proportional duplicates removed). Every grid point is converted with `composition.to_fractions` - the same conversion Single composition uses - and stored with its design coordinates in the entered basis; `available_axes` derives at.% axes from them in SQL. Tests: `tests/test_space_units.py` (the four bases agree for CoCrFeMnNi) |
+| Analysis Mass column "Mass (*g* g batch)" (`report.composition_report_html(batch_mass=…)`) | presentation: `composition.from_fractions(..., "mass", total_mass)` of the stored atomic fractions | the persisted Total mass preference applies to every result type; it never enters the engine |
+| Descriptor names "Size mismatch — Guo & Liu radii" (δ) / "Size mismatch — Kittel CN12 radii" (δ<sub>CN12</sub>) | label text in `core/analysis/metrics.py` | the two size mismatches use different radius sets (section 1); the labels say which, so neither is privileged in Statistics |
+| `t_assess` definition: "from Calculation settings" (was "from Settings") | label text | the menu item is *Calculation settings…* |
+| Engine fingerprint `daf5fcf9f33b` → `32c617b4c92d` | consequence of the `model_coverage` addition to `core/engine.py` | `provenance.engine_version()` hashes the engine sources; any source edit changes the ID even without a numerical change. Runs record the ID they were calculated with |
+
+The Help documentation (`hea_calc/docs/pages/`) quotes engine values only where `tests/test_help.py` recomputes
+them with the current engine (CoCrFeMnNi descriptors and verdicts, AlCoCrFeNi verdicts, the CoCrFeNiSi0.5 N/A reason,
+every composition-space and expression count, workload constants); its descriptor reference table is generated
+from the descriptor registry, and its reference list from `core/references.py`, so neither can drift from the code.

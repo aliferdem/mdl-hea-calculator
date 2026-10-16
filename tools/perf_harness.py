@@ -31,6 +31,7 @@ import ctypes
 import gc
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -270,7 +271,7 @@ def scenario_preflight(app, win, hb) -> dict:
     jit = hb.stop()
     s = sw.summary_data
     out = {"ok": ok, "timeToDisplayMs": round(1000 * dt, 1), "truncated": bool(s and s.truncated),
-           "summaryText": sw.summary.text().split("<br>")[-1], "heartbeat": jit,
+           "summaryText": re.sub(r"<[^>]+>", "", sw.workload.count.text()), "heartbeat": jit,
            "rowsInTable": win.table.model.view_count()}
     from hea_calc.core.generation import SweepSpec, count_space
     t = time.perf_counter()

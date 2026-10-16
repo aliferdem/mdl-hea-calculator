@@ -8,7 +8,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
                                QVBoxLayout, QWidget)
 
-from ... import __version__
 from ...core.composition import parse_number
 from ...core.engine import DEFAULT_TCRIT_FRACTION, MODEL_KEYS, MODELS
 from ...core.results import COLUMNS, COLUMN_BY_KEY, DEFAULT_COLUMNS, IdSetFilter, ModelFilter, RangeFilter
@@ -27,6 +26,8 @@ class Modal(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
+        from .. import win_titlebar
+        win_titlebar.watch(self)
         self.resize(width, 560)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -350,51 +351,6 @@ class ImportReportDialog(Modal):
             v.addWidget(QLabel(f"… and {len(errors) - 500} more"))
         v.addStretch(1)
         self.body.addWidget(scroll(inner), 1)        # informational: the native caption closes it
-
-
-class AboutDialog(Modal):
-    def __init__(self, parent=None):
-        super().__init__("MDL HEA Calculator", f"Version {__version__}", parent, width=720)
-        self.resize(720, 640)
-        from pathlib import Path
-
-        from PySide6.QtCore import QByteArray
-        from PySide6.QtSvgWidgets import QSvgWidget
-
-        from ..theme import t as _tok
-        logo_path = Path(__file__).resolve().parents[1] / "icons" / "about_logo.svg"
-        if logo_path.exists():
-            svg = logo_path.read_text(encoding="utf-8").replace("rgb(141,141,141)", _tok("text-primary"))
-            logo = QSvgWidget()
-            logo.load(QByteArray(svg.encode("utf-8")))
-            logo.setFixedSize(346, 44)
-            self.body.addWidget(logo)
-        parts = [
-            "<p>Phase-formation descriptors and models for high-entropy alloys.<br>"
-            "Metals Development Laboratory, Department of Metallurgical and Materials Engineering, "
-            "Middle East Technical University (METU), Ankara, Türkiye.</p>",
-            "<p><b>Models</b></p><ul>",
-        ]
-        for k in MODEL_KEYS:
-            parts.append(f"<li><b>{k}</b> {html.escape(MODELS[k].title)} — {html.escape(MODELS[k].reference)}</li>")
-        parts.append("</ul><p><b>Data</b></p><ul>"
-                     "<li>Binary liquid mixing enthalpies: A. Takeuchi, A. Inoue, Mater. Trans. 46 (2005) 2817.</li>"
-                     "<li>Binary formation enthalpies: Troparevsky et al., Phys. Rev. X 5 (2015) 011041, Suppl. A.</li>"
-                     "<li>Miedema parameters and moduli: H. Bakker, Enthalpies in Alloys (1998), Tables A1, A5.</li>"
-                     "<li>Atomic radii: S. Guo, C.T. Liu, Prog. Nat. Sci. 21 (2011) 433; "
-                     "C. Kittel, Introduction to Solid State Physics, 8th ed., Table 9 (CN12).</li></ul>"
-                     "<p>Licensed under the GNU General Public License v3. IBM Plex Sans: SIL Open Font License.</p>")
-        lab = QLabel("".join(parts))
-        lab.setTextFormat(Qt.TextFormat.RichText)
-        lab.setWordWrap(True)
-        lab.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        inner = QWidget()
-        v = QVBoxLayout(inner)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.addWidget(lab)
-        v.addStretch(1)
-        self.body.addWidget(scroll(inner), 1)
-        self.add_footer_button("Close", "primary", self.accept)
 
 
 class ChoiceDialog(Modal):

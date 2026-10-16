@@ -145,7 +145,9 @@ class AnalysisPanel(QFrame):
         self.expand_btn.clicked.connect(self.expand_requested.emit)
         self.overflow_btn.clicked.connect(self.open_overflow)
         controller.state_changed.connect(self._state_changed)
-        controller.composition_changed.connect(self._composition_changed)
+        # set_active changes the state (which already rebuilds through _sync) and then signals: rebuild once
+        controller.composition_changed.connect(self._composition_signal)
+        self._rendered_key = None
         self._has_results = False
         self._sync(None, controller.state)
         self._composition_changed()
@@ -220,7 +222,15 @@ class AnalysisPanel(QFrame):
         for b in self.coll_tabs.buttons:
             b.setEnabled(has)
 
+    def _composition_key(self):
+        return id(self.c.row), self.c.state.active, self.c.state.active_gone
+
+    def _composition_signal(self):
+        if self._composition_key() != self._rendered_key:
+            self._composition_changed()
+
     def _composition_changed(self):
+        self._rendered_key = self._composition_key()
         st = self.c.state
         row = self.row
         if row is None:

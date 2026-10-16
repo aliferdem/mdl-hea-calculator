@@ -966,7 +966,7 @@ class PageField(QLineEdit):
         self.current, self.last = current, max(1, last)
         if not self.hasFocus():
             self.setText(str(current + 1))
-        self.setToolTip(f"Type a page number (1–{self.last:,}) and press Enter")
+        self.setAccessibleDescription(f"Type a page number (1–{self.last:,}) and press Enter")
 
     def _commit(self) -> None:
         text = self.text().strip()

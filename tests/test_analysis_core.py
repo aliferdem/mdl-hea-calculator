@@ -105,6 +105,26 @@ def test_sql_statistics_equal_reference_implementation(world):
             assert got[k] == pytest.approx(ref[k], rel=1e-12, abs=1e-12), (key, k)
 
 
+def test_two_pass_exact_quartiles_equal_the_full_sort(world, monkeypatch):
+    """The bin-selection path (used from QUANTILE_SELECT_MIN values) returns exactly the quartiles of one sort of
+    every value - continuous descriptors through the selection, discrete ones (VEC) through the fallback."""
+    from hea_calc.core.analysis import queries as Q
+    monkeypatch.setattr(Q, "QUANTILE_SELECT_MIN", 0)
+    from hea_calc.core.analysis.metrics import STATISTICS_ELIGIBLE
+    from hea_calc.core.analysis.stats import QUARTILES, type7_positions
+    for scope in (CollectionScope(world["c1"]), CollectionScope(world["e1"])):
+        q = sq(world, scope)
+        for key in STATISTICS_ELIGIBLE:
+            st = q.statistics([key])["metrics"][key]
+            n = st["n_valid"]
+            if not n:
+                continue
+            m = q.metric(key)
+            need = {p: type7_positions(n, p) for p in QUARTILES}
+            ref = q._quantiles_sorted(m, n, q._from(m.needs_design), need)
+            assert (st["q1"], st["median"], st["q3"]) == ref, key
+
+
 def test_approximate_quartiles_are_disclosed_and_within_one_bin(world):
     q = sq(world, CollectionScope(world["c1"]))
     exact = q.statistics(["dhmix"])

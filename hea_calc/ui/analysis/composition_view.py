@@ -813,8 +813,8 @@ class CompositionContent(QStackedWidget):
                 elif c == "ref":
                     cells.append(Cell(_html.escape(MODELS[k].short) + f" ({MD.YEARS[k]})", color="text-secondary"))
             rows.append(cells)
-            tips.append(f"{MD.title(k)} · threshold: {plain_text(MD.threshold_text(k, d))}" if cls == "S"
-                        else f"Open details for {MD.title(k)}")
+            # S hides the threshold column, so its row Tooltip carries it; wider tables show everything already
+            tips.append(f"{MD.title(k)} · threshold: {plain_text(MD.threshold_text(k, d))}" if cls == "S" else "")
         table = DataTable(cols, rows, ROW_SM, activatable=True, row_tips=tips)
         status_col = list(columns).index("status") if "status" in columns else -1
         combined_col = list(columns).index("predstatus") if "predstatus" in columns else -1

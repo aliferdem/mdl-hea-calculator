@@ -27,6 +27,7 @@ RAW_POINT_LIMIT = 50_000          # plotting spec section 4: RAW up to this many
 SAMPLE_TARGET = 20_000            # points drawn in a sampled scatter
 EXACT_QUANTILE_MAX = 2_000_000    # above: quartiles from a fine histogram (disclosed as approximate)
 APPROX_BINS = 4096
+QUANTILE_SELECT_MIN = 20_000      # below: one sort is already cheap
 FETCH_CHUNK = 5_000
 _HASH_MUL = 2654435761            # Knuth multiplicative hash: deterministic per result id (fixed seed)
 _HASH_MOD = 4294967296
@@ -316,7 +317,7 @@ class ScopeQuery:
             if not c:
                 continue
             if c <= exact_limit:
-                q1, med, q3 = self._quantiles_exact(m, c, frm)
+                q1, med, q3 = self._quantiles_exact(m, c, frm, out[m.id]["min"], out[m.id]["max"])
             else:
                 exact = False
                 q1, med, q3, width = self._quantiles_binned(m, c, frm, out[m.id]["min"], out[m.id]["max"])
@@ -324,11 +325,63 @@ class ScopeQuery:
             out[m.id].update(q1=q1, median=med, q3=q3)
         return {"n": n, "n_error": n_err, "exact": exact, "metrics": out}
 
-    def _quantiles_exact(self, m: PlotMetric, n: int, frm: str) -> tuple:
-        need = {}
-        for p in QUARTILES:
-            lo, hi, w = type7_positions(n, p)
-            need[p] = (lo, hi, w)
+    def _quantiles_exact(self, m: PlotMetric, n: int, frm: str, mn=None, mx=None) -> tuple:
+        """Exact type-7 quartiles.  Two-pass selection (measured 1.7x faster than sorting every value at 1 M rows,
+        ``design/implementation/performance.md``): one GROUP BY pass counts the values in ``APPROX_BINS`` equal bins,
+        which locates the bin holding each needed rank; a second pass sorts only the values of those bins.  Both
+        passes use the identical bin expression, so bin membership - and therefore every rank - is exact.  Values
+        concentrated in a few bins (discrete descriptors such as VEC) or a non-finite range fall back to one sort
+        of all values (``_quantiles_sorted``), which gives the same numbers."""
+        need = {p: type7_positions(n, p) for p in QUARTILES}
+        if mn is None or mx is None:
+            return self._quantiles_sorted(m, n, frm, need)
+        if mn == mx:
+            return tuple(float(mn) for _p in QUARTILES)
+        if not (math.isfinite(mn) and math.isfinite(mx)) or n < QUANTILE_SELECT_MIN:
+            return self._quantiles_sorted(m, n, frm, need)
+        nb = APPROX_BINS
+        scale = nb / (mx - mn)
+        bexpr = f"MIN({nb - 1}, CAST(({m.sql} - ?) * ? AS INTEGER))"
+        counts = sorted(self._fetchall(self._exec(
+            f"SELECT {bexpr} AS b, COUNT(*) FROM {frm} WHERE {self.where} AND {m.sql} IS NOT NULL GROUP BY b",
+            [mn, scale] + self.params)))
+        if sum(c for _b, c in counts) != n:
+            return self._quantiles_sorted(m, n, frm, need)       # the population changed between the passes
+        ranks = sorted({lo for lo, _h, _w in need.values()} | {hi for _l, hi, _w in need.values()})
+        start: dict[int, int] = {}                # bin -> rank of its first value
+        targets: list[int] = []
+        cum = 0
+        it = iter(ranks)
+        r = next(it, None)
+        for b, c in counts:
+            if r is not None and r < cum + c:
+                targets.append(b)
+                start[b] = cum
+                while r is not None and r < cum + c:
+                    r = next(it, None)
+            cum += c
+        size = dict(counts)
+        if sum(size[b] for b in targets) > n // 4:
+            return self._quantiles_sorted(m, n, frm, need)
+        # placeholders in textual order: bin expression (mn, scale) in the WHERE comes after the scope's own
+        sql = (f"SELECT {m.sql} FROM {frm} WHERE {self.where} AND {m.sql} IS NOT NULL "
+               f"AND {bexpr} IN ({','.join('?' * len(targets))}) ORDER BY {m.sql}")
+        vals = [v for (v,) in self._fetchall(self._exec(sql, self.params + [mn, scale] + targets))]
+        before: dict[int, int] = {}               # bin -> index of its first value in ``vals``
+        acc = 0
+        for b in targets:
+            before[b] = acc
+            acc += size[b]
+        if acc != len(vals):
+            return self._quantiles_sorted(m, n, frm, need)
+
+        def at(rank: int):
+            b = max(x for x in targets if start[x] <= rank)
+            return vals[before[b] + rank - start[b]]
+        return tuple(at(lo) + w * (at(hi) - at(lo)) for lo, hi, w in (need[p] for p in QUARTILES))
+
+    def _quantiles_sorted(self, m: PlotMetric, n: int, frm: str, need: dict) -> tuple:
+        """Exact type-7 quartiles from one sort of every value (ROW_NUMBER window)."""
         ranks = sorted({lo + 1 for lo, _h, _w in need.values()} | {hi + 1 for _l, hi, _w in need.values()})
         rows = self._fetchall(self._exec(
             f"SELECT rn, v FROM (SELECT {m.sql} AS v, ROW_NUMBER() OVER (ORDER BY {m.sql}) AS rn FROM {frm} "

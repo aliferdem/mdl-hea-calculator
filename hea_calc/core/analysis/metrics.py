@@ -137,7 +137,7 @@ DESCRIPTORS_LIST: list[Descriptor] = [
        "Undefined when S<sub>E</sub> = 0.", "abs(r.s_e) < 1e-15", log_default=True),
     # ---- binary compounds
     _D("t_assess", "Assessment temperature", "T", "T", "K", G_BINARY, 0,
-       "Temperature used by M6 and M7: the annealing temperature from Settings, or 0.55·T<sub>m</sub>.",
+       "Temperature used by M6 and M7: the annealing temperature from Calculation settings, or 0.55·T<sub>m</sub>.",
        "T = T<sub>anneal</sub>, or 0.55 T<sub>m</sub>", "Calculation settings"),
     _D("hf_lower", "Entropic lower bound", "−TΔS<sub>mix</sub>", "-TΔSmix", "meV atom⁻¹", G_BINARY, 1,
        "Lower bound of the Troparevsky window at the assessment temperature.",

@@ -514,6 +514,11 @@ def test_report_theme_is_light_whatever_the_app_theme(win, app):
     THEME.set_theme("dark")
     html = composition_report_html(win.analysis_ctl.row)
     assert "background: #ffffff" in html and "color: #161616" in html
+    for token in ("#161616;", "#262626", "#393939"):                     # no dark-theme surface leaks in
+        assert f"background: {token}" not in html.replace("background: #161616; ", "")
+    # the report follows the Total mass preference (release brief section 37)
+    five = composition_report_html(win.analysis_ctl.row, batch_mass=5.0)
+    assert "Mass (5 g batch)" in five and "Mass (2 g batch)" in html
 
 
 def test_long_report_paginates(win, app, tmp_path):

@@ -14,9 +14,12 @@ Colours are the theme's own tokens: caption = ``background`` (#161616 dark / #f4
 (the window then simply keeps the system caption).  Only this process's top-level QWidget windows are touched
 - never native file dialogs, other applications or the global Windows theme.
 
-``TitleBarThemer`` is an application event filter: windows get their caption when they are shown or their
-native handle is recreated (``WinIdChange``), and :meth:`apply_all` re-themes every open window after a theme
-change.
+``TitleBarThemer`` themes a window when it is shown or its native handle is recreated (``WinIdChange``) - as an
+event filter on the application's own top-level windows only (:func:`watch`: main window, Help, About, every
+``Modal``), never on the whole application: an application-wide Python event filter is called for every Qt event
+and measurably stalled the GUI (≈ 0.5 s while Analysis rebuilt its widgets, release perf run 2026-10-16).  Windows
+the application does not create itself (for example a ``QMessageBox``) are themed when they take focus
+(``focusWindowChanged``).  :meth:`apply_all` re-themes every open window after a theme change.
 """
 
 from __future__ import annotations
@@ -98,19 +101,30 @@ def has_native_caption(w: QWidget) -> bool:
 
 
 class TitleBarThemer(QObject):
-    """Application event filter keeping every native caption in the effective theme."""
+    """Keeps the native captions of watched windows in the effective theme (see module docstring)."""
 
     def __init__(self, app: QApplication, theme_getter, tokens_getter):
         super().__init__(app)
         self.theme = theme_getter
         self.tokens = tokens_getter
-        app.installEventFilter(self)
+        app.focusWindowChanged.connect(self._focus_window)
+
+    def watch(self, widget: QWidget) -> None:
+        widget.installEventFilter(self)
 
     def eventFilter(self, obj, ev):
         if ev.type() in (QEvent.Type.Show, QEvent.Type.WinIdChange) and isinstance(obj, QWidget) \
                 and has_native_caption(obj):
             apply(obj, self.theme(), self.tokens())
         return False
+
+    def _focus_window(self, window) -> None:
+        if window is None:
+            return
+        for w in QApplication.topLevelWidgets():
+            if w.windowHandle() is window and has_native_caption(w):
+                apply(w, self.theme(), self.tokens())
+                return
 
     def apply_all(self) -> None:
         for w in QApplication.topLevelWidgets():
@@ -119,13 +133,28 @@ class TitleBarThemer(QObject):
 
 
 _THEMER: TitleBarThemer | None = None
+_PENDING: list = []
 
 
 def install(app: QApplication, theme_getter, tokens_getter) -> TitleBarThemer:
     global _THEMER
     if _THEMER is None:
         _THEMER = TitleBarThemer(app, theme_getter, tokens_getter)
+        for w in _PENDING:
+            try:
+                _THEMER.watch(w)
+            except RuntimeError:
+                pass
+        _PENDING.clear()
     return _THEMER
+
+
+def watch(widget: QWidget) -> None:
+    """Theme ``widget``'s native caption whenever it is shown (call once, from the window's constructor)."""
+    if _THEMER is not None:
+        _THEMER.watch(widget)
+    else:
+        _PENDING.append(widget)
 
 
 def themer() -> TitleBarThemer | None:
