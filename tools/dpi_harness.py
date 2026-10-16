@@ -141,9 +141,14 @@ def child(scale: float, theme: str, rows: int, tag: str) -> dict:
     info["horizontalOverflow"] = lt["horizontalOverflow"]
     info["stickyHeaderActiveWhenScrolled"] = ls["stickyHeaderActive"]
     info["stickyHeaderAligned"] = win.sticky.matches_source() if ls["stickyHeaderActive"] else None
+    # the sticky header has a job only once the table's own header has scrolled above the viewport (a short
+    # scroll range - e.g. the stacked layout with a few rows - leaves the real header on screen)
+    hdr = win.table.view.header
+    header_top = hdr.mapTo(win.scroll.viewport(), QPoint(0, 0)).y()
+    info["tableHeaderTopWhenScrolled"] = header_top
     ok = (info["tileBorderSymmetric"] and not info["horizontalOverflow"]
           and not info["tableVerticalScrollbarVisible"] and not info["tableHorizontalScrollbarVisible"]
-          and (not lt["mainScrollbarVisible"] or ls["stickyHeaderActive"]))
+          and (not lt["mainScrollbarVisible"] or ls["stickyHeaderActive"] or header_top >= 0))
     info["visualStatus"] = "pass" if ok else "fail"
     win.close()
     return info
