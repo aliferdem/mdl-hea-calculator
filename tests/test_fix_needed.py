@@ -385,6 +385,67 @@ def test_tight_expanded_workspace_reflows_and_scrolls_once(win, app):
     assert not ws.identity_wrapped and coll.inspector_region.width() == 340
 
 
+def test_tight_descriptor_sources_truncate_with_ellipsis_and_tooltip(win, app):
+    """Expanded Composition › Descriptors at 1214 × 700: a Source too long for its column is never silently
+    clipped - it ends in a visible ellipsis and its full text is the cell's Carbon Tooltip."""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QHelpEvent
+    from hea_calc.core.analysis import samples
+    from hea_calc.core.analysis import state as S
+    from hea_calc.ui.analysis.widgets import DataTable
+    from hea_calc.ui.widgets.dropdown import html_width, plain_text
+    from hea_calc.ui.widgets.tooltip import install_tooltips
+    ctl = install_tooltips(app)
+    run = samples.store_recipe(win.repo, win.engine, samples.c1_recipe())
+    win.table.model.refresh_committed()
+    c = win.analysis_ctl
+    c.run_finished(run)
+    c.apply(S.switch_context, S.COLLECTION)
+    c.scope_for(run, "full")
+    win.resize(1214, 700)
+    win.set_expanded(True)
+    for _ in range(4):
+        c.wait_idle(30)
+        pump(app)
+    c.set_active(win.table.model.page_rows()[0].id, by="table")     # Sources are per descriptor, not per alloy
+    c.apply(S.switch_context, S.COMPOSITION)
+    c.apply(S.set_tab, "descriptors")
+    for _ in range(8):
+        c.wait_idle(30)
+        pump(app)
+    tables = [tb for tb in win.workspace.findChildren(DataTable)
+              if tb.isVisible() and tb.rows and any(col[0] == "Source" for col in tb.columns)]
+    assert len(tables) == 1
+    tb = tables[0]
+    ci = [col[0] for col in tb.columns].index("Source")
+    x, w = tb.column_rects()[ci]
+    inner = DataTable._inner(QRectF(x, 0, w, 1), "left").width()
+    elided = 0
+    for i, row in enumerate(tb.rows):
+        full = row[ci].html
+        shown = tb.display_html(i, ci)
+        assert html_width(shown) <= inner + 0.5, f"row {i}: painted text overflows its column: {shown!r}"
+        if shown == full:
+            assert not tb.cell_elided(i, ci)
+            continue
+        elided += 1
+        assert tb.cell_elided(i, ci) and shown.endswith("…"), f"row {i}: truncated without an ellipsis"
+        assert plain_text(full).startswith(plain_text(shown)[:-1].rstrip())
+        pos = QPoint(int(x + w / 2), tb.row_y[i] + tb.row_height // 2)
+        text, rect = tb.tip_at(pos)
+        assert plain_text(full) in text.split("\n") and rect.contains(pos)
+        ctl.hide()
+        app.sendEvent(tb, QHelpEvent(QEvent.Type.ToolTip, pos, tb.mapToGlobal(pos)))
+        assert ctl.visible() and ctl.tip.text == text, "the full Source text is the cell's Carbon Tooltip"
+        ctl.hide()
+    assert elided, "at 1214 px the longest Source (Ye parameter) must not fit - the test would be vacuous"
+    first = QPoint(int(x + w / 2), tb.row_y[0] + tb.row_height // 2)   # a Source that fits has no tooltip
+    assert not tb.cell_elided(0, ci) and tb.tip_at(first) is None
+    win.set_expanded(False)
+    win.resize(1920, 1000)
+    pump(app, 8)
+
+
 # ====================================================================== shell calculation states (§14, §15, §52, §53)
 def _start_sweep(win, app, lo, hi, step):
     import time

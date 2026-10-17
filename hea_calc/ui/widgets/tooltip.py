@@ -279,13 +279,18 @@ def _header_tip(header: QHeaderView, pos: QPoint) -> tuple[str, QRect] | None:
     return str(text), QRect(x, 0, header.sectionSize(section), header.height())
 
 
+def _has_cell_tips(obj) -> bool:
+    return isinstance(obj, QWidget) and callable(getattr(obj, "tip_at", None))
+
+
 class ToolTipController(QObject):
     """Application-wide event filter that shows :class:`CarbonToolTip` instead of Qt's tooltip.
 
     * plain widgets with ``toolTip()``: Enter starts the 100 ms enter delay, Leave hides at once (no linger);
       keyboard focus (Tab / Backtab / Shortcut) shows it at once, focus-out hides it;
     * item views and headers: the per-cell / per-section tooltip, anchored to that cell, refreshed
-      as the pointer moves to another cell;
+      as the pointer moves to another cell; painted widgets with cells answer the same way through
+      ``tip_at(pos) -> (text, local rect) | None`` (the Analysis ``DataTable``);
     * ``Esc`` and any mouse press elsewhere dismiss it; Qt's own ``QEvent.ToolTip`` is swallowed.
     """
 
@@ -362,7 +367,7 @@ class ToolTipController(QObject):
             if obj is self._source and not (self._focus_shown and obj.hasFocus()):
                 self.hide()             # no linger after hover (a keyboard-focus tip stays with the focus)
         elif et == QEvent.Type.MouseMove and self._source is obj and self.tip is not None \
-                and isinstance(obj.parent(), (QAbstractItemView, QHeaderView)):
+                and (isinstance(obj.parent(), (QAbstractItemView, QHeaderView)) or _has_cell_tips(obj)):
             # left the cell the tip belongs to
             local = obj.mapFromGlobal(self.tip.anchor.topLeft())
             if not QRect(local, self.tip.anchor.size()).contains(ev.position().toPoint()):
@@ -399,9 +404,15 @@ class ToolTipController(QObject):
             if hit:
                 text, rect = hit
                 self.show_tip(obj, text, rect)
+        elif _has_cell_tips(obj):
+            hit = obj.tip_at(ev.pos())
+            if hit:
+                text, rect = hit
+                self.show_tip(obj, text, rect)
         elif isinstance(obj, QWidget) and obj.toolTip() and not self.visible():
             self.show_tip(obj, obj.toolTip())
-        if hit is None and isinstance(parent, (QAbstractItemView, QHeaderView)) and self._source is obj:
+        if hit is None and (isinstance(parent, (QAbstractItemView, QHeaderView)) or _has_cell_tips(obj)) \
+                and self._source is obj:
             self.hide()
         return True             # never let Qt show its native tooltip
 

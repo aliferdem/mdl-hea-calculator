@@ -7,7 +7,8 @@
 * :class:`Popover` - Carbon popover (``layer-02`` surface, caret on the trigger, Esc / outside click closes,
   focus returns to the trigger);
 * :class:`DataTable` - painted read-only Carbon data table (xs 24 / sm 32 rows) with rich-text and tag cells,
-  row hover, optional activation (drill-in chevron on hover/focus) and keyboard row focus;
+  row hover, optional activation (drill-in chevron on hover/focus) and keyboard row focus; text wider than its
+  column is end-truncated with an ellipsis and its full text is the cell's Tooltip (Carbon overflow content);
 * :class:`KVRows` - key-value rows (label, right-aligned value, unit, optional Toggletip);
 * :class:`StatusIcon` - the 16 px scientific status icon (Tooltip on hover, Toggletip on click);
 * :class:`ActionableNotification`, :class:`InlineLoading`, :class:`Skeleton`, :class:`EmptyBlock`.
@@ -17,10 +18,11 @@ No widget holds result objects: tables receive plain rows (text / tags), the vie
 
 from __future__ import annotations
 
+import html as _html
 import time
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QFontMetrics, QFontMetricsF, QPainter, QPainterPath
 from PySide6.QtWidgets import (QAbstractButton, QHBoxLayout, QLabel, QSizePolicy, QStackedWidget, QVBoxLayout,
                                QWidget)
 
@@ -433,21 +435,32 @@ class DataTable(QWidget):
         return -1
 
     # -------------------------------------------------------------- input
+    def tip_at(self, pos) -> tuple[str, QRect] | None:
+        """The Tooltip under ``pos`` and the rect it belongs to (asked by the application ToolTipController):
+        a row tip for the whole row, else the cell's full text when it is truncated, then its own ``tip``."""
+        i = self.row_at(int(pos.y()))
+        if i < 0:
+            return None
+        y = self.row_y[i]
+        if i < len(self.row_tips) and self.row_tips[i]:
+            return self.row_tips[i], QRect(0, y, self.width(), self.row_height)
+        x = pos.x()
+        for ci, ((cx, cw), cell) in enumerate(zip(self.column_rects(), self.rows[i])):
+            if cx <= x < cx + cw:
+                parts = [plain_text(cell.html)] if self.cell_elided(i, ci) else []
+                if cell.tip:
+                    parts.append(cell.tip)
+                if parts:
+                    return "\n".join(parts), QRect(int(cx), y, int(cw + 0.999), self.row_height)
+                return None
+        return None
+
     def mouseMoveEvent(self, e):
         i = self.row_at(int(e.position().y()))
         if i != self.hover:
             self.hover = i
             self.update()
             self.hovered.emit(i)
-            tip = ""
-            if 0 <= i < len(self.row_tips):
-                tip = self.row_tips[i] or ""
-            if not tip and i >= 0:
-                x = e.position().x()
-                for (cx, cw), cell in zip(self.column_rects(), self.rows[i]):
-                    if cx <= x < cx + cw and cell.tip:
-                        tip = cell.tip
-            self.setToolTip(tip)
         if self.activatable:
             self.setCursor(Qt.CursorShape.PointingHandCursor if i >= 0 else Qt.CursorShape.ArrowCursor)
 
@@ -520,12 +533,40 @@ class DataTable(QWidget):
                 crisp.frame(p, r, FOCUS_WIDTH, t("focus"))
         p.end()
 
-    def _text(self, p, rect, html, align, typo, color):
+    # -------------------------------------------------------------- overflow (Carbon: truncate + Tooltip)
+    @staticmethod
+    def _inner(rect: QRectF, align: str) -> QRectF:
         left, right = (8, 16) if align == "right" else (16, 4)
-        inner = QRectF(rect.x() + left, rect.y(), max(0.0, rect.width() - left - right), rect.height())
+        return QRectF(rect.x() + left, rect.y(), max(0.0, rect.width() - left - right), rect.height())
+
+    @staticmethod
+    def _fitted(html: str, width: float, typo=BODY_COMPACT_01) -> str:
+        """``html`` if it fits ``width``, else its plain text end-truncated with an ellipsis - never a clip."""
+        if not html or html_width(html, typo) <= width + 0.5:
+            return html
+        el = QFontMetricsF(font(typo)).elidedText(plain_text(html), Qt.TextElideMode.ElideRight, max(0.0, width - 1))
+        return _html.escape(el, quote=False)
+
+    def _is_text(self, i: int, ci: int) -> bool:
+        cell = self.rows[i][ci]
+        return bool(cell.html) and not cell.tag and cell.bar is None
+
+    def display_html(self, i: int, ci: int) -> str:
+        """What row ``i`` / column ``ci`` paints: its text, or the truncated text when it overflows."""
+        cell = self.rows[i][ci]
+        if not self._is_text(i, ci):
+            return cell.html
+        x, w = self.column_rects()[ci]
+        return self._fitted(cell.html, self._inner(QRectF(x, 0, w, 1), cell.align).width())
+
+    def cell_elided(self, i: int, ci: int) -> bool:
+        return self._is_text(i, ci) and self.display_html(i, ci) != self.rows[i][ci].html
+
+    def _text(self, p, rect, html, align, typo, color):
+        inner = self._inner(rect, align)
         a = {"left": Qt.AlignmentFlag.AlignLeft, "right": Qt.AlignmentFlag.AlignRight,
              "center": Qt.AlignmentFlag.AlignHCenter}.get(align, Qt.AlignmentFlag.AlignLeft)
-        paint_html(p, inner, html, typo, color, a)
+        paint_html(p, inner, self._fitted(html, inner.width(), typo), typo, color, a)
 
     def _cell(self, p, rect: QRectF, cell: Cell):
         if cell.tag:
