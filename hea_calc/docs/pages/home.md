@@ -22,7 +22,7 @@ each value is calculated.
 
 ## Help inside the application
 
-* **F1**, the **Help** icon at the right of the header, and **File › Help** open this documentation.
+* **F1** and the **Help** icon at the right of the header open this documentation.
 * An information icon next to a label opens a short explanation (a toggletip); its links lead to the matching
   topic here.
 * The **Options** menus of the Analysis panel open [Prediction Model Coverage](help://model-coverage) and

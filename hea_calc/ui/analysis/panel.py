@@ -14,6 +14,29 @@ from __future__ import annotations
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 
+
+class _Accent(QWidget):
+    """The fading accent line of :meth:`AnalysisPanel.acknowledge` (``border-interactive``)."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.level = 0.0
+        self.hide()
+
+    def set_level(self, v) -> None:
+        self.level = float(v)
+        self.update()
+
+    def paintEvent(self, _e):
+        from PySide6.QtGui import QColor, QPainter
+        from ..theme import t
+        p = QPainter(self)
+        c = QColor(t("border-interactive"))
+        c.setAlphaF(max(0.0, min(1.0, self.level)))
+        p.fillRect(self.rect(), c)
+        p.end()
+
 from ...core import composition as CMP
 from ...core.analysis import state as S
 from ...core.engine import MODEL_KEYS
@@ -169,9 +192,33 @@ class AnalysisPanel(QFrame):
             self.collection.set_has_results(has)
             self._sync_enabled()
 
+    # ------------------------------------------------------------------ acknowledgement (brief §38)
+    def acknowledge(self) -> None:
+        """A results-row double click made a new active composition: a 3 px interactive accent on the panel's
+        top edge fades out (the header identity already shows the new composition).  Feedback, not state."""
+        from PySide6.QtCore import QEasingCurve, QVariantAnimation
+        acc = getattr(self, "accent", None)
+        if acc is None:
+            acc = self.accent = _Accent(self)
+            self._accent_anim = QVariantAnimation(self)
+            self._accent_anim.setStartValue(1.0)
+            self._accent_anim.setEndValue(0.0)
+            self._accent_anim.setDuration(900)
+            self._accent_anim.setEasingCurve(QEasingCurve.Type.InQuad)
+            self._accent_anim.valueChanged.connect(acc.set_level)
+            self._accent_anim.finished.connect(acc.hide)
+        acc.setGeometry(0, 0, self.width(), 3)
+        acc.set_level(1.0)
+        acc.show()
+        acc.raise_()
+        self._accent_anim.stop()
+        self._accent_anim.start()
+
     # ------------------------------------------------------------------ sizing
     def resizeEvent(self, e):
         super().resizeEvent(e)
+        if getattr(self, "accent", None) is not None:
+            self.accent.setGeometry(0, 0, self.width(), 3)
         cls = size_class_for(self.width())
         if cls != self.size_class:
             self.size_class = cls

@@ -23,7 +23,7 @@ from ..widgets.common import IconButton, LineTabs
 from .collection_view import CollectionContent, _Region
 from .composition_view import CompositionContent, mode_name
 from .panel import overflow_menu
-from .widgets import ROW_SM, Cell, ContentSwitcher, DataTable, label, rich
+from .widgets import ROW_SM, Cell, ContentSwitcher, CurrentStack, DataTable, label, rich
 
 
 class BackButton(QPushButton):
@@ -88,16 +88,22 @@ class AnalysisWorkspace(QWidget):
         hl.addWidget(self.switcher)
         hl.addSpacing(32)
         self.tab_stack = QStackedWidget()
-        self.comp_tabs = LineTabs(list(S.COMP_TAB_LABELS))
-        self.coll_tabs = LineTabs(list(S.COLL_TAB_LABELS))
+        # the tabs sit on the page background; when the header is tight they become scrollable (§21)
+        surface = ("background", "background-hover", "layer-active-01")
+        self.comp_tabs = LineTabs(list(S.COMP_TAB_LABELS), surface=surface)
+        self.coll_tabs = LineTabs(list(S.COLL_TAB_LABELS), surface=surface)
         self.tab_stack.addWidget(self.comp_tabs)
         self.tab_stack.addWidget(self.coll_tabs)
         self.tab_stack.setFixedHeight(32)
-        self.tab_stack.setFixedWidth(480)
-        hl.addWidget(self.tab_stack)
-        hl.addStretch(1)
+        hl.addWidget(self.tab_stack, 1)
+        hl.addSpacing(24)
+        # the scope / identity text: in the header row when it fits, otherwise on its own line under it
+        # (7.png: the tab row overlapped it) - see _reflow_header
         self.identity = label("", "secondary")
-        hl.addWidget(self.identity)
+        self.identity_slot = QHBoxLayout()
+        self.identity_slot.setContentsMargins(0, 0, 0, 0)
+        self.identity_slot.addWidget(self.identity)
+        hl.addLayout(self.identity_slot)
         hl.addSpacing(8)
         self.overflow_btn = IconButton("overflow_menu_vertical", "Options")
         hl.addWidget(self.overflow_btn)
@@ -105,9 +111,17 @@ class AnalysisWorkspace(QWidget):
         self.back = BackButton()
         hl.addWidget(self.back)
         root.addWidget(head)
+        self.head = head
+        self.identity_row = QWidget()
+        irl = QHBoxLayout(self.identity_row)
+        irl.setContentsMargins(0, 0, 0, 0)
+        irl.addStretch(1)
+        self.identity_row.hide()
+        root.addWidget(self.identity_row)
+        self.identity_wrapped = False
         # ---- body
-        self.body = QStackedWidget()
-        self.comp_body = QStackedWidget()          # overview / descriptors / models / model details
+        self.body = CurrentStack()                  # sized by the visible page: the outer scroll owns overflow
+        self.comp_body = CurrentStack()            # overview / descriptors / models / model details
         self.composition = CompositionContent("W")
         self.composition_details = CompositionContent("W")
         self.composition_details.setCurrentIndex(3)
@@ -140,6 +154,31 @@ class AnalysisWorkspace(QWidget):
         self.collection.set_has_results(True)
         self._sync(None, controller.state)
         self._composition_changed()
+
+    # ------------------------------------------------------------------ header reflow (7.png)
+    def header_needs(self) -> int:
+        """Width the one-row header needs with every tab visible and the identity text beside them."""
+        tabs = self.tab_stack.currentWidget()
+        return (self.title.sizeHint().width() + 36 + self.switcher.width() + 32 + tabs.natural + 24
+                + self.identity.sizeHint().width() + 8 + self.overflow_btn.width() + 8 + self.back.width())
+
+    def _reflow_header(self) -> None:
+        wrap = bool(self.identity.text()) and self.header_needs() > self.head.width()
+        if wrap == self.identity_wrapped:
+            return
+        self.identity_wrapped = wrap
+        lay = self.identity_row.layout()
+        if wrap:                                    # move the text under the header, right-aligned
+            self.identity_slot.removeWidget(self.identity)
+            lay.addWidget(self.identity)
+        else:
+            lay.removeWidget(self.identity)
+            self.identity_slot.addWidget(self.identity)
+        self.identity_row.setVisible(wrap)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._reflow_header()
 
     def _build_comp_pages(self) -> None:
         # overview / descriptors / models share one CompositionContent (W layouts); model details adds the list
@@ -225,6 +264,10 @@ class AnalysisWorkspace(QWidget):
         self._identity()
 
     def _identity(self):
+        self._set_identity()
+        self._reflow_header()
+
+    def _set_identity(self):
         st = self.c.state
         if st.context == S.COMPOSITION:
             row = self.c.row if st.active_gone is None else None

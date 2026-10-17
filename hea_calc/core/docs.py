@@ -533,13 +533,22 @@ def to_html(md: str, image_width: int = 640, lead: bool = True) -> str:
                 else:
                     break
                 i += 1
-            tag = "ol" if ordered else "ul"
-            out.append(f"<{tag}>" + "".join(f"<li>{inline(' '.join(it))}</li>" for it in items) + f"</{tag}>")
+            out.append(list_html([inline(" ".join(it)) for it in items], ordered))
             continue
         para.append(s)
         i += 1
     flush()
     return "\n".join(out)
+
+
+def list_html(items: list[str], ordered: bool) -> str:
+    """A list as marker / text rows (10.png): Qt's rich-text engine glues its own list markers to the text and
+    cannot space them, so the Carbon list anatomy is laid out explicitly - an en dash (unordered) or number
+    (ordered) in a 16 / 24 px marker column, the text beside it, 8 px between items."""
+    w = 24 if ordered else 16
+    rows = "".join(f'<tr><td class="mark" width="{w}" valign="top">{f"{n}." if ordered else "–"}</td>'
+                   f'<td class="item" valign="top">{text}</td></tr>' for n, text in enumerate(items, 1))
+    return f'<table class="{"ol" if ordered else "ul"}" cellspacing="0" cellpadding="0">{rows}</table>'
 
 
 def lead_text(page: str) -> str:
@@ -574,8 +583,8 @@ def article_html(page: str, image_width: int = 640) -> str:
     body = to_html(article_markdown(page), image_width)
     rel = related(page)
     if rel:
-        body += ("\n<h2 class='related'>Related topics</h2><ul>" + "".join(
-            f'<li><a href="help://{r}">{html.escape(NODES[r].title)}</a></li>' for r in rel) + "</ul>")
+        body += ("\n<h2 class='related'>Related topics</h2>" + list_html(
+            [f'<a href="help://{r}">{html.escape(NODES[r].title)}</a>' for r in rel], False))
     prev, nxt = neighbours(page)
     left = (f'<span class="pnlabel">Previous</span><br/><a href="help://{prev}">{html.escape(NODES[prev].title)}</a>'
             if prev else "")

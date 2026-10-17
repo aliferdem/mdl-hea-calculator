@@ -3,37 +3,39 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRect, QSize
-from PySide6.QtWidgets import QLayout, QSizePolicy, QWidget, QWidgetItem
+from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from ..responsive import distribute
 
 
 class UpperPanels(QWidget):
-    """The upper content area: Element selection, Composition setup, Analysis.
+    """The upper content area: Elements, Composition setup, Analysis.
 
-    * **wide** - one row, the design's 578 / 457 / 805 px reference widths distributed by
-      ``responsive.distribute`` (only Analysis grows; only the periodic table compresses);
-    * **stacked** - when the three panels no longer fit at their wide-row minimums, Analysis moves to a
-      second row spanning the full width; Element + Composition share the first row (the periodic table
-      takes the width Composition setup - fixed by design - does not use).
+    * **wide** - one row: Elements and Composition at their fixed design widths, Analysis takes the rest
+      (at least its wide minimum);
+    * **stacked** - when the three panels no longer fit, Analysis moves to a second row spanning the full
+      width with the taller ``stacked_height`` (brief §19); Elements and Composition keep their fixed sizes,
+      left-aligned (they are never stretched to fill the row - 8.png, brief §18).
 
     ``panels`` are ``(widget, reference, wide_minimum, maximum)``; a widget's own minimum width is its own
     business (Analysis may be narrower when stacked than it is allowed to be in the wide row).
 
     The breakpoint is not a screen size: it is the width the wide row needs, ``Σ wide minimums + gaps``
-    (``wide_minimum``), with ``HYSTERESIS`` px extra before returning to wide so a resize near the
-    boundary cannot oscillate.  The panels are only repositioned - never re-created or re-parented - so
+    (``wide_minimum``; 1880 px - exactly the 1920 px design window).  No hysteresis: the main scroll bar is an
+    overlay, so switching modes never changes the available width and cannot oscillate, and a window returned
+    to its design width must be wide again.  The panels are only repositioned - never re-created or re-parented - so
     their state survives every switch and no panel ever becomes a top-level window; the main scroll area
     simply receives the taller content.
     """
 
-    HYSTERESIS = 24
+    HYSTERESIS = 0
 
     def __init__(self, panels: list[tuple[QWidget, int, int, int | None]], row_height: int, gap: int,
-                 parent=None):
+                 parent=None, stacked_height: int | None = None):
         super().__init__(parent)
         self.panels = panels                        # (widget, reference, wide minimum, maximum)
         self.row_height = row_height
+        self.stacked_height = stacked_height or row_height
         self.gap = gap
         self.stacked = False
         for w, _ref, _mn, _mx in panels:
@@ -68,23 +70,15 @@ class UpperPanels(QWidget):
         stacked = self.mode_for(width)
         if stacked != self.stacked:
             self.stacked = stacked
-            h = 2 * self.row_height + self.gap if stacked else self.row_height
+            h = self.row_height + self.gap + self.stacked_height if stacked else self.row_height
             self.setFixedHeight(h)
         h = self.row_height
         if self.stacked:
-            first = self.panels[:-1]
-            avail = width - self.gap * (len(first) - 1)
-            # the first row's free width goes to the panels without a maximum (the fixed Composition
-            # setup keeps its width; the periodic table takes the rest)
-            maxs = [x for _w, _r, _m, x in first]
-            if all(x is not None for x in maxs):
-                maxs[0] = None
-            widths = distribute(avail, [r for _w, r, _m, _x in first], [m for _w, _r, m, _x in first], maxs)
             x = 0
-            for (w, *_), wd in zip(first, widths):
-                w.setGeometry(QRect(x, 0, wd, h))
-                x += wd + self.gap
-            self.panels[-1][0].setGeometry(QRect(0, h + self.gap, width, h))
+            for w, ref, _mn, _mx in self.panels[:-1]:          # fixed design widths, left-aligned
+                w.setGeometry(QRect(x, 0, ref, h))
+                x += ref + self.gap
+            self.panels[-1][0].setGeometry(QRect(0, h + self.gap, width, self.stacked_height))
         else:
             avail = width - self.gap * (len(self.panels) - 1)
             widths = distribute(avail, [r for _w, r, _m, _x in self.panels], [m for _w, _r, m, _x in self.panels],
@@ -93,73 +87,3 @@ class UpperPanels(QWidget):
             for (w, *_), wd in zip(self.panels, widths):
                 w.setGeometry(QRect(x, 0, wd, h))
                 x += wd + self.gap
-
-
-class ProportionalRowLayout(QLayout):
-    """Horizontal row whose items keep the design's width proportions (see ``responsive.distribute``).
-
-    Each item has a reference width (its width in the 1920 px design frame), a minimum and an
-    optional maximum (``None`` = may grow).  The layout's minimum width is the sum of the minimums,
-    so a window narrower than that makes the enclosing scroll area show its fallback horizontal bar
-    instead of clipping a panel.
-    """
-
-    def __init__(self, parent=None, spacing: int = 20):
-        super().__init__(parent)
-        self._items: list[tuple[QWidgetItem, int, int, int | None]] = []
-        self.setSpacing(spacing)
-        self.setContentsMargins(0, 0, 0, 0)
-
-    def add(self, widget, ref: int, minimum: int, maximum: int | None = None):
-        self.addChildWidget(widget)
-        self._items.append((QWidgetItem(widget), ref, minimum, maximum))
-        widget.setMinimumWidth(minimum)
-        self.invalidate()
-
-    # -- QLayout interface
-    def addItem(self, item):                       # pragma: no cover - use add()
-        self._items.append((item, item.sizeHint().width(), item.minimumSize().width(), None))
-
-    def count(self):
-        return len(self._items)
-
-    def itemAt(self, i):
-        return self._items[i][0] if 0 <= i < len(self._items) else None
-
-    def takeAt(self, i):
-        if 0 <= i < len(self._items):
-            return self._items.pop(i)[0]
-        return None
-
-    def _gaps(self) -> int:
-        return self.spacing() * max(0, len(self._items) - 1)
-
-    def _height(self) -> int:
-        return max((it.sizeHint().height() for it, *_ in self._items), default=0)
-
-    def sizeHint(self) -> QSize:
-        m = self.contentsMargins()
-        return QSize(sum(r for _i, r, _mn, _mx in self._items) + self._gaps() + m.left() + m.right(),
-                     self._height() + m.top() + m.bottom())
-
-    def minimumSize(self) -> QSize:
-        m = self.contentsMargins()
-        h = max((it.minimumSize().height() for it, *_ in self._items), default=0)
-        return QSize(sum(mn for _i, _r, mn, _mx in self._items) + self._gaps() + m.left() + m.right(),
-                     h + m.top() + m.bottom())
-
-    def widths_for(self, width: int) -> list[int]:
-        m = self.contentsMargins()
-        avail = width - m.left() - m.right() - self._gaps()
-        return distribute(avail, [r for _i, r, _mn, _mx in self._items],
-                          [mn for _i, _r, mn, _mx in self._items],
-                          [mx for _i, _r, _mn, mx in self._items])
-
-    def setGeometry(self, rect: QRect):
-        super().setGeometry(rect)
-        m = self.contentsMargins()
-        x = rect.x() + m.left()
-        h = rect.height() - m.top() - m.bottom()
-        for (item, *_), w in zip(self._items, self.widths_for(rect.width())):
-            item.setGeometry(QRect(x, rect.y() + m.top(), w, h))
-            x += w + self.spacing()

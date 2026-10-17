@@ -73,20 +73,3 @@ def distribute(avail: int, refs: Sequence[int], mins: Sequence[int],
     if free:
         out[free[-1]] += rest
     return out
-
-
-def tile_size_for(content_width: int, columns: int = 18, gap: int = 2, largest: int = 29,
-                  smallest: int = 24) -> int:
-    """Largest periodic-table tile (px) whose ``columns`` fit in ``content_width``."""
-    pitch = (content_width + gap) // columns
-    return max(smallest, min(largest, pitch - gap))
-
-
-def tab_padding(width: int, text_widths: Sequence[int], gap: int = 1, preferred: int = 16,
-                smallest: int = 6) -> int:
-    """Horizontal padding of Carbon line tabs that fit ``width`` (16 px design, compressed to 6)."""
-    n = len(text_widths)
-    if n == 0:
-        return preferred
-    room = width - sum(text_widths) - gap * (n - 1)
-    return max(smallest, min(preferred, room // (2 * n)))

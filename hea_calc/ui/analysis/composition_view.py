@@ -14,7 +14,7 @@ import html as _html
 
 from PySide6.QtCore import QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QLineEdit, QSizePolicy, QStackedWidget, QVBoxLayout,
+from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QLineEdit, QSizePolicy, QVBoxLayout,
                                QWidget)
 
 from ...core import composition as CMP
@@ -29,7 +29,8 @@ from ..widgets.common import IconButton, TagLabel
 from ..widgets.common import retire
 from ..widgets.tooltip import InfoButton, Toggletip
 from .widgets import (ROW_SM, ROW_XS, ActionableNotification, Cell, DataTable, Divider, Dropdown, EmptyBlock,
-                      KVRows, SectionHeading, StatusIcon, label, paint_html, plain_text, rich, scroll_page)
+                      SCROLL_SAFE, CurrentStack, KVRows, SectionHeading, StatusIcon, label, paint_html, plain_text,
+                      rich, scroll_page)
 
 PAGES = ("overview", "descriptors", "models", "model_details")
 MODE_NAMES = {"single": "Single composition", "sweep": "Composition space", "expression": "Composition expression",
@@ -307,7 +308,7 @@ def _paint_icon(w, name, token):
 
 
 # ====================================================================== the pages
-class CompositionContent(QStackedWidget):
+class CompositionContent(CurrentStack):
     """The four Composition pages for one result (embedded panel, workspace or a details window)."""
 
     open_tab = Signal(str)            # request a tab switch (e.g. "All descriptors")
@@ -401,7 +402,7 @@ class CompositionContent(QStackedWidget):
 
     def _scroll(self, margins=(20, 16, 20, 16)):
         content = QWidget()
-        sa, lay = scroll_page(content, margins)
+        sa, lay = scroll_page(content, margins, scroll=self.size_class != "W")
         return sa, lay
 
     def _region(self, title: str = "") -> tuple[QWidget, QVBoxLayout]:
@@ -704,9 +705,12 @@ class CompositionContent(QStackedWidget):
         lay.addLayout(bar)
         cols = self._descriptor_columns()
         header = DataTable(cols, [], ROW_XS)
-        lay.addWidget(header)                         # the header stays put while the rows scroll
+        head_row = QHBoxLayout()                      # the header stays put while the rows scroll; it keeps the
+        head_row.setContentsMargins(0, 0, SCROLL_SAFE if self.size_class != "W" else 0, 0)   # rows' safe area
+        head_row.addWidget(header)
+        lay.addLayout(head_row)
         content = QWidget()
-        sa, cl = scroll_page(content, (0, 0, 0, 16))
+        sa, cl = scroll_page(content, (0, 0, 0, 16), scroll=self.size_class != "W")
         cl.setSpacing(0)
         self.desc_table = DataTable(cols, [], ROW_XS, header=False)
         self.desc_table.activatable = False
@@ -907,7 +911,7 @@ class CompositionContent(QStackedWidget):
             sel.addStretch(1)
             ol.addLayout(sel)
         content = QWidget()
-        sa, lay = scroll_page(content, (20, 8, 20, 16) if cls != "W" else (0, 0, 0, 0))
+        sa, lay = scroll_page(content, (20, 8, 20, 16) if cls != "W" else (0, 0, 0, 0), scroll=cls != "W")
         left = QWidget()
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
@@ -1032,9 +1036,8 @@ class CompositionContent(QStackedWidget):
 
 
 def scroll_wrap(w: QWidget):
-    from ..widgets.scroll import inner_scroll_area
-    sa = inner_scroll_area(w)
-    return sa
+    """Workspace regions do not scroll by themselves (one outer workspace scroll, §20)."""
+    return w
 
 
 _ = (BODY_COMPACT_01, paint_html, QGridLayout)

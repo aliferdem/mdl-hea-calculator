@@ -426,6 +426,11 @@ class Delegate(QStyledItemDelegate):
         row = index.row()
         if row == self.view.hover_row:
             crisp.fill_rect(p, r, t("row-hover"))
+        if row == self.view.flash_row and self.view.flash_level > 0:
+            # double-click acknowledgement (brief §38): a Carbon active fill that fades out - feedback, not state
+            c = QColor(t("layer-active-01"))
+            c.setAlphaF(self.view.flash_level)
+            p.fillRect(r, c)
         # row rule in device pixels: a 1 px QPen line came out 1 or 2 px tall at DPR 1.25
         crisp.hline_bottom(p, r, t("row-border"), HAIRLINE)
         key = self.view.m.keys[index.column()]
@@ -648,6 +653,16 @@ class ResultsView(QTableView):
         self.m = model
         self.setModel(model)
         self.hover_row = -1
+        self.flash_row = -1                  # transient double-click acknowledgement (never a selection)
+        self.flash_level = 0.0
+        from PySide6.QtCore import QEasingCurve, QVariantAnimation
+        self._flash = QVariantAnimation(self)
+        self._flash.setStartValue(1.0)
+        self._flash.setEndValue(0.0)
+        self._flash.setDuration(self.FLASH_MS)
+        self._flash.setEasingCurve(QEasingCurve.Type.InQuad)
+        self._flash.valueChanged.connect(self._flash_step)
+        self._flash.finished.connect(lambda: self._flash_step(0.0))
         self.header = Header(model, self)
         self.setHorizontalHeader(self.header)
         self.verticalHeader().hide()
@@ -739,6 +754,22 @@ class ResultsView(QTableView):
         self._press = None
         e.accept()
 
+    FLASH_MS = 450
+
+    def flash(self, view_row: int) -> None:
+        """Brief Carbon active flash of a row (double-click feedback); the row then returns to hover-only."""
+        self.flash_row = view_row
+        self.flash_level = 1.0                 # visible at once (the animation's first value comes on its first tick)
+        self.viewport().update()
+        self._flash.stop()
+        self._flash.start()
+
+    def _flash_step(self, v) -> None:
+        self.flash_level = float(v)
+        if self.flash_level <= 0:
+            self.flash_row = -1
+        self.viewport().update()
+
     def mouseDoubleClickEvent(self, e):
         self.selection.end()
         self._press = None
@@ -746,6 +777,7 @@ class ResultsView(QTableView):
         if idx.isValid() and e.button() == Qt.MouseButton.LeftButton:
             row = self.m.row_at(idx.row())
             if row is not None:
+                self.flash(idx.row())
                 self.details_requested.emit(row)
         e.accept()
 

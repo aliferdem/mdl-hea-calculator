@@ -22,7 +22,7 @@ from PySide6.QtGui import QColor, QFocusEvent, QImage, QKeyEvent, QPainter, QWhe
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from hea_calc.ui.responsive import distribute, tab_padding, tile_size_for  # noqa: E402
+from hea_calc.ui.responsive import distribute  # noqa: E402
 
 DPRS = (1.0, 1.25, 1.5)
 OFFSETS = ((0, 0), (1, 1), (2, 3), (3, 2), (5, 7))
@@ -115,15 +115,6 @@ def test_distribute_reproduces_the_design_and_compresses_proportionally():
     for avail in range(1360, 2400, 7):
         out = distribute(avail, refs, mins, maxs)
         assert sum(out) == avail and all(o >= m for o, m in zip(out, mins))
-
-
-def test_tile_and_tab_sizing_rules():
-    assert tile_size_for(556) == 29                       # design: 18 x 31 - 2
-    assert tile_size_for(466) == 24                       # 150 %: TILE_SIZE_MIN
-    assert tile_size_for(300) == 24                       # never below the minimum
-    texts = [62, 77, 48, 89, 67]                          # semibold tab labels
-    assert tab_padding(10_000, texts) == 16
-    assert tab_padding(414, texts) == 6                   # 454 px Details panel at 150 %
 
 
 # =========================================================================== crisp strokes
@@ -271,11 +262,11 @@ def test_upper_panels_fit_and_table_fills_width_at_each_scale(app, scale):
         assert not rep["horizontalOverflow"], rep
         e, c, d = rep["upperPanels"]
         width = MATEBOOK_CLIENTS[scale][0]
-        if rep["detailsStacked"]:     # Analysis below Element + Composition (the row cannot hold 805 px)
-            assert e + c + 3 * 20 == width and d == width - 40, rep
+        if rep["detailsStacked"]:     # Analysis below Elements + Composition (the row cannot hold 805 px)
+            assert e + c + 3 * 20 <= width and d == width - 40, rep     # fixed panels, left-aligned (§18)
         else:
             assert e + c + d + 4 * 20 == width, rep
-        assert e >= 506 and c == 457 and d >= 454, rep        # Composition setup is not responsive
+        assert e == 578 and c == 457 and d >= 454, rep        # Elements and Composition never resize
         # results table spans the content width; default columns fill it exactly, no scroll bars
         assert rep["tableWidth"] == MATEBOOK_CLIENTS[scale][0] - 40, rep
         assert rep["tableColumnsSum"] == rep["tableViewportWidth"], rep

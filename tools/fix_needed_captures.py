@@ -276,6 +276,83 @@ def main():
         c.apply(S.switch_context, S.COMPOSITION)
         settle()
 
+    # ---------------------------------------------------------------- 18 calculating, 19 completed / cancelled
+    if want("shell_states"):
+        for el in ("Cr", "Mn", "Fe", "Co", "Ni"):
+            if not win.elements.table.tiles[el].isChecked():
+                win.elements.table.tiles[el].click()
+        comp.set_mode(1)
+        comp.unit_box.setCurrentIndex(1)
+        for r in comp.sweep.rows.values():
+            r.min.setText("2"), r.max.setText("40"), r.step.setText("2")
+        sw = comp.sweep
+        sw._timer.stop()
+        sw._update_summary()
+        t0 = time.perf_counter()
+        while sw._counter.busy and time.perf_counter() - t0 < 30:
+            app.processEvents()
+            time.sleep(0.005)
+        pump()
+        comp.calc_btn.click()
+        t0 = time.perf_counter()
+        while (win.worker is None or win.worker.done_count < 2000) and time.perf_counter() - t0 < 60:
+            app.processEvents()
+            time.sleep(0.01)
+        for _ in range(3):                      # let the 10 Hz progress tick paint
+            time.sleep(0.12)
+            pump()
+        composite([], None, "calculating")
+        win.cancel_calculation()
+        t0 = time.perf_counter()
+        while win.worker is not None and time.perf_counter() - t0 < 30:
+            app.processEvents()
+            time.sleep(0.01)
+        pump()
+        composite([], QRect(0, 0, win.width(), 120), "cancelled_header")
+        # a short run to completion
+        for r in comp.sweep.rows.values():
+            r.min.setText("10"), r.max.setText("30"), r.step.setText("10")
+        sw._timer.stop()
+        sw._update_summary()
+        t0 = time.perf_counter()
+        while sw._counter.busy and time.perf_counter() - t0 < 30:
+            app.processEvents()
+            time.sleep(0.005)
+        pump()
+        comp.calc_btn.click()
+        t0 = time.perf_counter()
+        while win.worker is not None and time.perf_counter() - t0 < 60:
+            app.processEvents()
+            time.sleep(0.01)
+        settle()
+        composite([], None, "completed")
+        comp.set_mode(0)
+        pump()
+
+    # ---------------------------------------------------------------- 7 expanded Analysis in a small window
+    if want("tight"):
+        c = collection("statistics")
+        win.resize(1214, 700)
+        win.set_expanded(True)
+        c.apply(S.update, stats_focus="delta_cn12", stats_view="histogram")
+        settle()
+        composite([], None, "tight_statistics")
+        sb = win.workspace_scroll.verticalScrollBar()
+        sb.setValue(sb.maximum())
+        pump()
+        composite([], None, "tight_statistics_end")
+        sb.setValue(0)
+        c.apply(S.set_tab, "plots")
+        settle()
+        composite([], None, "tight_plots")
+        c.apply(S.switch_context, S.COMPOSITION)
+        c.apply(S.set_tab, "descriptors")
+        settle()
+        composite([], None, "tight_descriptors")
+        win.set_expanded(False)
+        win.resize(1920, 1032)
+        settle()
+
     # ---------------------------------------------------------------- 2 expanded Plots: thresholds, tooltip, inspector
     if want("plots"):
         from PySide6.QtCore import QPointF, Qt

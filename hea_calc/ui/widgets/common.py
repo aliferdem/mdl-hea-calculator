@@ -317,8 +317,8 @@ class TabButton(QAbstractButton):
     ``border-strong-02`` on hover, ``border-interactive`` when selected, ``border-disabled`` when
     disabled; keyboard focus draws the 2 px ``focus`` frame.  The underline and the focus frame are
     filled in device pixels (``crisp``), so the underline is the same thickness under every tab at
-    any device pixel ratio.  The horizontal padding is set by :class:`LineTabs` (16 px design,
-    compressed on narrow panels).
+    any device pixel ratio.  The horizontal padding is the design's 16 px (scrollable :class:`LineTabs`
+    never compress it).
     """
 
     def __init__(self, text: str, parent=None):
@@ -374,20 +374,71 @@ class TabButton(QAbstractButton):
         p.end()
 
 
-class LineTabs(QWidget):
-    """Carbon line tabs (small, auto width).
+class _TabArrow(QAbstractButton):
+    """Overflow button of scrollable line tabs (Carbon Tabs, "Line tab scrollable states"): the surface colour
+    with an 8 px gradient fading into the tabs, a 16 px chevron in ``$icon-primary``; hover / active fill."""
 
-    Tabs keep the design's 16 px padding when the row has room; on a narrower panel the padding of
-    every tab shrinks equally (down to 6 px) so all five tabs stay visible and unclipped, instead of
-    the row overflowing (``responsive.tab_padding``).
+    W = 40
+
+    def __init__(self, direction: str, tabs: "LineTabs"):
+        super().__init__(tabs)
+        self.direction = direction
+        self.tabs = tabs
+        self.setFixedSize(self.W, 32)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)            # keyboard users move with the arrow keys
+        self.setAccessibleName("Scroll tabs left" if direction == "left" else "Scroll tabs right")
+        self._hover = False
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+
+    def paintEvent(self, _e):
+        from PySide6.QtGui import QLinearGradient
+        from .. import crisp
+        p = QPainter(self)
+        rest, hover, active = self.tabs.surface
+        fill = QColor(t(active if self.isDown() else hover if self._hover else rest))
+        body = QRectF(0, 0, self.W - 8, 32) if self.direction == "left" else QRectF(8, 0, self.W - 8, 32)
+        p.fillRect(body, fill)
+        fade = QRectF(self.W - 8, 0, 8, 32) if self.direction == "left" else QRectF(0, 0, 8, 32)
+        g = QLinearGradient(fade.left(), 0, fade.right(), 0)
+        clear = QColor(fill)
+        clear.setAlpha(0)
+        g.setColorAt(0.0, fill if self.direction == "left" else clear)
+        g.setColorAt(1.0, clear if self.direction == "left" else fill)
+        p.fillRect(fade, g)
+        crisp.hline_bottom(p, QRectF(0, 0, self.W, 32), t("border-strong-01"), 1)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        icons.paint(p, "chevron_left" if self.direction == "left" else "chevron_right",
+                    QRectF(body.center().x() - 8, 8, 16, 16), "icon-primary")
+        p.end()
+
+
+class LineTabs(QWidget):
+    """Carbon line tabs (small, auto width), scrollable when the row is too narrow.
+
+    Every tab keeps its 16 px padding and its full label - never shrunk, wrapped or overlapped.  When the
+    row cannot show all tabs, Carbon's scrollable pattern applies (CORRECT_SCROLLABLE_TABS_WHEN_TIGHT_SPACE,
+    Carbon Tabs "Scrollable"): left / right overflow buttons appear at the clipped ends, and the selected or
+    focused tab is always scrolled into view.  ``surface`` is the (rest, hover, active) token triple of what
+    the tabs sit on - the overflow buttons take its colour.
     """
 
     changed = Signal(int)
     GAP = 1
 
-    def __init__(self, labels: list[str], parent=None):
+    def __init__(self, labels: list[str], parent=None, surface=("layer-01", "layer-hover-01", "layer-active-01")):
         super().__init__(parent)
-        lay = QHBoxLayout(self)
+        self.surface = surface
+        self.offset = 0
+        self.strip = QWidget(self)
+        lay = QHBoxLayout(self.strip)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(self.GAP)
         self.group = QButtonGroup(self)
@@ -397,28 +448,89 @@ class LineTabs(QWidget):
             b = TabButton(text)
             self.group.addButton(b, i)
             lay.addWidget(b)
+            b.installEventFilter(self)
             self.buttons.append(b)
-        lay.addStretch(1)
+        self.natural = sum(b.width() for b in self.buttons) + self.GAP * (len(self.buttons) - 1)
+        self.strip.setFixedSize(self.natural, 32)
+        self.left_arrow = _TabArrow("left", self)
+        self.right_arrow = _TabArrow("right", self)
+        self.left_arrow.clicked.connect(lambda: self._step(-1))
+        self.right_arrow.clicked.connect(lambda: self._step(1))
+        self.setFixedHeight(32)
         self.buttons[0].setChecked(True)
         self.group.idClicked.connect(self.changed.emit)
-        self.group.idClicked.connect(lambda _i: [b.update() for b in self.buttons])
+        self.group.idClicked.connect(lambda i: (self.ensure_visible(i), [b.update() for b in self.buttons]))
+        self._relayout()
+
+    # -------------------------------------------------------------- geometry
+    def sizeHint(self) -> QSize:
+        return QSize(self.natural, 32)
 
     def minimumSizeHint(self) -> QSize:
-        from ..responsive import tab_padding
-        widths = [b.text_width for b in self.buttons]
-        pad = tab_padding(0, widths, self.GAP)
-        return QSize(sum(widths) + 2 * pad * len(widths) + self.GAP * (len(widths) - 1), 32)
+        return QSize(min(self.natural, 2 * _TabArrow.W + max(b.width() for b in self.buttons)), 32)
+
+    def overflowing(self) -> bool:
+        return self.natural > self.width()
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        from ..responsive import tab_padding
-        pad = tab_padding(self.width(), [b.text_width for b in self.buttons], self.GAP)
-        for b in self.buttons:
-            if b.pad != pad:
-                b.set_padding(pad)
+        self._relayout()
+        if self.overflowing():
+            self.ensure_visible(self.index())
 
+    def _relayout(self) -> None:
+        over = self.natural > self.width()
+        self.offset = max(0, min(self.offset, self.natural - self.width())) if over else 0
+        self.strip.move(-self.offset, 0)
+        self.left_arrow.setVisible(over and self.offset > 0)
+        self.right_arrow.setVisible(over and self.offset < self.natural - self.width())
+        self.left_arrow.move(0, 0)
+        self.right_arrow.move(self.width() - _TabArrow.W, 0)
+        self.left_arrow.raise_()
+        self.right_arrow.raise_()
+
+    def ensure_visible(self, i: int) -> None:
+        """Scroll so tab ``i`` is clear of the overflow buttons."""
+        if not self.overflowing() or not 0 <= i < len(self.buttons):
+            return
+        b = self.buttons[i]
+        left, right = b.x(), b.x() + b.width()
+        lo = self.offset + (_TabArrow.W if self.offset > 0 else 0)
+        hi = self.offset + self.width() - _TabArrow.W
+        if left < lo:
+            self.offset = 0 if i == 0 else left - _TabArrow.W
+        elif right > hi:
+            self.offset = (self.natural - self.width()) if i == len(self.buttons) - 1 else \
+                right - self.width() + _TabArrow.W
+        self._relayout()
+
+    def _step(self, d: int) -> None:
+        """Overflow buttons: bring the next tab hidden on that side into view."""
+        vis_l = self.offset + (_TabArrow.W if self.offset > 0 else 0)
+        vis_r = self.offset + self.width() - (_TabArrow.W if self.offset < self.natural - self.width() else 0)
+        if d > 0:
+            nxt = next((i for i, b in enumerate(self.buttons) if b.x() + b.width() > vis_r), len(self.buttons) - 1)
+        else:
+            nxt = next((i for i in range(len(self.buttons) - 1, -1, -1) if self.buttons[i].x() < vis_l), 0)
+        self.ensure_visible(nxt)
+
+    def wheelEvent(self, e):
+        if not self.overflowing():
+            return super().wheelEvent(e)
+        d = e.angleDelta().x() or e.angleDelta().y()
+        self.offset -= int(d / 2)
+        self._relayout()
+        e.accept()
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == ev.Type.FocusIn and obj in self.buttons:
+            self.ensure_visible(self.buttons.index(obj))
+        return False
+
+    # -------------------------------------------------------------- state
     def set_index(self, i: int) -> None:
         self.buttons[i].setChecked(True)
+        self.ensure_visible(i)
 
     def index(self) -> int:
         return self.group.checkedId()
@@ -429,6 +541,7 @@ class LineTabs(QWidget):
             j = (i + (1 if e.key() == Qt.Key.Key_Right else -1)) % len(self.buttons)
             self.buttons[j].setChecked(True)
             self.buttons[j].setFocus()
+            self.ensure_visible(j)
             self.changed.emit(j)
             return
         super().keyPressEvent(e)

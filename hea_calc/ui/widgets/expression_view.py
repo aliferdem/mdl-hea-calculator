@@ -168,7 +168,6 @@ class ExpressionView(QWidget):
     changed = Signal()
     elements_parsed = Signal(list)
     message = Signal(str, str)
-    preview_requested = Signal()          # kept for callers; the parsed preview is inline now
 
     def __init__(self, datasets: Datasets, parent=None):
         super().__init__(parent)

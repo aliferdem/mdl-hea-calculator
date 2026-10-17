@@ -188,9 +188,6 @@ class ProgressLine(QWidget):
         p.end()
 
 
-_Bar = ProgressLine                                 # former name
-
-
 class HeaderProgress(QWidget):
     """The header's status region (Main window.svg; CORRECT_CALCULATING_STATE / CORRECT_CALCULATION_COMPLETED):
 
@@ -370,9 +367,6 @@ class AppHeader(QFrame):
         self.theme_btn.update()
 
     THEME_ICONS = {"light": "brightness_contrast", "dark": "asleep", "system": "contrast"}
-
-    def set_effective_theme(self, name: str) -> None:
-        """Kept for callers: the icon follows the *preference* (:meth:`set_theme_preference`)."""
 
     def set_theme_preference(self, pref: str) -> None:
         """CORRECT_THEME_BUTTON: the header icon shows the selected preference - Light (brightness-contrast),

@@ -21,7 +21,7 @@ import time
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath
-from PySide6.QtWidgets import (QAbstractButton, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout,
+from PySide6.QtWidgets import (QAbstractButton, QHBoxLayout, QLabel, QSizePolicy, QStackedWidget, QVBoxLayout,
                                QWidget)
 
 from .. import crisp, icons
@@ -840,12 +840,60 @@ class EmptyBlock(QWidget):
             outer.addStretch(1)
 
 
-def scroll_page(widget: QWidget, margins=(20, 16, 20, 16)) -> tuple[QScrollArea, QVBoxLayout]:
+def hstrip(table: QWidget) -> QWidget:
+    """A data table in a horizontal-only overflow strip (brief §58: table overflow is the one legitimate inner
+    scroll).  The table keeps its content-based minimum width - no clipped column - and scrolls sideways only
+    when the region is narrower; 12 px under the rows are reserved for the bar so it never covers a row
+    (§23)."""
+    from ..widgets.scroll import inner_scroll_area
+    sa = inner_scroll_area(table, horizontal=True)
+    sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    sa.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    sa.setFixedHeight(table.height() + 12)
+    sa.setMinimumWidth(120)
+    return sa
+
+
+class CurrentStack(QStackedWidget):
+    """A stacked widget sized by its *current* page (QStackedWidget reports the largest page), so a page
+    that grows makes the enclosing scroll page taller and a short page does not inherit a tall neighbour."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.currentChanged.connect(lambda _i: self.updateGeometry())
+
+    def sizeHint(self):
+        w = self.currentWidget()
+        return w.sizeHint() if w is not None else super().sizeHint()
+
+    def minimumSizeHint(self):
+        w = self.currentWidget()
+        return w.minimumSizeHint() if w is not None else super().minimumSizeHint()
+
+
+def _scroll_safe() -> int:
+    from ..theme import SCROLLBAR_HIT
+    from ..widgets.scroll import OverlayScrollArea
+    return SCROLLBAR_HIT + OverlayScrollArea.OVERLAY_RIGHT
+
+
+SCROLL_SAFE = _scroll_safe()          # 12 px hit target + 4 px inset of the overlay bar
+
+
+def scroll_page(widget: QWidget, margins=(20, 16, 20, 16), scroll: bool = True) -> tuple[QWidget, QVBoxLayout]:
     """An inner scroll area (4 px overlay-style bar, wheel rule) whose content is ``widget`` with the
-    embedded content padding; returns the area and the content layout."""
+    embedded content padding; returns the area and the content layout.  ``scroll=False`` (the expanded
+    workspace) returns ``widget`` itself: the page grows and the one outer workspace scroll owns the overflow
+    (brief 2026-10-16 §20, §58)."""
     lay = QVBoxLayout(widget)
+    if scroll:
+        # trailing safe area (brief §23, 5.png): the overlay bar occupies the last SCROLL_SAFE px of the page,
+        # so content always ends at least that far from the right edge - never under the thumb
+        margins = (margins[0], margins[1], max(margins[2], SCROLL_SAFE), margins[3])
     lay.setContentsMargins(*margins)
     lay.setSpacing(16)
+    if not scroll:
+        return widget, lay
     # The vertical bar floats over the 20 px right padding (OverlayScrollArea), so a tall page never loses width;
     # horizontal scrolling only as the last resort: content whose minimum width (tables size their columns to
     # their header and content) exceeds the page is reachable instead of clipped.

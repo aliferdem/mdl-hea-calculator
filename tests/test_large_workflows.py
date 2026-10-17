@@ -347,7 +347,8 @@ def test_sweep_calculation_runs_as_a_process_job_with_throttled_progress(win, ap
 
 
 def test_details_move_below_when_the_three_panels_do_not_fit(app):
-    from hea_calc.ui.theme import (ANALYSIS_WIDE_MIN, COMPOSITION_PANEL_WIDTH, CONTENT_MARGIN_X, ELEMENT_PANEL_MIN,
+    from hea_calc.ui.theme import (ANALYSIS_STACKED_HEIGHT, ANALYSIS_WIDE_MIN, COMPOSITION_PANEL_WIDTH,
+                                   CONTENT_MARGIN_X, ELEMENT_PANEL_MIN,
                                    PANEL_GAP)
     need = ELEMENT_PANEL_MIN + COMPOSITION_PANEL_WIDTH + ANALYSIS_WIDE_MIN + 2 * PANEL_GAP
     boundary = need + 2 * CONTENT_MARGIN_X                    # window width at the breakpoint
@@ -363,17 +364,20 @@ def test_details_move_below_when_the_three_panels_do_not_fit(app):
         e, c, d = w.elements.geometry(), w.composition.geometry(), w.details.geometry()
         assert e.top() == c.top() == 0 and d.top() == e.bottom() + 1 + PANEL_GAP
         assert d.width() == top.width() and d.left() == 0, "Analysis spans the full width"
-        assert c.right() == top.width() - 1, "Element + Composition fill the first row"
+        # 8.png / brief §18: Elements and Composition keep their fixed sizes, left-aligned - never stretched
+        assert (e.left(), e.width()) == (0, ELEMENT_PANEL_MIN) and c.left() == e.right() + 1 + PANEL_GAP
         assert c.width() == COMPOSITION_PANEL_WIDTH, "Composition setup keeps its design width"
+        assert d.height() == ANALYSIS_STACKED_HEIGHT > e.height(), "§19: stacked Analysis is taller"
         assert w.table.mapTo(w.content, QPoint(0, 0)).y() > w.details.mapTo(w.content, QPoint(0, 0)).y()
         assert not w.layout_report()["horizontalOverflow"]
-        # hysteresis: just past the boundary it stays stacked, a little wider it returns
-        w.resize(boundary + 10, 900)
+        # the breakpoint is exact (overlay scroll bar: no oscillation): one pixel short is stacked, the
+        # design width is wide again
+        w.resize(boundary - 1, 900)
         app.processEvents()
         assert top.stacked
-        w.resize(boundary + 40, 900)
+        w.resize(boundary, 900)
         app.processEvents()
-        assert not top.stacked
+        assert not top.stacked and boundary == 1920
         assert w.composition.width() == COMPOSITION_PANEL_WIDTH and w.details.width() >= ANALYSIS_WIDE_MIN
         assert ids == (id(w.elements), id(w.composition), id(w.details)), "panels repositioned, not rebuilt"
     finally:

@@ -26,8 +26,7 @@ BUTTON_HEIGHT = 40       # Carbon "md" buttons in panel footers
 FIELD_CONTENT_HEIGHT = CONTROL_HEIGHT - 1
 PANEL_TITLE_TOP = 20
 PANEL_PADDING_X = 20
-TILE_SIZE = 29          # design tile; the periodic table shrinks it down to TILE_SIZE_MIN on narrow windows
-TILE_SIZE_MIN = 24
+TILE_SIZE = 28          # CORRECT_ELEMENTS / Main window.svg: 28 x 28 tiles on a 30 px pitch, at every window size
 TILE_GAP = 2
 # Current Figma frame DARK_MODE_FULLSCREEN (node 341:33323, 1920 px): Elements 578 · Composition setup 457 ·
 # Analysis 805, 20 px margins and gaps.
@@ -40,12 +39,13 @@ ANALYSIS_PANEL_WIDTH = 805
 DETAILS_PANEL_WIDTH = ANALYSIS_PANEL_WIDTH      # former name of the third panel's reference width
 TOP_ROW_HEIGHT = 465
 
-# Responsive upper row.  Only the periodic table compresses (down to ELEMENT_PANEL_MIN); Composition setup is
-# fixed and Analysis keeps its 805 px preferred width in the wide row, so the wide row needs
-# 506 + 457 + 805 + 2 × 20 = 1808 px of content; below that Analysis is stacked under the first two panels
-# (full width).  Wider windows give the extra width to Analysis only.
-ELEMENT_PANEL_MIN = 506      # 18 tiles of TILE_SIZE_MIN + gaps, plus 2 × 20 px padding
+# Upper row (brief 2026-10-16 §18, §64): Elements and Composition have FIXED designed sizes - they never stretch
+# or shrink.  The wide row needs 578 + 457 + 805 + 2 × 20 = 1880 px of content (a 1920 px window); below that
+# Analysis moves under the first two panels, spans the full width and gets the taller stacked height.  Wider
+# windows give the extra width to Analysis only.
+ELEMENT_PANEL_MIN = ELEMENT_PANEL_WIDTH      # 18 × 28 px tiles + 17 × 2 px gaps + 2 × 20 px padding
 COMPOSITION_PANEL_MIN = COMPOSITION_PANEL_WIDTH
+ANALYSIS_STACKED_HEIGHT = 720   # stacked Analysis (§19): room for a plot / statistics table, not the 465 side row
 DETAILS_PANEL_MIN = 454      # Analysis' own minimum (the five line tabs at compact padding + 2 × 20 px)
 ANALYSIS_WIDE_MIN = ANALYSIS_PANEL_WIDTH   # narrowest Analysis allowed beside the other two panels
 

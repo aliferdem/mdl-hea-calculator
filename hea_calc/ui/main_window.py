@@ -18,7 +18,7 @@ from ..core.repository import RepositoryError, ResultRecord, ResultRepository, u
 from ..core.results import DEFAULT_COLUMNS, COLUMN_BY_KEY, ResultRow, table_tsv
 from ..core.spreadsheet import SpreadsheetError, read_compositions
 from . import icons
-from .theme import (ANALYSIS_WIDE_MIN, COMPOSITION_PANEL_MIN, COMPOSITION_PANEL_WIDTH, CONTENT_MARGIN_BOTTOM,
+from .theme import (ANALYSIS_STACKED_HEIGHT, ANALYSIS_WIDE_MIN, COMPOSITION_PANEL_MIN, COMPOSITION_PANEL_WIDTH, CONTENT_MARGIN_BOTTOM,
                     CONTENT_MARGIN_TOP, CONTENT_MARGIN_X, DETAILS_PANEL_WIDTH, ELEMENT_PANEL_MIN, ELEMENT_PANEL_WIDTH,
                     PANEL_GAP, THEME, TOP_ROW_HEIGHT, stylesheet)
 from .widgets.common import InlineNotification
@@ -116,7 +116,7 @@ class MainWindow(QMainWindow):
                              (self.composition, COMPOSITION_PANEL_WIDTH, COMPOSITION_PANEL_MIN,
                               COMPOSITION_PANEL_WIDTH),
                              (self.details, DETAILS_PANEL_WIDTH, ANALYSIS_WIDE_MIN, None)],
-                            TOP_ROW_HEIGHT, PANEL_GAP)
+                            TOP_ROW_HEIGHT, PANEL_GAP, stacked_height=ANALYSIS_STACKED_HEIGHT)
         self.top_row = top_w
         content.addWidget(top_w)
         table_col = QVBoxLayout()
@@ -146,7 +146,8 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         self.pages.addWidget(self.scroll)
         self.workspace = AnalysisWorkspace(self.analysis_ctl)
-        self.workspace.setMinimumSize(1200, 640)
+        # the workspace page grows with its content; its one vertical scroll is this page's (7.png, §20)
+        self.workspace.setMinimumWidth(1000)
         self.workspace_scroll = QScrollArea()
         self.workspace_scroll.setObjectName("ContentScroll")
         self.workspace_scroll.setWidgetResizable(True)
@@ -359,7 +360,6 @@ class MainWindow(QMainWindow):
             _SHEET_CACHE[THEME.name] = sheet
         self.setStyleSheet(sheet)
         self._sync_theme_actions()
-        self.header.set_effective_theme(THEME.name)
         themer = win_titlebar.themer()
         if themer is not None:
             themer.apply_all()                  # every native caption follows the effective theme
@@ -584,6 +584,8 @@ class MainWindow(QMainWindow):
         if isinstance(row, ResultRecord):
             self._details_id = row.id
             self.analysis_ctl.set_active(row.id)
+            if self.sender() is self.table.view:   # a results-row double click: brief acknowledgement (§38)
+                self.analysis.acknowledge()
 
     def _check_details(self):
         m = self.table.model

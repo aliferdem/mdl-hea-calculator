@@ -14,7 +14,7 @@ import html as _html
 
 from PySide6.QtCore import QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel, QSizePolicy, QStackedWidget, QVBoxLayout,
+from PySide6.QtWidgets import (QBoxLayout, QCheckBox, QFrame, QHBoxLayout, QLabel, QSizePolicy, QStackedWidget, QVBoxLayout,
                                QWidget)
 
 from ...core.analysis import models as MD
@@ -36,7 +36,7 @@ from .composition_view import mode_name
 from .plot import PlotSpec, PlotWidget, class_color, categorical
 from .widgets import (ROW_SM, ROW_XS, ActionableNotification, Cell, DataTable, Divider, Dropdown, EmptyBlock,
                       InlineLoading, KVRows, LabeledField, MultiSelect, SectionHeading, Skeleton, label,
-                      open_popover, plain_text, rich, scroll_page)
+                      CurrentStack, hstrip, open_popover, plain_text, rich, scroll_page)
 
 ANA_SCOPE = ("The collection is fixed when it is created or updated. Sorting, paging and double-clicking in the "
              "results table do not change it. Changes to the table filter are announced here; choose Update "
@@ -377,7 +377,7 @@ class CollectionContent(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        self.stack = QStackedWidget()
+        self.stack = CurrentStack()
         lay.addWidget(self.stack)
         self.pages = [QWidget() for _ in S.COLL_TABS]
         for pg in self.pages:
@@ -562,8 +562,6 @@ class CollectionContent(QWidget):
         if slot in ("population", "options"):
             if i == 0:
                 self._fill_overview()
-            if i == 1:
-                self._fill_plot_meta()
         elif slot == "plot" and i == 1:
             self._fill_plot()
         elif slot in ("stats", "stats_group", "hist", "box", "outliers") and i == 2:
@@ -1060,9 +1058,6 @@ class CollectionContent(QWidget):
         except (RuntimeError, AttributeError):
             pass
 
-    def _fill_plot_meta(self) -> None:
-        pass
-
     def _fill_plot(self) -> None:
         if self.plot is None:
             return
@@ -1202,12 +1197,14 @@ class CollectionContent(QWidget):
         open_popover(self.plot, content, 320, prefer="right", align="center", title="Point inspector")
 
     # ---- workspace plots (Frame 21)
+    PLOTS_REFLOW = 1340          # rail 320 + plot 640 + inspector 340 + gaps: narrower puts the inspector below
+
     def _build_plots_ws(self, info, cfg) -> QWidget:
-        host = QWidget()
+        host = _Reflow(self.PLOTS_REFLOW, self._plots_reflow)
         row = QHBoxLayout(host)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(20)
-        rail = _Region(scroll=True)
+        rail = _Region()
         rail.setFixedWidth(320)
         self._rail_collection(rail)
         rail.add(Divider())
@@ -1264,12 +1261,31 @@ class CollectionContent(QWidget):
         self.ws_caption = label("", "label")
         center.add(self._plot_area(compact=False), 1)
         center.add(self.ws_caption)
-        row.addWidget(center, 1)
-        self.inspector_region = _Region(scroll=True)
-        self.inspector_region.setFixedWidth(340)
-        row.addWidget(self.inspector_region)
+        self.plot.setMinimumHeight(360)            # a readable plot at any window size (§20)
+        split = QWidget()
+        self.plot_box = QBoxLayout(QBoxLayout.Direction.LeftToRight, split)
+        self.plot_box.setContentsMargins(0, 0, 0, 0)
+        self.plot_box.setSpacing(20)
+        self.plot_box.addWidget(center, 1)
+        self.inspector_region = _Region()
+        self.plot_box.addWidget(self.inspector_region)
+        row.addWidget(split, 1)
+        self._plots_reflow(True)
         self._fill_inspector()
         return host
+
+    def _plots_reflow(self, wide: bool) -> None:
+        """Wide: plot | inspector (340 px).  Tight (7.png): the inspector moves under the plot, full width,
+        instead of squeezing the plot into a sliver."""
+        try:
+            self.plot_box.setDirection(QBoxLayout.Direction.LeftToRight if wide else QBoxLayout.Direction.TopToBottom)
+            if wide:
+                self.inspector_region.setFixedWidth(340)
+            else:
+                self.inspector_region.setMinimumWidth(0)
+                self.inspector_region.setMaximumWidth(16777215)
+        except (AttributeError, RuntimeError):
+            pass
 
     def _export_menu(self, anchor) -> None:
         from ..widgets.menu import CarbonMenu
@@ -1507,7 +1523,7 @@ class CollectionContent(QWidget):
         row = QHBoxLayout(host)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(20)
-        rail = _Region(scroll=True)
+        rail = _Region()
         rail.setFixedWidth(320)
         self._rail_collection(rail)
         rail.add(Divider())
@@ -1534,11 +1550,9 @@ class CollectionContent(QWidget):
         row.addWidget(rail)
         right = QVBoxLayout()
         right.setSpacing(20)
-        self.ws_stats = _Region(scroll=True)
-        # the table region shares the height with the distribution plots (no fixed height that could clip
-        # either); it scrolls inside when the metric list is long
-        self.ws_stats.setMinimumHeight(220)
-        right.addWidget(self.ws_stats, 5)
+        self.ws_stats = _Region()
+        # the table region hugs its rows; the visualization takes the remaining height (one outer scroll)
+        right.addWidget(self.ws_stats)
         # one visualization of the user's selected descriptor (4.png: no permanent second chart); Compare
         # groups is an explicit choice (Carbon content switcher, sm)
         dist = QHBoxLayout()
@@ -1554,8 +1568,8 @@ class CollectionContent(QWidget):
         dist.addWidget(self.stats_view_sw)
         right.addLayout(dist)
         self.ws_viz = _Region()
-        self.ws_viz.setMinimumHeight(300)
-        right.addWidget(self.ws_viz, 4)
+        self.ws_viz.setMinimumHeight(420)              # a readable plot even in a small window (§20)
+        right.addWidget(self.ws_viz, 1)
         row.addLayout(right, 1)
         self._fill_statistics_ws()
         return host
@@ -1594,7 +1608,7 @@ class CollectionContent(QWidget):
                               f"({plain_text(DESCRIPTORS[k].name)})" for k in shown]
             table.activated.connect(lambda i, ks=shown: self.c.apply(S.update, stats_focus=ks[i]))
             table.set_rows(table.rows, row_tips=table.row_tips)
-            self.ws_stats.add(table)
+            self.ws_stats.add(hstrip(table))
             cap = QHBoxLayout()
             exact = "exact" if stats["exact"] else "Approximate (binned)"
             cap.addWidget(label(f"N = {stats['n']:,} results in scope · N/A excluded and counted as missing · "
@@ -1603,7 +1617,6 @@ class CollectionContent(QWidget):
             self.ws_stats.lay.addLayout(cap)
         else:
             self.ws_stats.add(InlineLoading("Calculating statistics…"))
-        self.ws_stats.lay.addStretch(1)
         focus = st.stats_focus
         reg = self.ws_viz
         reg.clear()
@@ -1666,7 +1679,7 @@ class CollectionContent(QWidget):
             row = QHBoxLayout(host)
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(20)
-            rail = _Region(scroll=True)
+            rail = _Region()
             rail.setFixedWidth(320)
             self._rail_collection(rail)
             rail.add(Divider())
@@ -1677,8 +1690,8 @@ class CollectionContent(QWidget):
             right = QVBoxLayout()
             right.setSpacing(20)
             self.ws_bars = _Region()
-            self.ws_bars.setFixedHeight(460)
-            self.ws_counts = _Region(scroll=True)
+            self.ws_bars.setMinimumHeight(460)
+            self.ws_counts = _Region()
             right.addWidget(self.ws_bars)
             right.addWidget(self.ws_counts, 1)
             row.addLayout(right, 1)
@@ -1749,8 +1762,7 @@ class CollectionContent(QWidget):
                         pw.set_spec(PlotSpec("bars_stacked", bars_data(models, st.denominator, st.split_status, 26,
                                                                         220, 200, legend=False)))
                         sl.addWidget(pw)
-                    from ..widgets.scroll import inner_scroll_area
-                    self.ws_bars.add(inner_scroll_area(sa_host), 1)
+                    self.ws_bars.add(sa_host, 1)
             else:
                 self.ws_bars.add(label("Model distributions", "heading02"))
                 pw = PlotWidget()
@@ -1820,10 +1832,28 @@ class CollectionContent(QWidget):
 
 
 # ====================================================================== shared builders
-class _Region(QWidget):
-    """A workspace region: ``layer-01`` panel with 20 px padding (optionally scrolling)."""
+class _Reflow(QWidget):
+    """A workspace page that reports crossing ``breakpoint`` px of width (wide / tight layouts)."""
 
-    def __init__(self, scroll: bool = False):
+    def __init__(self, breakpoint: int, on_change):
+        super().__init__()
+        self.breakpoint = breakpoint
+        self.on_change = on_change
+        self.wide = True
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        wide = self.width() >= self.breakpoint
+        if wide != self.wide:
+            self.wide = wide
+            self.on_change(wide)
+
+
+class _Region(QWidget):
+    """A workspace region: ``layer-01`` panel with 20 px padding.  Regions never scroll by themselves: the
+    expanded workspace grows with its content and its one outer scroll owns the overflow (7.png, §20, §58)."""
+
+    def __init__(self):
         super().__init__()
         self.setObjectName("AnaRegion")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -1833,11 +1863,7 @@ class _Region(QWidget):
         self.lay = QVBoxLayout(inner)
         self.lay.setContentsMargins(20, 20, 20, 20)
         self.lay.setSpacing(12)
-        if scroll:
-            from ..widgets.scroll import inner_scroll_area
-            outer.addWidget(inner_scroll_area(inner))
-        else:
-            outer.addWidget(inner)
+        outer.addWidget(inner)
 
     def add(self, w, stretch: int = 0):
         self.lay.addWidget(w, stretch)

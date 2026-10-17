@@ -49,7 +49,7 @@ search field to clear it and return to the page you were reading.
 
 | Where | Opens |
 |---|---|
-| **F1**, the header **Help** icon, **File › Help** | Documentation Home |
+| **F1**, the header **Help** icon | Documentation Home |
 | Model support legend (information icon in Element selection) › link | [Prediction Model Coverage](help://model-coverage) |
 | Footer warning **Partial model coverage** › **View model support** | [Prediction Model Coverage](help://model-coverage) |
 | Workload summary and **Large workload** messages › **About workload estimates** | [Workload Estimation](help://workload) |

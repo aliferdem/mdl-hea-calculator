@@ -235,8 +235,9 @@ def stylesheet() -> str:
     return f"""
 body {{ color: {k['text-primary']}; font-family: '{FONT_FAMILY}'; font-size: 14px; }}
 p {{ margin-top: 0px; margin-bottom: 12px; line-height: 110%; }}
-li {{ margin-bottom: 4px; line-height: 110%; }}
-ul, ol {{ margin-top: 0px; margin-bottom: 12px; }}
+table.ul, table.ol {{ margin-top: 0px; margin-bottom: 12px; }}
+td.mark {{ color: {k['text-primary']}; padding-bottom: 8px; }}
+td.item {{ padding-bottom: 8px; line-height: 110%; }}
 h1 {{ font-size: 32px; font-weight: 300; margin-top: 0px; margin-bottom: 16px; }}
 h2 {{ font-size: 20px; font-weight: 400; margin-top: 28px; margin-bottom: 12px; }}
 h3 {{ font-size: 16px; font-weight: 600; margin-top: 20px; margin-bottom: 8px; }}

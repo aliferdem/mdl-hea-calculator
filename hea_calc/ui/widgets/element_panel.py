@@ -1,5 +1,6 @@
-"""Element Selection panel (Figma 170:13202): periodic table of selectable element tiles,
-per-model data-support indicators and the element property readout."""
+"""Elements panel (CORRECT_ELEMENTS.png, Figma 170:13202): periodic table of selectable element tiles,
+per-model data-support indicators and the element property readout.  Fixed geometry: 28 × 28 px tiles on a
+30 px pitch at every window size (brief 2026-10-16 §17-18)."""
 
 from __future__ import annotations
 
@@ -12,9 +13,9 @@ from ...core.data import Datasets
 from ...core.engine import MODEL_KEYS, MODELS, Engine
 from .. import crisp, icons
 from ..crisp import device_inset
-from ..responsive import distribute, tile_size_for
-from ..theme import (BODY_COMPACT_01, BORDER_SELECTED, ELEMENT_PANEL_MIN, FOCUS_WIDTH, LABEL_01, PANEL_PADDING_X, THEME,
-                     TILE_GAP, TILE_SIZE, TILE_SIZE_MIN, font, t)
+from ..responsive import distribute
+from ..theme import (BODY_COMPACT_01, BORDER_SELECTED, ELEMENT_PANEL_WIDTH, FOCUS_WIDTH, LABEL_01, PANEL_PADDING_X,
+                     THEME, TILE_GAP, TILE_SIZE, font, t)
 from .common import Divider, InfoButton, Panel
 
 # Figma places La and Ac at the start of the f-block rows (row 8/9, column 2).
@@ -23,9 +24,10 @@ _FBLOCK_EXTRA_GAP = 10  # px between the main table and the f-block rows (Figma:
 
 
 class ElementTile(QAbstractButton):
-    """Selectable element tile — a customised Carbon selectable Tile (29 × 29).
+    """Selectable element tile — a customised Carbon selectable Tile (28 × 28, CORRECT_ELEMENTS).
 
-    States: rest (layer-02), hover (layer-hover-02), pressed (layer-active-02), selected (2 px
+    States: rest (layer-02 with a 1 px ``border-subtle-02`` inner stroke), hover (layer-hover-02), pressed
+    (layer-active-02), selected (2 px
     ``tile-selected-border`` frame: #f4f4f4 in the dark theme, #0f62fe in the light one, so the
     selected tile keeps the design's white frame on dark and the interactive blue on light),
     keyboard focus (Carbon focus ring with inset line).
@@ -78,6 +80,8 @@ class ElementTile(QAbstractButton):
         crisp.fill_rect(p, r, bg)
         if self.isChecked():
             crisp.frame(p, r, BORDER_SELECTED, t("tile-selected-border"))
+        else:
+            crisp.frame(p, r, 1, t("border-subtle-02"))      # bordered tile (CORRECT_ELEMENTS)
         if self.hasFocus() and self.focusPolicy() != Qt.FocusPolicy.NoFocus:
             crisp.frame(p, r, FOCUS_WIDTH, t("focus"))
             inset = device_inset(p, FOCUS_WIDTH)
@@ -118,10 +122,7 @@ class PeriodicTable(QWidget):
         return self.tile_size + TILE_GAP
 
     def set_tile_size(self, size: int) -> None:
-        """Lay the tiles out at ``size`` px (design 29; narrower windows use down to TILE_SIZE_MIN).
-
-        Only the cell size changes - gap, typography and the f-block offset stay as designed.
-        """
+        """Lay the tiles out at ``size`` px (TILE_SIZE, fixed)."""
         if size == self.tile_size:
             return
         self.tile_size = size
@@ -440,7 +441,7 @@ class ElementPanel(Panel):
     element_toggled = Signal(str, bool)
 
     def __init__(self, engine: Engine, parent=None):
-        super().__init__("Element selection", parent)
+        super().__init__("Elements", parent)
         self.engine = engine
         self.data = engine.data
         self.title_holder.setFixedHeight(49)
@@ -459,17 +460,11 @@ class ElementPanel(Panel):
         self.table.hovered.connect(self._preview)
         self.table.toggled.connect(self._toggled)
         self.table.installEventFilter(self)
-        self.setMinimumWidth(ELEMENT_PANEL_MIN)
-
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
+        self.setFixedWidth(ELEMENT_PANEL_WIDTH)       # fixed geometry: never stretched or squeezed
         self.relayout()
 
     def relayout(self):
-        """Fit the periodic table to the panel width and keep the model-support block in the gap of
-        the first three periods (columns 2-11), at its design position when the tiles are 29 px."""
-        tile = tile_size_for(self.width() - 2 * PANEL_PADDING_X, 18, TILE_GAP, TILE_SIZE, TILE_SIZE_MIN)
-        self.table.set_tile_size(tile)
+        """Model-support block in the gap of the first three periods (columns 2-11)."""
         pitch = self.table.pitch
         x = min(3 * pitch + 1, 12 * pitch - TILE_GAP - self.support.width())
         self.support.move(PANEL_PADDING_X + max(2 * pitch, x), 6)

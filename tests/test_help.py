@@ -142,7 +142,9 @@ def test_markdown_subset_rendering():
     assert '<p class="lead">Lead.</p>' in out
     assert "<th align=\"left\">b | c</th>" in out and "x<sub>i</sub>" in out
     assert 'class="callout"' in out and "<b>Note.</b>" in out
-    assert "<li>one continued</li>" in out and "<ol>" in out
+    # lists: marker column + text (10.png - Qt cannot space its own list markers)
+    assert '<td class="mark" width="16" valign="top">–</td><td class="item" valign="top">one continued</td>' in out
+    assert '<table class="ol"' in out and '>2.</td><td class="item" valign="top">second</td>' in out
     assert "mol<sup>−1</sup>" in out and "<script>" not in out and "&lt;script&gt;" in out
 
 

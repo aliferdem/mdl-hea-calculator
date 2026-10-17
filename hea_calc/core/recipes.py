@@ -383,15 +383,4 @@ def recipe_tsv(recipe) -> str:
     return compositions_tsv(names, comps)
 
 
-def recipe_preview(recipe, limit: int = 2000) -> tuple[int, list[str], str]:
-    """(total, first ``limit`` display lines, full TSV) for the generated-compositions dialog."""
-    _check_copy_size(recipe)
-    _src, names, comps, _envs = recipe()
-    lines = []
-    for n, c in list(zip(names, comps))[:limit]:
-        tot = sum(c.values())
-        lines.append(f"{n}    ({', '.join(f'{el} {100 * v / tot:.2f}' for el, v in c.items())})")
-    return len(comps), lines, compositions_tsv(names, comps)
-
-
 _ = (math, os)
