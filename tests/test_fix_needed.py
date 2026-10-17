@@ -489,3 +489,41 @@ def test_row_double_click_is_acknowledged_transiently(win, app):
     assert view.flash_row == -1 and view.flash_level == 0, "feedback, not state: the row returns to hover-only"
     assert not acc.isVisible()
     assert view.selectionMode() == view.SelectionMode.NoSelection and not win.notification.isVisible()
+
+
+def test_menus_never_elide_their_items(win, app):
+    """150 % render: integer metrics under-measured "Import compositions"; widths use fractional metrics now."""
+    from PySide6.QtGui import QFontMetricsF
+    from hea_calc.ui.theme import BODY_COMPACT_01, font
+    from hea_calc.ui.widgets.menu import MENU_PADDING_X
+    fm = QFontMetricsF(font(BODY_COMPACT_01))
+    for m in (win.file_menu, win.theme_menu, win.table.export_btn.menu()):
+        texts = [a.text().replace("&", "") for a in m.actions() if not a.isSeparator() and a.isVisible()]
+        need = max(fm.horizontalAdvance(x) for x in texts) + 2 * MENU_PADDING_X
+        assert m.content_width() >= need + 1, (m.title(), m.content_width(), need)
+
+
+def test_menus_stay_on_the_available_screen(app):
+    """§5 / §77: a menu without room below opens above its trigger (or upward from the pointer) and never
+    covers the taskbar - Qt alone only clamps to the full screen."""
+    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtWidgets import QPushButton
+    from hea_calc.ui.widgets.menu import SHADOW, CarbonMenu
+    scr = QGuiApplication.primaryScreen().availableGeometry()
+    b = QPushButton("Export")
+    b.resize(123, 32)
+    b.show()
+    m = CarbonMenu(parent=b, size="sm")
+    for t_ in ("Excel workbook (.xlsx)", "CSV (.csv)", "Copy table to clipboard"):
+        m.add_action(t_, lambda: None)
+    m._fit_width()
+    h = m.sizeHint().height()
+    low = QPoint(scr.right() - 300, scr.bottom() - 10)                 # a trigger at the bottom edge
+    pos = m.placed(low, above_y=low.y() - 32)
+    assert m.opens_up and pos.y() + h - SHADOW == low.y() - 32, "flush above the trigger"
+    assert pos.y() + h - SHADOW <= scr.bottom() + 1
+    ctx = m.placed(QPoint(scr.right() - 5, scr.bottom() - 5))           # context menu at the bottom-right corner
+    assert ctx.x() + m.sizeHint().width() - SHADOW <= scr.right() + 1 and ctx.y() + h - SHADOW <= scr.bottom() + 1
+    top = m.placed(QPoint(scr.left() + 20, scr.top() + 20))
+    assert not m.opens_up and top == QPoint(scr.left() + 20, scr.top() + 20), "room below: unchanged"
+    b.close()

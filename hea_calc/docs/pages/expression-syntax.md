@@ -1,7 +1,8 @@
 # Expression Syntax Reference
 
-The complete syntax of **Composition expression**. An expression is a formula of element symbols and amounts; the
-amounts are atomic ratios and may contain variables.
+The complete syntax of **Composition expression**. A document is a set of blocks; the first line of each block is a
+formula of element symbols and amounts (atomic ratios, which may contain variables), and the following lines give
+the range of each variable.
 
 ## Elements and amounts
 
@@ -30,13 +31,37 @@ amounts are atomic ratios and may contain variables.
 
 | Write | Meaning |
 |---|---|
-| Blank line | Starts a new block. Each block is one formula. |
-| Spaces, single line breaks | Ignored. |
+| Blank line | Starts a new block. |
+| First line of a block | The expression. |
+| Following lines of a block | Range lines, one per variable of that expression. |
 
-## Ranges
+A block without variables has only its expression line (a fixed composition). Fixed and parametric blocks may be
+mixed in one document.
 
-Each variable has one **Min**, **Max** and **Step** (defaults 0, 1, 0.1), shared by every block that uses it. Values
-form a regular grid from Min to Max; Min = Max gives one value. There is no random sampling.
+## Range lines
+
+```
+lower <= variable <= upper, step=s
+lower <= variable <= upper, points=n
+```
+
+| Part | Rule |
+|---|---|
+| Bounds | Numbers; the lower bound may not exceed the upper bound. Equal bounds give one value. |
+| `step=s` | Values from the lower bound in steps of s up to the upper bound; s must be greater than 0. |
+| `points=n` | n equally spaced values including both bounds; n is a whole number of at least 2. |
+| `step` and `points` | Exactly one of the two. |
+| `p=v` (optional) | The value the block's preview uses; it must lie within the bounds. |
+
+Each variable of an expression needs exactly one range line in its block, and every range line must name a variable
+of that expression. A range belongs to its own block: the same letter in two blocks has two independent ranges.
+There is no random sampling.
+
+## Parsing
+
+Nothing is checked while you type. **Parse** (the icon in the field, or Ctrl+Enter) checks every block; **Calculate**
+uses the parsed document only. Editing after a parse marks the result as changed ("Expression changed. Parse again
+to update the result.") and makes **Calculate** unavailable until the next parse.
 
 ## Rules for generated compositions
 
@@ -46,6 +71,14 @@ form a regular grid from Min to Max; Min = Max gives one value. There is no rand
 
 ## Error messages
 
-Syntax errors appear below the expression field with the position, for example "Unknown element 'Q' (at position
-5)". With several blocks the message starts with the block number ("Block 2: …"), and the footer shows **Invalid
-expression**.
+Errors are listed below the field, one entry per block: the block number, its first line and the message.
+
+| Message | Cause |
+|---|---|
+| Unknown element "Xx" | A symbol that is not an element. |
+| Unmatched parenthesis | A group is not closed (or closed twice). |
+| Choose one sampling method. Specify either step or points, not both. | A range line gives both. |
+| Choose a sampling method for x. Specify step or points. | A range line gives neither. |
+| The variable "x" has no range. Add a line such as 0 <= x <= 1, step=0.1. | A variable without a range line. |
+| The variable "x" is declared twice. | Two range lines for the same variable. |
+| The variable "x" is not used in the expression. | A range line for a letter the expression does not contain. |

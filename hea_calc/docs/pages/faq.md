@@ -3,8 +3,10 @@
 ## Why is Calculate unavailable?
 
 The footer of Composition setup names the reason: for example fewer than two elements, a missing or invalid value,
-at.% or wt.% values that do not sum to 100 %, an invalid expression, or no valid compositions. Calculate is also
-unavailable while a batch is running; use **Cancel** in the footer to stop it.
+at.% or wt.% values that do not sum to 100 %, or no valid compositions. In **Composition expression**, Calculate
+waits for an explicit **Parse**, and becomes unavailable again when you edit the document after parsing ("Expression
+changed. Parse again to update the result."). Calculate is also unavailable while a batch is running; use **Cancel**
+in the footer to stop it.
 
 ## Why does my composition space produce no compositions?
 

@@ -5,13 +5,18 @@ expression calculates it in one run.
 
 ## Calculate the family
 
-1. Select **Composition expression** with the mode switcher.
-2. Type `AlxCoCrFeNi`. A row for the variable **x** appears with Min 0, Max 1 and Step 0.1.
-3. The count reads **11 valid compositions**, from CoCrFeNi (x = 0) to AlCoCrFeNi (x = 1). The footer reads
-   **Ready**.
-4. Select **Calculate**.
+Select **Composition expression** with the mode switcher. Type the expression and, on the next line, the range of x:
 
-To check the compositions first, select **Preview generated compositions** in the expression field.
+```
+AlxCoCrFeNi
+0 <= x <= 1, step=0.1
+```
+
+Select **Parse** (or press Ctrl+Enter). The field turns green and reads "Parsed successfully: Parametric
+composition, 5 elements, 1 variable, 11 compositions." — from CoCrFeNi (x = 0) to AlCoCrFeNi (x = 1). Then select
+**Calculate**.
+
+`0 <= x <= 1, points=11` gives the same eleven values: points always include both endpoints.
 
 ## Read the trend
 
@@ -22,15 +27,25 @@ the vertical axis. VEC falls from 8.25 at x = 0 to 7.20 at x = 1, crossing the 8
 
 ## Extend the range
 
-Set x from 0 to 2 in steps of 0.05: **41 valid compositions**.
+Change the range line to `0 <= x <= 2, step=0.05`. The field now reads "Expression changed. Parse again to update the
+result." and Calculate waits; parse again: **41 compositions**.
 
 ## Two blocks
 
-Type `AlxCoCrFeNi`, a blank line, and `(CoCrFeNi)1-yAly`. Set x from 0 to 2 in steps of 0.1 and y from 0 to 0.3 in
-steps of 0.05. The 28 combinations give **26 valid compositions** and **2 duplicates**: y = 0 and y = 0.2 produce the
-same alloys as x = 0 and x = 1 of the first block, so they are calculated once and belong to the first block.
+Write a second block after a blank line:
+
+```
+AlxCoCrFeNi
+0 <= x <= 2, step=0.1
+
+(CoCrFeNi)1-yAly
+0 <= y <= 0.3, step=0.05
+```
+
+The 28 combinations give **26 compositions (2 duplicates)**: y = 0 and y = 0.2 produce the same alloys as x = 0 and
+x = 1 of the first block, so they are calculated once and belong to the first block.
 
 ## Skipped combinations
 
-Type `(FeCoNi)1-xAlx` with x from 0 to 1 in steps of 0.25. At x = 1 only Al remains, so that combination is skipped:
-**4 valid compositions**, and the footer notes **1 combination skipped**.
+Parse `(FeCoNi)1-xAlx` with the range `0 <= x <= 1, step=0.25`. At x = 1 only Al remains, so that combination is
+skipped: **4 compositions**, and the footer notes **1 combination skipped**.

@@ -4,11 +4,11 @@ Select elements, define one composition or a whole set of compositions, and calc
 descriptors and one prediction per model; results stay in the results table for this session, where you can sort,
 filter, analyse and export them.
 
-![The main window after calculating CoCrFeMnNi: Element selection, Composition setup and Analysis above the results table.](images/main-window.png)
+![The main window after calculating CoCrFeMnNi: Elements, Composition setup and Analysis above the results table.](images/main-window.png)
 
 ## Quick start
 
-1. **Select elements.** Click elements in the periodic table of **Element selection**. Hover an element to see its
+1. **Select elements.** Click elements in the periodic table of **Elements**. Hover an element to see its
    properties and which models have data for it.
 2. **Define the composition.** In **Composition setup**, choose a mode with the switcher at the top right —
    **Single composition**, **Composition space** or **Composition expression** — and enter amounts, ranges or an

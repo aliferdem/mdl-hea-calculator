@@ -1,6 +1,6 @@
 # Calculation Settings
 
-**File › Calculation settings…** sets the temperature used by M6 (Troparevsky et al.) and M7 (Senkov & Miracle).
+**File › Calculation settings** sets the temperature used by M6 (Troparevsky et al.) and M7 (Senkov & Miracle).
 The other models do not use a temperature setting: M1, M5 and M8 work at the rule-of-mixtures T<sub>m</sub>, and
 M2–M4 need no temperature.
 

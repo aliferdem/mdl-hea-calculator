@@ -415,10 +415,11 @@ class PlotWidget(QWidget):
             else:
                 continue
             box.moveLeft(max(rect.left() + 1, min(rect.right() - tw - 1, box.left())))
+            self._threshold_labels.append((box, lab, col))
+        for box, lab, col in self._threshold_labels:      # labels after every line: no line crosses a label
             p.fillRect(box, QColor(col))
             p.setPen(QColor(on_color(col)))
             p.drawText(box, int(Qt.AlignmentFlag.AlignCenter), lab)
-            self._threshold_labels.append((box, lab, col))
         return lines
 
     def _paint_xy(self, p, w, h, interactive):

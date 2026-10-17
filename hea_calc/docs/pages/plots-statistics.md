@@ -14,8 +14,11 @@ run. Values that are not available are excluded and counted — never drawn or a
 | **Heatmap (two parameters)** | A value over two design parameters, for example two at.% axes of a composition space. |
 | **Stacked bars** / **Grouped bars (model classes)** | Counts of each model's classes. |
 
-Hover a point for its values; double-click it to analyse that composition. The number of results omitted because a
-value is not available is stated below the plot.
+Hover a point for a tooltip with its composition, its values on both axes and its colour group. Click a point to
+inspect it; double-click it to analyse that composition. Turn the mouse wheel to zoom; drag with the middle or right
+mouse button to pan; **Reset axes** restores the full view. When the colour shows a model's prediction, the model's
+published thresholds are drawn as dashed lines labelled with the side the model accepts, for example
+"SS: δ ≤ 6.6 %". The number of results omitted because a value is not available is stated below the plot.
 
 ### Large collections
 
@@ -41,8 +44,13 @@ and the range **Min – Max**. **All measures** — and the expanded view — sh
 
 ### Distribution of one descriptor
 
-**Distribution of** selects one descriptor for the histogram and box plot; you can also activate a statistics row.
-Until you choose one, the area shows **Select a descriptor**.
+**Distribution of** selects one descriptor; you can also activate a statistics row. Its distribution is shown as
+one chart: **Histogram**, or **Compare groups** for a box plot per element family, system size or block. Until you
+choose a descriptor, the area shows **Select a descriptor**.
+
+When values lie outside Q1 − 1.5 × IQR to Q3 + 1.5 × IQR (Tukey fences), the chart reports, for example,
+**12 statistical outliers**. They are not excluded from the analysis and do not necessarily indicate erroneous
+data; the note is not shown when the interquartile range is zero or fewer than ten values are available.
 
 ### Size mismatch: two descriptors
 

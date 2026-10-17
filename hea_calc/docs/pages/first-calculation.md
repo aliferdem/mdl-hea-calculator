@@ -15,7 +15,7 @@ The panel shows **Start by selecting elements**, and **Calculate** is unavailabl
 
 ## Step 2 — Select five elements
 
-In **Element selection**, click **Co**, **Cr**, **Fe**, **Mn** and **Ni**, in this order. Each selected tile is
+In **Elements**, click **Co**, **Cr**, **Fe**, **Mn** and **Ni**, in this order. Each selected tile is
 marked, and Composition setup adds one row per element in the order you clicked. Every **At. ratio** value reads
 **1.0000**, so the composition is already equiatomic.
 
@@ -96,7 +96,7 @@ composition, key descriptors, the model predictions (8 of 8 evaluated, all SS) a
 **Descriptors**, **Models** and **Model details** tabs show every value, criterion and threshold.
 
 The temperature used by M6 and M7 is 991 K here: by default 0.55 × T<sub>m</sub>. You can set an annealing
-temperature in **File › Calculation settings…**.
+temperature in **File › Calculation settings**.
 
 To show another result in Analysis later, double-click its row, or right-click the row and select **Analyse
 composition**. A single click does not change Analysis.

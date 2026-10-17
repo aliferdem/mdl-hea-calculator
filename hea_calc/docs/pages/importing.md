@@ -1,6 +1,6 @@
 # Importing Compositions
 
-**File › Import compositions…** (Ctrl+O) reads a spreadsheet and calculates every valid row as one run.
+**File › Import compositions** (Ctrl+O) reads a spreadsheet and calculates every valid row as one run.
 
 ## Supported files
 

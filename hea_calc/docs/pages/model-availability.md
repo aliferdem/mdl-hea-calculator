@@ -16,7 +16,7 @@ Hover an element in the periodic table. The **Model support** row below the tabl
 
 The information icon next to **Model support** opens the legend.
 
-![Element selection with the Model support row and the element properties.](images/element-selection.png)
+![The Elements panel with the Model support row and the element properties.](images/element-selection.png)
 
 ## For the selected elements: Partial model coverage
 

@@ -246,7 +246,8 @@ SEARCH_ALIASES: tuple[tuple[str, ...], ...] = (
     ("not available", "n/a", "na"),
     ("solid solution", "ss"), ("intermetallic", "im"), ("multiple phases", "mp"), ("metallic glass", "mg"),
     ("composition space", "sweep", "range"),
-    ("expression", "formula", "parametric"),
+    ("expression", "formula", "parametric", "parse", "block"),
+    ("range line", "step", "points", "sampling", "variable range"),
     ("formation enthalpy", "δhf", "dhf", "troparevsky"),
     ("density", "ρ", "rho"),
 )

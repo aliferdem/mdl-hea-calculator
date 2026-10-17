@@ -24,8 +24,10 @@ semantic theme tokens (Carbon MCP, components/menu "Specifications - Color / Int
 
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt
-from PySide6.QtGui import QAction, QColor, QFontMetrics, QKeySequence, QPainter
+from PySide6.QtGui import QAction, QColor, QFontMetrics, QFontMetricsF, QKeySequence, QPainter
 from PySide6.QtWidgets import QMenu
 
 from .. import crisp, icons
@@ -96,20 +98,37 @@ class CarbonMenu(QMenu):
         x = trigger.width() - (self.width() - 2 * SHADOW) if align_right else 0
         return trigger.mapToGlobal(QPoint(x - SHADOW, trigger.height() - SHADOW))
 
+    def placed(self, pos: QPoint, above_y: int | None = None) -> QPoint:
+        """``pos`` (widget top-left, global) kept inside the available screen area (brief §5, §77): a menu that does
+        not fit below opens above - flush over its trigger (``above_y``: the trigger's top) or upward from the
+        pointer - and never covers the taskbar; Qt itself only clamps to the full screen."""
+        from PySide6.QtGui import QGuiApplication
+        size = self.sizeHint()
+        scr = (QGuiApplication.screenAt(pos) or QGuiApplication.primaryScreen()).availableGeometry()
+        self.opens_up = False
+        x, y = pos.x(), pos.y()
+        if y + size.height() - SHADOW > scr.bottom() + 1:
+            self.opens_up = True
+            y = (above_y - size.height() + SHADOW) if above_y is not None else (pos.y() + 2 * SHADOW - size.height())
+        y = max(scr.top() - SHADOW, min(y, scr.bottom() + 1 + SHADOW - size.height()))
+        x = max(scr.left() - SHADOW, min(x, scr.right() + 1 + SHADOW - size.width()))
+        return QPoint(x, y)
+
     def open_below(self, trigger, exec_: bool = True, align_right: bool = False):
-        """Open with the surface flush under ``trigger`` (the shadow margin hangs outside it)."""
+        """Open with the surface flush under ``trigger`` (the shadow margin hangs outside it); above it when the
+        screen has no room below."""
         self.trigger_width = max(getattr(self, "trigger_width", 0), trigger.width())
         self._fit_width()
-        pos = self.target_below(trigger, align_right)
+        pos = self.placed(self.target_below(trigger, align_right), trigger.mapToGlobal(QPoint(0, 0)).y())
         if exec_:
             return self.exec(pos)
         self.popup(pos)
         return None
 
     def exec_at(self, global_pos: QPoint):
-        """Context menu: the surface's top-left corner at ``global_pos``."""
+        """Context menu: the surface's top-left corner at ``global_pos`` (upward from it near the screen bottom)."""
         self._fit_width()
-        return self.exec(global_pos - QPoint(SHADOW, SHADOW))
+        return self.exec(self.placed(global_pos - QPoint(SHADOW, SHADOW)))
 
     def _columns(self) -> tuple[bool, bool, bool]:
         acts = [a for a in self.actions() if a.isVisible() and not a.isSeparator()]
@@ -117,7 +136,9 @@ class CarbonMenu(QMenu):
                 any(a.property("trailing_icon") for a in acts))
 
     def content_width(self) -> int:
-        fm = QFontMetrics(font(BODY_COMPACT_01))
+        # fractional metrics, rounded up (+1 px): at DPR 1.25 / 1.5 integer advances under-measured the painted
+        # text and the longest item was elided ("Import compositio…")
+        fm = QFontMetricsF(font(BODY_COMPACT_01))
         check, icon, trailing = self._columns()
         lead = (ICON + ICON_GAP if check else 0) + (ICON + ICON_GAP if icon else 0)
         show_sc = self.property("show_shortcuts") is not False
@@ -132,7 +153,7 @@ class CarbonMenu(QMenu):
             if a.menu() is not None or trailing:
                 w += SHORTCUT_GAP + ICON
             widest = max(widest, w)
-        return 2 * MENU_PADDING_X + lead + widest
+        return int(math.ceil(2 * MENU_PADDING_X + lead + widest)) + 1
 
     def _fit_width(self) -> None:
         w = max(MENU_MIN_WIDTH, getattr(self, "trigger_width", 0),
