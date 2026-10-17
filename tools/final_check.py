@@ -183,11 +183,13 @@ def main():
         comp = w.composition
         comp.set_mode(2)
         QApplication.processEvents()
-        comp.expr.edit.setPlainText("FeCoNi(AlCu)0.2\n(Co30Fe45Ni25)1-x(Al40Si60)x")
-        comp.expr.parse()
+        comp.expr.edit.setPlainText("FeCoNi(AlCu)0.2\n\n(Co30Fe45Ni25)1-x(Al40Si60)x\n0 <= x <= 1, step=0.05")
+        ok = comp.expr.parse()
         QApplication.processEvents()
+        n = len(comp.expr.doc.blocks)
         w.close()
-        return "2 blocks parsed"
+        assert ok and n == 2, (ok, n)
+        return "2 blocks parsed (inline ranges)"
 
 
     # --------------------------------------------------------------------------- 9/10/12 table

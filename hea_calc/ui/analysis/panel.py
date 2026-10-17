@@ -273,7 +273,7 @@ class AnalysisPanel(QFrame):
     # ------------------------------------------------------------------ overflow
     def open_overflow(self):
         menu = overflow_menu(self, self.c)
-        menu.exec(self.overflow_btn.mapToGlobal(self.overflow_btn.rect().bottomLeft()))
+        menu.open_below(self.overflow_btn, align_right=True)
         menu.deleteLater()
 
 

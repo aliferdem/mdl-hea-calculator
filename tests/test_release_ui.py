@@ -306,10 +306,13 @@ def test_statistics_are_descriptor_generic_and_delta_is_not_privileged(win, app)
     assert stats["delta"]["median"] != stats["delta_cn12"]["median"], "two different quantities"
     win.set_expanded(True)
     settle(win, app)
-    for metric in ("density", "delta_cn12"):
-        c.apply(S.update, stats_focus=metric)
+    for metric in ("density", "delta_cn12"):          # any descriptor drives the one visualization (§33)
+        c.apply(S.update, stats_focus=metric, stats_view="histogram")
         settle(win, app)
-        assert metric in c.data["box"]["metrics"] and c.data["hist"]["n_valid"] > 0
+        assert c.data["hist"]["metric"] == metric and c.data["hist"]["n_valid"] > 0
+        c.apply(S.update, stats_view="groups")
+        settle(win, app)
+        assert metric in c.data["box"]["metrics"]
     win.set_expanded(False)
 
 
@@ -346,8 +349,9 @@ def test_closed_dropdowns_ignore_the_wheel_and_keep_their_text_origin(win, app):
     opened = grab()
     d._open = False
     def text_cols(img):
+        # the 2 px focus frame is painted *over* the field (open / focus states); the text starts at 16 px
         cols = []
-        for x in range(img.width()):
+        for x in range(3, img.width()):
             if any(img.pixelColor(x, y).lightness() > 150 for y in range(4, img.height() - 4)):
                 cols.append(x)
         return cols[:3]
@@ -382,7 +386,7 @@ def test_theme_preference_system_light_dark(app, settings):
     w = MainWindow(settings=settings)
     try:
         labels = [a.text() for a in w.theme_menu.actions() if not a.isSeparator()]
-        assert labels == ["System default", "Light", "Dark"]
+        assert labels == ["Light", "Dark", "System default"]          # CORRECT_THEME_BUTTON order
         w.set_theme("system")
         assert w.prefs.theme == "system"
         w._os_scheme_changed("light")
@@ -406,10 +410,11 @@ def test_native_titlebar_attributes_follow_the_tokens():
     assert WT.colorref("#0f62fe") == 0xFE620F
     dark = dict(WT.caption_attributes("dark", DARK, 22631))
     assert dark[WT.DWMWA_USE_IMMERSIVE_DARK_MODE] == 1
-    assert dark[WT.DWMWA_CAPTION_COLOR] == WT.colorref(DARK["background"])
+    assert dark[WT.DWMWA_CAPTION_COLOR] == WT.colorref(DARK["shell"])
     assert dark[WT.DWMWA_TEXT_COLOR] == WT.colorref(DARK["text-primary"])
     light = dict(WT.caption_attributes("light", LIGHT, 22631))
-    assert light[WT.DWMWA_USE_IMMERSIVE_DARK_MODE] == 0 and light[WT.DWMWA_CAPTION_COLOR] == 0xF4F4F4
+    # Main window.svg: the light title bar and shell are #FFFFFF
+    assert light[WT.DWMWA_USE_IMMERSIVE_DARK_MODE] == 0 and light[WT.DWMWA_CAPTION_COLOR] == 0xFFFFFF
     win10 = dict(WT.caption_attributes("dark", DARK, 19045))
     assert WT.DWMWA_CAPTION_COLOR not in win10 and win10[WT.DWMWA_USE_IMMERSIVE_DARK_MODE] == 1
     assert dict(WT.caption_attributes("dark", DARK, 17763)) == {WT.DWMWA_USE_IMMERSIVE_DARK_MODE_OLD: 1}

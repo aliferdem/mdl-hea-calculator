@@ -171,7 +171,7 @@ class AboutWindow(QDialog):
         doc = QTextDocument()
         doc.setHtml(lab.text())
         menu.add_action("Copy all", lambda: QGuiApplication.clipboard().setText(doc.toPlainText()))
-        menu.exec(lab.mapToGlobal(pos))
+        menu.exec_at(lab.mapToGlobal(pos))
         menu.deleteLater()
 
     def _open_link(self, href: str) -> None:

@@ -80,10 +80,10 @@ DARK = {
     "layer-01": "#262626", "layer-02": "#393939", "layer-03": "#525252",
     "layer-hover-01": "#333333", "layer-hover-02": "#474747",
     "layer-active-01": "#525252", "layer-active-02": "#6f6f6f",
-    "layer-selected-01": "#393939", "layer-selected-hover-01": "#474747",
+    "layer-selected-01": "#393939", "layer-selected-hover-01": "#474747", "layer-selected-02": "#525252", "layer-selected-hover-02": "#636363", "shell": "#161616", "notification-info-bg": "#262626", "notification-success-bg": "#262626", "notification-warning-bg": "#262626", "notification-error-bg": "#262626",
     "field-01": "#262626", "field-02": "#393939", "field-hover-02": "#474747",
     "border-subtle-00": "#393939", "border-subtle-01": "#393939", "border-subtle-02": "#525252",
-    "border-strong-01": "#6f6f6f", "border-strong-02": "#8d8d8d", "border-tile": "#6f6f6f",
+    "border-strong-01": "#6f6f6f", "border-strong-02": "#8d8d8d", "border-tile": "#6f6f6f", "scrollbar-thumb": "#525252", "scrollbar-thumb-hover": "#8d8d8d", "scrollbar-thumb-active": "#c6c6c6",
     # 2 px frame of a selected periodic-table tile: white on dark (as designed), and the
     # interactive blue on light, where a near-black frame disappears against the tile.
     "tile-selected-border": "#f4f4f4",
@@ -105,7 +105,7 @@ DARK = {
     "status-green": "#24a148", "status-yellow": "#f1c21b", "status-red": "#fa4d56", "status-gray": "#8d8d8d",
     "status-inner": "#000000",
     # Carbon g100 inverse tokens: content on the light inverse surface of tooltips / toggletips
-    "icon-inverse": "#161616", "link-inverse": "#0f62fe",
+    "icon-inverse": "#161616", "link-inverse": "#0f62fe", "icon-on-color": "#ffffff",
     "support-success-inverse": "#24a148", "support-error-inverse": "#da1e28",
     "support-warning-inverse": "#f1c21b", "support-info-inverse": "#0f62fe", "status-gray-inverse": "#6f6f6f",
     "overlay": "rgba(0, 0, 0, 0.65)", "shadow": "rgba(0, 0, 0, 0.8)",
@@ -121,10 +121,10 @@ LIGHT = {
     "layer-01": "#ffffff", "layer-02": "#f4f4f4", "layer-03": "#ffffff",
     "layer-hover-01": "#e8e8e8", "layer-hover-02": "#e8e8e8",
     "layer-active-01": "#c6c6c6", "layer-active-02": "#c6c6c6",
-    "layer-selected-01": "#e0e0e0", "layer-selected-hover-01": "#d1d1d1",
+    "layer-selected-01": "#e0e0e0", "layer-selected-hover-01": "#d1d1d1", "layer-selected-02": "#e0e0e0", "layer-selected-hover-02": "#d1d1d1", "shell": "#ffffff", "notification-info-bg": "#edf5ff", "notification-success-bg": "#defbe6", "notification-warning-bg": "#fcf4d6", "notification-error-bg": "#fff1f1",
     "field-01": "#ffffff", "field-02": "#f4f4f4", "field-hover-02": "#e8e8e8",
     "border-subtle-00": "#e0e0e0", "border-subtle-01": "#e0e0e0", "border-subtle-02": "#c6c6c6",
-    "border-strong-01": "#8d8d8d", "border-strong-02": "#8d8d8d", "border-tile": "#a8a8a8",
+    "border-strong-01": "#8d8d8d", "border-strong-02": "#8d8d8d", "border-tile": "#a8a8a8", "scrollbar-thumb": "#c6c6c6", "scrollbar-thumb-hover": "#8d8d8d", "scrollbar-thumb-active": "#6f6f6f",
     "tile-selected-border": "#0f62fe",
     "border-interactive": "#0f62fe", "border-inverse": "#161616", "border-disabled": "#c6c6c6",
     "text-primary": "#161616", "text-secondary": "#525252", "text-helper": "#6f6f6f",
@@ -144,7 +144,7 @@ LIGHT = {
     "status-green": "#24a148", "status-yellow": "#f1c21b", "status-red": "#da1e28", "status-gray": "#8d8d8d",
     "status-inner": "#000000",
     # Carbon g10 inverse tokens: content on the dark inverse surface of tooltips / toggletips
-    "icon-inverse": "#ffffff", "link-inverse": "#78a9ff",
+    "icon-inverse": "#ffffff", "link-inverse": "#78a9ff", "icon-on-color": "#ffffff",
     "support-success-inverse": "#42be65", "support-error-inverse": "#fa4d56",
     "support-warning-inverse": "#f1c21b", "support-info-inverse": "#4589ff", "status-gray-inverse": "#a8a8a8",
     "overlay": "rgba(22, 22, 22, 0.5)", "shadow": "rgba(0, 0, 0, 0.3)",
@@ -259,14 +259,21 @@ QMainWindow, #AppBody, #ContentScroll {{ background: {k['background']}; }}
 #ErrorText {{ font-size: 12px; color: {k['text-error']}; letter-spacing: 0.32px; }}
 
 /* ---------------- header (UI shell) */
-#AppHeader {{ background: {k['background']}; border-bottom: 1px solid {k['border-subtle-00']}; }}
+#AppHeader {{ background: {k['shell']}; border-bottom: 1px solid {k['border-subtle-00']}; }}
 #HeaderName {{ font-size: 14px; color: {k['text-primary']}; }}
 #HeaderDivider {{ background: {k['border-subtle-01']}; }}
 #HeaderMenuItem {{ background: transparent; border: none; color: {k['text-secondary']};
                    padding: 0px 16px; font-size: 14px; text-align: left; }}
-#HeaderMenuItem:hover, #HeaderMenuItem[open="true"] {{ background: {k['layer-hover-01']};
+#HeaderMenuItem[open="true"] {{ background: {k['layer-02']}; color: {k['text-primary']}; }}
+#HeaderMenuItem:hover {{ background: {k['layer-hover-01']};
                    color: {k['text-primary']}; }}
 #HeaderMenuItem:focus {{ border: 2px solid {k['focus']}; padding: 0px 14px; }}
+#HeaderProgressLabel {{ color: {k['text-primary']}; font-size: 14px; }}
+#HeaderProgressDetail {{ color: {k['text-secondary']}; font-size: 12px; letter-spacing: 0.32px; }}
+#Heading {{ color: {k['text-primary']}; font-size: 14px; font-weight: 600; }}
+#ParsedRule {{ background: {k['border-subtle-01']}; border: none; }}
+#NotificationTitle {{ color: {k['text-primary']}; font-weight: 600; font-size: 14px; }}
+#NotificationBody {{ color: {k['text-primary']}; font-size: 14px; }}
 /* Menus are widgets/menu.CarbonMenu (painted from tokens); these rules only give it Carbon geometry:
    4 px block padding, 32 px items, 9 px dividers (1 px rule + 4 px margins). */
 QMenu {{ background: {k['layer-01']}; border: none; padding: 4px 0px; }}
@@ -399,15 +406,17 @@ QComboBox[field="true"] {{ background: {k['field-02']}; border-bottom: 1px solid
 QScrollArea {{ background: transparent; border: none; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
 QScrollBar:vertical {{ background: transparent; width: {SCROLLBAR_HIT}px; margin: 0px; }}
-QScrollBar::handle:vertical {{ background: {k['border-strong-01']}; min-height: {SCROLLBAR_MIN_THUMB}px;
+QScrollBar::handle:vertical {{ background: {k['scrollbar-thumb']}; min-height: {SCROLLBAR_MIN_THUMB}px;
                                border-radius: {SCROLLBAR_VISIBLE // 2}px;
                                margin: 0px {(SCROLLBAR_HIT - SCROLLBAR_VISIBLE) // 2}px; }}
-QScrollBar::handle:vertical:hover {{ background: {k['border-strong-02']}; }}
+QScrollBar::handle:vertical:hover {{ background: {k['scrollbar-thumb-hover']}; }}
+QScrollBar::handle:vertical:pressed {{ background: {k['scrollbar-thumb-active']}; }}
 QScrollBar:horizontal {{ background: transparent; height: {SCROLLBAR_HIT}px; margin: 0px; }}
-QScrollBar::handle:horizontal {{ background: {k['border-strong-01']}; min-width: {SCROLLBAR_MIN_THUMB}px;
+QScrollBar::handle:horizontal {{ background: {k['scrollbar-thumb']}; min-width: {SCROLLBAR_MIN_THUMB}px;
                                  border-radius: {SCROLLBAR_VISIBLE // 2}px;
                                  margin: {(SCROLLBAR_HIT - SCROLLBAR_VISIBLE) // 2}px 0px; }}
-QScrollBar::handle:horizontal:hover {{ background: {k['border-strong-02']}; }}
+QScrollBar::handle:horizontal:hover {{ background: {k['scrollbar-thumb-hover']}; }}
+QScrollBar::handle:horizontal:pressed {{ background: {k['scrollbar-thumb-active']}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ width: 0px; height: 0px; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 
@@ -430,10 +439,6 @@ QDialog {{ background: {k['layer-01']}; }}
 #ModalTitle {{ font-size: 20px; color: {k['text-primary']}; }}
 #ModalLabel {{ font-size: 12px; color: {k['text-secondary']}; letter-spacing: 0.32px; }}
 #ModalFooter {{ background: {k['layer-01']}; }}
-#InlineNotification {{ background: {k['layer-02']}; border-left: 3px solid {k['support-info']}; }}
-#InlineNotification[kind="error"] {{ border-left: 3px solid {k['support-error']}; }}
-#InlineNotification[kind="warning"] {{ border-left: 3px solid {k['support-warning']}; }}
-#InlineNotification[kind="success"] {{ border-left: 3px solid {k['support-success']}; }}
 QProgressBar {{ background: {k['layer-02']}; border: none; height: 8px; max-height: 8px; text-align: center; }}
 QProgressBar::chunk {{ background: {k['border-interactive']}; }}
 QListWidget {{ background: transparent; border: none; }}

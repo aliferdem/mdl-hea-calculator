@@ -3,7 +3,7 @@
 Every workflow (single composition, composition sweep, expression mode, spreadsheet import) hands a
 composition ``{element: amount}`` to :meth:`Engine.calculate`.  No other module implements a
 scientific equation.  Definitions, data sources and decisions are documented in
-``CALCULATION_AUDIT.md``; the short references below point to it.
+``CALCULATION_AUDIT.md``; citations live in ``references.py`` (one MSE-A source).
 
 Model numbering follows the literature files / Figma design:
 
@@ -82,7 +82,6 @@ class ModelInfo:
     key: str
     short: str
     title: str
-    reference: str
     criterion: str
     name: str = ""      # short human name of the criterion, e.g. "Ω–δ solid solution criterion"
     note: str = ""      # one sentence on what the criterion does and does not claim
@@ -90,46 +89,37 @@ class ModelInfo:
 
 MODELS: dict[str, ModelInfo] = {
     "M1": ModelInfo("M1", "Yang & Zhang", "Model 1 – Yang & Zhang (2012)",
-                    "X. Yang, Y. Zhang, Mater. Chem. Phys. 132 (2012) 233–238.",
                     "SS if Ω ≥ 1.1 and δ(CN12) ≤ 6.6 %, otherwise MP.",
                          name="Ω–δ solid solution criterion",
                          note="Empirical solid-solution region; outside this region the calculator reports MP rather than assigning a unique competing phase."),
     "M2": ModelInfo("M2", "Guo et al.", "Model 2 – Guo et al. (2013)",
-                    "S. Guo, Q. Hu, C. Ng, C.T. Liu, Intermetallics 41 (2013) 96–103.",
                     "SS if δ ≤ 6.6 % and −11.6 ≤ ΔHmix ≤ 3.2 kJ/mol; MG (amorphous) if δ > 6.4 % and "
                     "ΔHmix < −12.2 kJ/mol; otherwise MP.",
                          name="δ–ΔH<sub>mix</sub> empirical phase-selection map",
                          note="For as-cast alloys: solid solution inside the printed δ–ΔH<sub>mix</sub> window, amorphous phase (MG) where δ and ΔH<sub>mix</sub> are both large, multi-phase (MP) otherwise. Guo's intermetallic region is bounded only graphically, so SS and IM are not separated here."),
     "M3": ModelInfo("M3", "Wang et al.", "Model 3 – Wang et al. (2015)",
-                    "Z. Wang, Y. Huang, Y. Yang, J. Wang, C.T. Liu, Scr. Mater. 94 (2015) 28–31.",
                     "SS if γ < 1.175, otherwise MP.",
                          name="γ empirical atomic-size criterion",
                          note="A necessary size-mismatch condition, not a complete phase map. The 1.175 limit is Wang et al.'s empirical fit and is deliberately not refined."),
     "M4": ModelInfo("M4", "Singh et al.", "Model 4 – Singh et al. (2014)",
-                    "A.K. Singh, N. Kumar, A. Dwivedi, A. Subramaniam, Intermetallics 53 (2014) 112–119.",
                     "SS if Λ > 0.96; SS+IM if 0.24 ≤ Λ ≤ 0.96; IM if Λ < 0.24 (Λ in J mol⁻¹ K⁻¹).",
                          name="Λ empirical enthalpy–entropy criterion",
                          note="Empirical Λ bands calibrated on as-cast HEAs. δ is the Guo & Liu 2011 radius set, so Λ is in J mol⁻¹ K⁻¹."),
     "M5": ModelInfo("M5", "Ye et al.", "Model 5 – Ye et al. (2015)",
-                    "Y.F. Ye, Q. Wang, J. Lu, C.T. Liu, Y. Yang, Scr. Mater. 104 (2015) 53–55.",
                     "SS if φ ≥ 20, otherwise MP.",
                          name="φ excess-entropy ordering criterion",
                          note="φ ≥ 20 separates a single solid solution from multi-phase; S<sub>E</sub> is the hard-sphere excess entropy averaged over the fcc and bcc packing factors."),
     "M6": ModelInfo("M6", "Troparevsky et al.", "Model 6 – Troparevsky et al. (2015)",
-                    "M.C. Troparevsky, J.R. Morris, P.R.C. Kent, A.R. Lupini, G.M. Stocks, Phys. Rev. X 5 "
-                    "(2015) 011041.",
                     "SS if −T·ΔSmix < ΔHf(i,j) < 37 meV/atom for every binary; IM if any ΔHf is below the "
                     "lower bound; MP if only the upper bound is exceeded.",
                          name="ΔH<sub>f</sub> binary-window criterion",
                          note="Every binary pair in the composition must satisfy −T·ΔS<sub>mix</sub> &lt; ΔH<sub>f</sub>(i,j) &lt; 37 meV/atom; a pair below the lower bound is what drives IM."),
     "M7": ModelInfo("M7", "Senkov & Miracle", "Model 7 – Senkov & Miracle (2016)",
-                    "O.N. Senkov, D.B. Miracle, J. Alloys Compd. 658 (2016) 603–607.",
                     "SS if ΔHmix − TΔSmix < ΔH_IM − k₂TΔSmix (k₂ = 0.6), i.e. k₁ < k₁cr(T) for ΔHmix < 0; "
                     "otherwise IM.",
                          name="ΔG solid-solution versus intermetallic criterion",
                          note="Compares solid-solution and intermetallic formation free energies at the assessment temperature. Derived for ΔH<sub>mix</sub> &lt; 0; other compositions are marked as an extrapolation."),
     "M8": ModelInfo("M8", "King et al.", "Model 8 – King et al. (2016)",
-                    "D.J.M. King, S.C. Middleburgh, A.G. McGregor, M.B. Cortie, Acta Mater. 104 (2016) 172–179.",
                      "SS if Φ ≥ 1, otherwise MP.  The δ ≤ 6.6 % screen is King §3.4’s candidate-generation filter, not part of the criterion; King §3.1 keeps NbTiV₂Zr — Φ > 1 with δ > 6.6 — in the success set.",
                           name="Φ thermodynamic stability criterion",
                           note="Φ ≥ 1 means forming a solid solution is thermodynamically preferred to an intermetallic. The δ ≤ 6.6 % screen is King §3.4's alloy-generation filter, not part of this criterion."),

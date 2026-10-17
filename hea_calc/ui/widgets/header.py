@@ -12,7 +12,7 @@ calculation never changes the header's geometry.  Cancelling a calculation is th
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRectF, Qt, Signal
+from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QFontMetrics, QPainter
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QWidget
 
@@ -42,9 +42,11 @@ class HeaderMenuItem(QPushButton):
         refresh_style(self)
 
     def _open(self):
+        # CORRECT_FILE_BUTTON: the open trigger sits on the menu surface (layer-02) with the chevron up, and
+        # the menu opens flush beneath it
         self._set_open(True)
-        self.menu_.trigger_width = max(self.width(), 200)
-        self.menu_.exec(self.mapToGlobal(QPoint(0, self.height())))
+        self.menu_.trigger_width = 0
+        self.menu_.open_below(self)
 
     def paintEvent(self, e):
         super().paintEvent(e)
@@ -86,7 +88,7 @@ class HeaderAction(QPushButton):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         r = self.rect()
         if self.active:
-            crisp.fill_rect(p, r, t("layer-selected-01"))
+            crisp.fill_rect(p, r, t("layer-02"))        # merged with the open menu (CORRECT_THEME_BUTTON)
         elif self.isDown():
             crisp.fill_rect(p, r, t("layer-active-01"))
         elif self.underMouse():
@@ -106,25 +108,31 @@ class HeaderAction(QPushButton):
         super().leaveEvent(e)
 
 
-class _Bar(QWidget):
-    """Carbon progress bar track (4 px, ``border-subtle`` track, ``border-interactive`` fill; indeterminate when
-    the maximum is 0)."""
+class ProgressLine(QWidget):
+    """The shell's 4 px state line on the bottom edge of the header (Main window.svg: y = header bottom, full
+    window width): ``border-interactive`` progress (indeterminate while the total is unknown), then
+    ``support-success`` / ``support-warning`` / ``support-error`` for a succeeded / cancelled / failed run.
+    It is an overlay on the 20 px page gap, so appearing never moves the shell or the panels."""
+
+    HEIGHT = 4
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(4)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setFixedHeight(self.HEIGHT)
         self.lo, self.hi, self.val = 0, 100, 0
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.kind: str | None = None             # None idle, "progress", "success", "warning", "error"
         from PySide6.QtCore import QTimer
         self._phase = 0.0
         self._timer = QTimer(self)
         self._timer.setInterval(30)
         self._timer.timeout.connect(self._tick)
+        self.hide()
 
-    # QProgressBar-compatible subset used by the window, exports and reports
+    # QProgressBar-compatible subset (exports, reports and tests use it)
     def setRange(self, lo: int, hi: int) -> None:
         self.lo, self.hi = lo, hi
-        if hi <= lo and self.isVisible():
+        if hi <= lo and self.kind == "progress":
             self._timer.start()
         elif hi > lo:
             self._timer.stop()
@@ -145,40 +153,57 @@ class _Bar(QWidget):
             return None
         return max(0.0, min(1.0, (self.val - self.lo) / (self.hi - self.lo)))
 
+    def set_kind(self, kind: str | None) -> None:
+        self.kind = kind
+        if kind is None:
+            self._timer.stop()
+            self.hide()
+            return
+        if kind == "progress" and self.hi <= self.lo:
+            self._timer.start()
+        elif kind != "progress":
+            self._timer.stop()
+        self.show()
+        self.raise_()
+        self.update()
+
     def _tick(self):
         self._phase = (self._phase + 0.02) % 1.0
         self.update()
 
-    def showEvent(self, e):
-        if self.hi <= self.lo:
-            self._timer.start()
-        super().showEvent(e)
-
-    def hideEvent(self, e):
-        self._timer.stop()
-        super().hideEvent(e)
-
     def paintEvent(self, _e):
         p = QPainter(self)
         r = self.rect()
-        crisp.fill_rect(p, r, t("border-subtle-01"))
-        f = self.fraction()
-        if f is None:
-            w = r.width() * 0.25
-            x = (r.width() + w) * self._phase - w
-            crisp.fill_rect(p, QRectF(max(0.0, x), 0, min(w, r.width() - max(0.0, x)), r.height()),
-                            t("border-interactive"))
-        elif f > 0:
-            crisp.fill_rect(p, QRectF(0, 0, r.width() * f, r.height()), t("border-interactive"))
+        if self.kind in ("success", "warning", "error"):
+            crisp.fill_rect(p, r, t(f"support-{self.kind}"))
+        else:
+            f = self.fraction()
+            if f is None:
+                w = r.width() * 0.25
+                x = (r.width() + w) * self._phase - w
+                crisp.fill_rect(p, QRectF(max(0.0, x), 0, min(w, r.width() - max(0.0, x)), r.height()),
+                                t("border-interactive"))
+            elif f > 0:
+                crisp.fill_rect(p, QRectF(0, 0, r.width() * f, r.height()), t("border-interactive"))
         p.end()
 
 
-class HeaderProgress(QWidget):
-    """The header's progress region: label ("Calculating…25%"), bar, detail ("(24,990/99,961) 2 minutes
-    remaining") and, for exports / reports only, a Cancel button.  ``show()`` / ``hide()`` show or hide the
-    *content*; the region keeps its place in the header."""
+_Bar = ProgressLine                                 # former name
 
-    LABEL_WIDTH = 150
+
+class HeaderProgress(QWidget):
+    """The header's status region (Main window.svg; CORRECT_CALCULATING_STATE / CORRECT_CALCULATION_COMPLETED):
+
+    * running: "Calculating…25%" (body-compact-01) + the label-01 helper "(772,860/3,091,441) 2 minutes
+      remaining"; the :class:`ProgressLine` under the header shows the fraction;
+    * finished: "Calculation succeeded" / "Calculation cancelled" / "Calculation failed", a 16 px status icon and
+      the helper sentence; the line turns green / yellow / red.  The result stays until the next job;
+    * exports and reports also show their progress here, with Cancel (they have no other cancel control).
+
+    ``show()`` / ``hide()`` show or hide the *content*; the region keeps its place in the header.
+    """
+
+    RESULT_ICONS = {"success": "notify_success", "warning": "notify_warning", "error": "notify_error"}
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -189,22 +214,27 @@ class HeaderProgress(QWidget):
         self.setMaximumWidth(587 + 16 + 216 + 96)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(16)
+        lay.setSpacing(8)
         self.label = QLabel("")
         self.label.setObjectName("HeaderProgressLabel")
         self.label.setFont(font(BODY_COMPACT_01))
         lay.addWidget(self.label, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.bar = _Bar()
-        lay.addWidget(self.bar, 1, Qt.AlignmentFlag.AlignVCenter)
+        self.icon = QLabel()
+        self.icon.setFixedSize(16, 16)
+        lay.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignVCenter)
         self.detail = QLabel("")
         self.detail.setObjectName("HeaderProgressDetail")
         self.detail.setFont(font(LABEL_01))
         lay.addWidget(self.detail, 0, Qt.AlignmentFlag.AlignVCenter)
+        lay.addSpacing(8)
         self.cancel = button("Cancel", "ghost", "sm")
         self.cancel.setToolTip("")
         lay.addWidget(self.cancel, 0, Qt.AlignmentFlag.AlignVCenter)
+        lay.addStretch(1)
+        self.bar = ProgressLine(self)                # re-parented onto the window by the main window
         self.active = False
-        self._content = (self.label, self.bar, self.detail, self.cancel)
+        self.result: str | None = None
+        self._content = (self.label, self.icon, self.detail, self.cancel)
         for w in self._content:
             w.setVisible(False)
         self.setAccessibleName("Progress")
@@ -212,15 +242,20 @@ class HeaderProgress(QWidget):
     # the window, exports and reports call show() / hide(): content only, never the region
     def show(self) -> None:                         # noqa: D401 - Qt-compatible name
         self.active = True
-        for w in (self.label, self.bar, self.detail):
+        self.result = None
+        self.icon.setVisible(False)
+        for w in (self.label, self.detail):
             w.setVisible(True)
         self.cancel.setVisible(bool(self.property("cancellable")))
+        self.bar.set_kind("progress")
         super().show()
 
     def hide(self) -> None:
         self.active = False
         for w in self._content:
             w.setVisible(False)
+        if self.result is None:
+            self.bar.set_kind(None)
 
     def isVisible(self) -> bool:                    # "is a job shown" for callers and tests
         return self.active
@@ -231,7 +266,7 @@ class HeaderProgress(QWidget):
             self.cancel.setVisible(on)
 
     def set_progress(self, verb: str, done: int, total: int, eta: float | None) -> None:
-        """Carbon inline progress: "<verb>…NN%" + bar + "(done/total) N minutes remaining"."""
+        """"<verb>…NN%" + "(done/total) N minutes remaining"; the edge line shows the fraction."""
         if total > 0:
             pct = min(100, int(100 * min(done, total) / total + 0.5))     # nearest percent (Figma: 25 %)
             if pct == 100 and done < total:
@@ -246,6 +281,26 @@ class HeaderProgress(QWidget):
             self.label.setText(f"{verb}…")
             self.bar.setRange(0, 0)
             self.detail.setText("")
+
+    def set_result(self, kind: str, title: str, detail: str) -> None:
+        """A finished run: ``kind`` success / warning (cancelled) / error (failed)."""
+        from .. import icons
+        self.active = False
+        self.result = kind
+        self.label.setText(title)
+        self.detail.setText(detail)
+        self.icon.setPixmap(icons.pixmap(self.RESULT_ICONS.get(kind, "notify_info"), size=16))
+        for w in (self.label, self.icon, self.detail):
+            w.setVisible(True)
+        self.cancel.setVisible(False)
+        self.bar.set_kind(kind)
+
+    def clear_result(self) -> None:
+        if self.result is not None and not self.active:
+            self.result = None
+            for w in self._content:
+                w.setVisible(False)
+            self.bar.set_kind(None)
 
 
 def format_eta(seconds: float) -> str:
@@ -307,15 +362,19 @@ class AppHeader(QFrame):
         self.theme_btn.update()
         m = self.theme_menu
         m.trigger_width = 0
-        m._fit_width()
         self.theme_requested.emit()
-        m.exec(self.theme_btn.mapToGlobal(QPoint(self.theme_btn.width() - m.width(), self.theme_btn.height())))
+        m.open_below(self.theme_btn, align_right=True)
 
     def _theme_closed(self):
         self.theme_btn.active = False
         self.theme_btn.update()
 
+    THEME_ICONS = {"light": "brightness_contrast", "dark": "asleep", "system": "contrast"}
+
     def set_effective_theme(self, name: str) -> None:
-        """The theme action's icon (Figma DARK_MODE_FULLSCREEN shows the sun on the dark theme): the sun on dark,
-        the moon on light.  The menu itself lists System default / Light / Dark."""
-        self.theme_btn.set_icon("light" if name == "dark" else "asleep")
+        """Kept for callers: the icon follows the *preference* (:meth:`set_theme_preference`)."""
+
+    def set_theme_preference(self, pref: str) -> None:
+        """CORRECT_THEME_BUTTON: the header icon shows the selected preference - Light (brightness-contrast),
+        Dark (asleep) or System default (contrast) - not the effective theme."""
+        self.theme_btn.set_icon(self.THEME_ICONS.get(pref, "contrast"))

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
-from PySide6.QtGui import QActionGroup, QGuiApplication, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QFileDialog, QMainWindow, QMessageBox, QScrollArea, QStackedWidget,
                                QVBoxLayout, QWidget)
 
@@ -36,7 +36,7 @@ from .widgets.element_panel import ElementPanel
 from .widgets.header import AppHeader
 from .widgets.layouts import UpperPanels
 from .widgets.menu import CarbonMenu, carbonize_popups
-from .widgets.results_table import PAGE_SIZES, ResultsTable, StickyHeader, build_export_menu, update_export_menu
+from .widgets.results_table import PAGE_SIZES, ResultsTable, StickyHeader
 from .widgets.scroll import MainScrollArea
 from .worker import ExportTask, JobRunner
 
@@ -89,6 +89,7 @@ class MainWindow(QMainWindow):
         root.addWidget(self.header)
         # calculation / export progress lives in the UI shell header (stable geometry)
         self.progress = self.header.progress
+        self.progress_line = self.progress.bar
         content_w = QWidget()
         content_w.setObjectName("AppBody")
         content_w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -229,6 +230,7 @@ class MainWindow(QMainWindow):
         # the user's choice and - with System default - the OS colour scheme
         self.apply_theme()
         self._update_status()
+        self._place_progress_line()
 
     # ------------------------------------------------------------------ scrolling / layout
     def eventFilter(self, obj, ev):
@@ -241,6 +243,19 @@ class MainWindow(QMainWindow):
         super().resizeEvent(e)
         if hasattr(self, "_sticky_timer"):
             self._sticky_timer.start()
+        self._place_progress_line()
+
+    def _place_progress_line(self) -> None:
+        """The shell state line sits on the header's bottom edge, across the window (Main window.svg)."""
+        line = getattr(self, "progress_line", None)
+        if line is None:
+            return
+        host = self.centralWidget()
+        if line.parent() is not host:
+            line.setParent(host)
+        g = self.header.geometry()
+        line.setGeometry(0, g.bottom() + 1, host.width(), line.HEIGHT)
+        line.raise_()
 
     def _place_sticky(self):
         self.sticky.place(self.scroll.viewport())
@@ -272,31 +287,34 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ menus
     def _build_menus(self):
-        # Every opening menu is the shared Carbon menu (widgets/menu.py).
-        self.file_menu = CarbonMenu(parent=self)
-        a = self.file_menu.add_action("Import compositions…", self.import_compositions, shortcut="Ctrl+O")
-        exp = self.file_menu.add_submenu("Export results")
-        build_export_menu(exp, self.export, self.copy_table, self.copy_visible_rows)
-        exp.aboutToShow.connect(lambda: update_export_menu(exp, bool(self.table.model.filters)))
+        # Every opening menu is the shared Carbon menu (widgets/menu.py).  CORRECT_FILE_BUTTON: the header File
+        # menu is lg (48 px items, the header height), no dividers, no shortcut column; Help and About live in
+        # the header.  The shortcuts stay active as window actions.
+        self.file_menu = CarbonMenu(parent=self, size="lg", block_padding=0)
+        self.file_menu.setProperty("show_shortcuts", False)
+        a = self.file_menu.add_action("Import compositions", self.import_compositions, shortcut="Ctrl+O")
+        self.file_menu.add_action("Export results", self.export_dialog)
         c = self.file_menu.add_action("Copy table", self.copy_table, shortcut="Ctrl+Shift+C")
-        self.file_menu.addSeparator()
-        self.file_menu.add_action("Calculation settings…", self.edit_settings)
-        self.file_menu.addSeparator()
-        # one Help action (the header's Help icon and F1 run the same command: Documentation Home)
-        hlp = self.file_menu.add_action("Help", lambda: self.show_help("home"), shortcut="F1")
-        self.file_menu.add_action("About HEA Calculator", self.show_about)
-        self.file_menu.addSeparator()
+        self.file_menu.add_action("Calculation settings", self.edit_settings)
         q = self.file_menu.add_action("Exit", self.close, shortcut="Ctrl+Q")
-        for act in (a, c, q, hlp):
+        for act in (a, c, q):
             self.addAction(act)
-        # Theme: only in the header's Theme action (no duplicate in File)
-        self.theme_menu = CarbonMenu(parent=self)
+        # F1 / header Help: one command, Documentation Home
+        self.help_action = QAction("Help", self)
+        self.help_action.setShortcut(QKeySequence("F1"))
+        self.help_action.triggered.connect(lambda: self.show_help("home"))
+        self.addAction(self.help_action)
+        # Theme (CORRECT_THEME_BUTTON): Light, Dark, divider, System default - check + trailing icon, lg items
+        self.theme_menu = CarbonMenu(parent=self, size="lg", block_padding=0)
         group = QActionGroup(self)
         group.setExclusive(True)
         pref = self.prefs.theme
-        for name, label in THEME_LABELS:
+        icons_ = {"light": "brightness_contrast", "dark": "asleep", "system": "contrast"}
+        for name, label in (("light", "Light"), ("dark", "Dark"), ("system", "System default")):
+            if name == "system":
+                self.theme_menu.addSeparator()
             act = self.theme_menu.add_action(label, lambda n=name: self.set_theme(n), checkable=True,
-                                             checked=pref == name)
+                                             checked=pref == name, trailing_icon=icons_[name])
             act.setData(name)
             group.addAction(act)
         self.theme_actions = group
@@ -321,6 +339,8 @@ class MainWindow(QMainWindow):
         pref = self.prefs.theme
         for act in self.theme_actions.actions():
             act.setChecked(act.data() == pref)
+        if hasattr(self, "header"):
+            self.header.set_theme_preference(pref)
 
     def apply_theme(self, *_):
         # The sheet is scoped to this window rather than to QApplication.  Qt re-polishes every
@@ -479,11 +499,15 @@ class MainWindow(QMainWindow):
         cancelled = job.state == "cancelled"
         if r.storage_error:
             self._finish_batch(cancelled=True)
+            self.progress.set_result("error", "Calculation failed",
+                                     "An error interrupted the calculation before completion.")
             self.notify("error", f"{r.storage_error} The calculation was stopped; {self._batch_added:,} "
                                  "calculated result(s) were kept.")
             return
         if job.state == "error":
             self._finish_batch(cancelled=True)
+            self.progress.set_result("error", "Calculation failed",
+                                     "An error interrupted the calculation before completion.")
             self.notify("error", job.error or "The calculation failed.")
             return
         if self._job_queue and not cancelled:
@@ -492,10 +516,16 @@ class MainWindow(QMainWindow):
         self._finish_batch(cancelled)
         if self._batch_first is not None:
             self._jump_to(self._batch_first)
-        msg = f"{self._batch_added:,} composition(s) calculated" + (" (cancelled)" if cancelled else "")
-        if self._batch_failed:
-            msg += f"; {self._batch_failed:,} could not be evaluated (open one in Analysis to see the reason)"
-        self.notify("warning" if cancelled or self._batch_failed else "success", msg + ".")
+        # CORRECT_CALCULATION_COMPLETED: the outcome is the shell header's state, not a table notification
+        n = self._batch_added
+        failed = f"; {self._batch_failed:,} could not be evaluated" if self._batch_failed else ""
+        if cancelled:
+            self.progress.set_result("warning", "Calculation cancelled",
+                                     f"{n:,} composition{'s' if n != 1 else ''} calculated before cancellation"
+                                     + failed)
+        else:
+            self.progress.set_result("success", "Calculation succeeded",
+                                     f"{n:,} composition{'s' if n != 1 else ''} calculated successfully" + failed)
 
     def _finish_batch(self, cancelled: bool):
         self._job_queue = []
@@ -646,7 +676,16 @@ class MainWindow(QMainWindow):
         n = max(len(tsv.strip().splitlines()) - 1, 0)
         self.notify("success", f"Copied {n:,} generated composition(s) (paste into Excel).", 4000)
 
-    def export(self, fmt: str, scope: str = "all"):
+    def export_dialog(self):
+        """File › Export results: one save dialog; the file type chosen there decides Excel or CSV."""
+        path, sel = QFileDialog.getSaveFileName(self, "Export results", "hea_results.xlsx",
+                                                "Excel workbook (*.xlsx);;CSV (*.csv)")
+        if not path:
+            return
+        fmt = "csv" if path.lower().endswith(".csv") or sel.startswith("CSV") else "xlsx"
+        self.export(fmt, "all", path=path)
+
+    def export(self, fmt: str, scope: str = "all", path: str | None = None):
         """Export the dataset: ``all`` results (filters ignored) or the ``filtered`` results, both in
         the table's current sort order.  Never just the visible page."""
         m = self.table.model
@@ -673,11 +712,14 @@ class MainWindow(QMainWindow):
                 return
             if choice == "csv":
                 fmt = "csv"
-        flt = "Excel workbook (*.xlsx)" if fmt == "xlsx" else "CSV (*.csv)"
-        default = f"hea_results{'_filtered' if filtered else ''}.{fmt}"
-        path, _ = QFileDialog.getSaveFileName(self, "Export results", default, flt)
-        if not path:
-            return
+        if path is None:
+            flt = "Excel workbook (*.xlsx)" if fmt == "xlsx" else "CSV (*.csv)"
+            default = f"hea_results{'_filtered' if filtered else ''}.{fmt}"
+            path, _ = QFileDialog.getSaveFileName(self, "Export results", default, flt)
+            if not path:
+                return
+        elif not path.lower().endswith("." + fmt):
+            path = str(Path(path).with_suffix("." + fmt))      # a CSV fallback chosen in the row-limit dialog
         view = m.view
         elements = self.repo.elements_of(self.repo.run_ids_in(view.lo, view.hi))
         notes = {"M6/M7 temperature": self._temperature_note(),

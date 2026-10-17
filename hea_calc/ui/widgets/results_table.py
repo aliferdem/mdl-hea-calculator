@@ -758,11 +758,11 @@ class ResultsView(QTableView):
             return
         key = self.m.keys[idx.column()]
         menu = self.row_menu(row, key)
-        menu.exec(e.globalPos())
+        menu.exec_at(e.globalPos())
         menu.deleteLater()
 
     def row_menu(self, row: ResultRecord, key: str) -> CarbonMenu:
-        menu = CarbonMenu(parent=self)
+        menu = CarbonMenu(parent=self, size="md")     # CORRECT_RIGHT_CLICK: 40 px items, grouped
         sel = self.selection.clipboard_text()
         if sel:
             menu.add_action("Copy", lambda: QGuiApplication.clipboard().setText(sel), shortcut="Ctrl+C")
@@ -774,7 +774,7 @@ class ResultsView(QTableView):
             self._copy_value(row, key)))
         menu.add_action("Copy row", lambda: QGuiApplication.clipboard().setText(table_tsv([row], self.m.keys)))
         menu.addSeparator()
-        menu.add_action("Remove result", lambda: self._remove(row), danger=True)
+        menu.add_action("Remove result", lambda: self._remove(row), danger=True, trailing_icon="delete_key")
         return menu
 
     @staticmethod
@@ -1131,25 +1131,24 @@ class TableEmptyState(QWidget):
         self.update()
 
 
-def build_export_menu(menu: CarbonMenu, export, copy_all, copy_page) -> None:
-    """Export the dataset (all results, or the filtered results), never just the visible page;
-    clipboard copies are view operations."""
-    menu.add_action("Excel workbook (.xlsx)…", lambda: export("xlsx", "all"))
-    menu.add_action("CSV (.csv)…", lambda: export("csv", "all"))
-    menu.addSeparator()
-    a = menu.add_action("Filtered results (.xlsx)…", lambda: export("xlsx", "filtered"))
-    b = menu.add_action("Filtered results (.csv)…", lambda: export("csv", "filtered"))
+def build_export_menu(menu: CarbonMenu, export, copy_all, copy_page=None) -> None:
+    """CORRECT_MENU_BUTTON: Excel workbook, CSV, divider, Copy table to clipboard (paste icon).  The dataset is
+    exported - all results, never just the visible page; while a table filter is active two more items export
+    the filtered results (they are hidden otherwise, not shown disabled)."""
+    menu.add_action("Excel workbook (.xlsx)", lambda: export("xlsx", "all"))
+    menu.add_action("CSV (.csv)", lambda: export("csv", "all"))
+    a = menu.add_action("Filtered results (.xlsx)", lambda: export("xlsx", "filtered"))
+    b = menu.add_action("Filtered results (.csv)", lambda: export("csv", "filtered"))
     a.setProperty("filtered_only", True)
     b.setProperty("filtered_only", True)
     menu.addSeparator()
-    menu.add_action("Copy table to clipboard", copy_all)
-    menu.add_action("Copy visible rows", copy_page)
+    menu.add_action("Copy table to clipboard", copy_all, trailing_icon="paste")
 
 
 def update_export_menu(menu: CarbonMenu, filtered: bool) -> None:
     for act in menu.actions():
         if act.property("filtered_only"):
-            act.setEnabled(filtered)
+            act.setVisible(filtered)
 
 
 class ResultsTable(QFrame):
@@ -1184,15 +1183,18 @@ class ResultsTable(QFrame):
         self.columns_btn = IconButton("settings", "Table columns")
         for b in (self.delete_btn, self.filter_btn, self.columns_btn):
             bl.addWidget(b)
+        # CORRECT_MENU_BUTTON: Carbon MenuButton (secondary, sm): on-colour label and chevron, chevron up while
+        # open, a sm menu right-aligned flush under the button
         self.export_btn = MenuButton("Export")
         self.export_btn.setProperty("kind", "secondary")
         self.export_btn.setProperty("btnsize", "sm")
         self.export_btn.setFixedWidth(123)
-        menu = CarbonMenu(parent=self.export_btn)
+        menu = CarbonMenu(parent=self.export_btn, size="sm")
         build_export_menu(menu, self.export_requested.emit, self.copy_requested.emit, self.copy_page_requested.emit)
+        update_export_menu(menu, False)             # no filter yet: the filtered variants start hidden
         menu.aboutToShow.connect(lambda: update_export_menu(menu, bool(self.model.filters)))
         self.export_menu = menu
-        self.export_btn.setMenu(menu)
+        self.export_btn.attach(menu)
         bl.addWidget(self.export_btn)
         lay.addWidget(bar)
         self.view = ResultsView(self.model)

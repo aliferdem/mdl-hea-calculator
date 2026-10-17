@@ -79,7 +79,7 @@ def demo(win, mode: str):
         comp.set_mode(1)
     elif mode == "expression":
         comp.set_mode(2)
-        comp.expr.edit.setPlainText("(FeCoNi)1-xAlx")
+        comp.expr.edit.setPlainText("(FeCoNi)1-xAlx\n0 <= x <= 1, step=0.25")
         comp.expr.parse()
     QApplication.processEvents()
 

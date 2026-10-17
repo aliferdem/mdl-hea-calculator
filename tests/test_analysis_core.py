@@ -105,6 +105,38 @@ def test_sql_statistics_equal_reference_implementation(world):
             assert got[k] == pytest.approx(ref[k], rel=1e-12, abs=1e-12), (key, k)
 
 
+def test_tukey_fences_convention():
+    """Brief §35: Q1 − 1.5 IQR / Q3 + 1.5 IQR; no fences (no warning) for IQR = 0 or too few values."""
+    from hea_calc.core.analysis.stats import TUKEY_MIN_N, tukey_fences, tukey_outliers
+    assert tukey_fences(2.0, 4.0, 20) == (-1.0, 7.0)
+    assert tukey_fences(3.0, 3.0, 100) is None, "IQR = 0: the method is not meaningful"
+    assert tukey_fences(2.0, 4.0, TUKEY_MIN_N - 1) is None, "too few valid values"
+    assert tukey_fences(None, 4.0, 20) is None
+    # 22 finite values: Q1 5.25, Q3 15.75, fences −10.5 … 31.5
+    xs = list(range(1, 21)) + [100.0, -50.0, None, float("nan")]
+    assert tukey_outliers(xs) == (1, 1), "values strictly outside the fences; missing values are not counted"
+    assert tukey_outliers([5.0] * 30 + [9.0]) is None
+
+
+def test_sql_outlier_count_equals_reference_implementation(world):
+    """``ScopeQuery.outliers`` counts in SQL exactly what the reference implementation counts; values are
+    counted, never removed (the statistics of the metric are unchanged)."""
+    from hea_calc.core.analysis.stats import tukey_outliers
+    scope = CollectionScope(world["c1"])
+    q = sq(world, scope)
+    frm, where, params = scope.sql()
+    for key in ("omega", "dhmix", "delta", "vec"):
+        values = [r[0] for r in world["con"].execute(f'SELECT r."{key}" FROM {frm} WHERE {where}', params)]
+        ref = tukey_outliers(values)
+        got = q.outliers(key)
+        assert got["metric"] == key and got["n_valid"] == 341
+        if ref is None:
+            assert got["fences"] is None and got["n_low"] == got["n_high"] == 0
+        else:
+            assert (got["n_low"], got["n_high"]) == ref, key
+    assert q.statistics(["omega"])["metrics"]["omega"]["n_valid"] == 341, "outliers stay in the analysis"
+
+
 def test_two_pass_exact_quartiles_equal_the_full_sort(world, monkeypatch):
     """The bin-selection path (used from QUANTILE_SELECT_MIN values) returns exactly the quartiles of one sort of
     every value - continuous descriptors through the selection, discrete ones (VEC) through the fallback."""

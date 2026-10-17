@@ -1003,7 +1003,12 @@ class CompositionContent(QStackedWidget):
         rl.addWidget(label("Not available when", "heading"))
         rl.addWidget(label(h.not_available, "body", wrap=True))
         rl.addSpacing(8)
-        rl.addWidget(label(_html.escape(MODELS[k].reference), "label", wrap=True))
+        # the publication, in the one MSE-A form the About window, Help and reports use (brief §37)
+        from ...core.references import model_citation
+        rl.addWidget(label("Reference", "heading"))
+        ref = label(_html.escape(model_citation(k)), "body", wrap=True, selectable=True)
+        ref.setObjectName("ModelReference")
+        rl.addWidget(ref)
         rl.addStretch(1)
         if cls == "S":
             lay.addWidget(left)

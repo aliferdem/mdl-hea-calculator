@@ -51,6 +51,7 @@ class AnalysisState:
     stats_group: str = "none"
     stats_all: bool = False                    # "All measures"
     stats_focus: str = ""                      # metric of the distribution (histogram / box plot); "" = none
+    stats_view: str = "histogram"              # the one Statistics visualization: "histogram" | "groups"
                                                # chosen yet - a neutral "Select a descriptor" state, never a
                                                # default descriptor presented as more important
     denominator: str = "evaluated"             # model distributions: evaluated | population

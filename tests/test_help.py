@@ -325,7 +325,7 @@ def test_help_window_is_one_native_window_with_the_documented_frame(win, app):
 
 def test_help_entry_points_route_to_their_pages(win, app):
     from hea_calc.ui import help_router
-    act = next(a for a in win.file_menu.actions() if a.text().startswith("Help"))
+    act = win.help_action                     # F1 (the header Help icon runs the same command)
     assert act.shortcut().toString() == "F1"
     act.trigger()
     pump(app)

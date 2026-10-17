@@ -428,7 +428,7 @@ class CollectionContent(QWidget):
         if i == 1:
             return base + (st.plot,)
         if i == 2:
-            return base + (st.stats_metrics, st.stats_group, st.stats_all, st.stats_focus)
+            return base + (st.stats_metrics, st.stats_group, st.stats_all, st.stats_focus, st.stats_view)
         if i == 3:
             return base + (st.denominator, st.split_status, st.dist_group)
         return base
@@ -459,8 +459,9 @@ class CollectionContent(QWidget):
         if old.coll_tab != new.coll_tab or old.scope != new.scope or old.stale != new.stale or \
                 old.data_version != new.data_version or old.scope_gone != new.scope_gone or \
                 (new.coll_tab == "plots" and old.plot != new.plot) or \
-                (new.coll_tab == "statistics" and (old.stats_metrics, old.stats_group, old.stats_all, old.stats_focus)
-                 != (new.stats_metrics, new.stats_group, new.stats_all, new.stats_focus)) or \
+                (new.coll_tab == "statistics" and
+                 (old.stats_metrics, old.stats_group, old.stats_all, old.stats_focus, old.stats_view)
+                 != (new.stats_metrics, new.stats_group, new.stats_all, new.stats_focus, new.stats_view)) or \
                 (new.coll_tab == "models" and (old.denominator, old.split_status, old.dist_group)
                  != (new.denominator, new.split_status, new.dist_group)):
             if new.coll_tab == "plots" and old.plot != new.plot and old.coll_tab == new.coll_tab and \
@@ -495,9 +496,6 @@ class CollectionContent(QWidget):
         self.c.run_query("options", lambda sq: sq.population(), scope=unrestricted)
         if i == 0:
             self.c.run_query("population", lambda sq: sq.population())
-            if self.size_class == "W":
-                self.c.run_query("family_stats", lambda sq: sq.statistics(["delta", "dhmix", "vec"], group=DIM_FAMILY),
-                                 params=("family",))
             self.c.run_query("dist", lambda sq: sq.distribution())
         elif i == 1:
             self.c.run_query("population", lambda sq: sq.population())
@@ -508,9 +506,12 @@ class CollectionContent(QWidget):
             self.c.run_query("stats", lambda sq: sq.statistics(list(metrics)), params=metrics)
             if self.size_class == "W" and st.stats_focus:
                 focus = st.stats_focus              # the user's selected metric (none -> nothing to query)
-                self.c.run_query("hist", lambda sq: sq.histogram(focus), params=(focus,))
-                g = group if group != "none" else DIM_FAMILY
-                self.c.run_query("box", lambda sq: sq.statistics([focus], group=g), params=(focus, g))
+                self.c.run_query("outliers", lambda sq: sq.outliers(focus), params=(focus,))
+                if st.stats_view == "groups":       # only the visualization that is shown is queried
+                    g = group if group != "none" else DIM_FAMILY
+                    self.c.run_query("box", lambda sq: sq.statistics([focus], group=g), params=(focus, g))
+                else:
+                    self.c.run_query("hist", lambda sq: sq.histogram(focus), params=(focus,))
             elif group != "none":
                 self.c.run_query("stats_group", lambda sq: sq.statistics(list(metrics), group=group),
                                  params=(metrics, group))
@@ -565,15 +566,13 @@ class CollectionContent(QWidget):
                 self._fill_plot_meta()
         elif slot == "plot" and i == 1:
             self._fill_plot()
-        elif slot in ("stats", "stats_group", "hist", "box") and i == 2:
+        elif slot in ("stats", "stats_group", "hist", "box", "outliers") and i == 2:
             self._fill_statistics()
         elif slot in ("dist", "dist_group"):
             if i == 3:
                 self._fill_models()
             elif i == 0:
                 self._fill_overview()
-        elif slot == "family_stats" and i == 0:
-            self._fill_overview()
 
     def _loading(self, slot: str, busy: bool) -> None:
         if slot == "plot" and self.plot is not None and self._visible_page() == 1:
@@ -783,14 +782,14 @@ class CollectionContent(QWidget):
             return None
         return self.c.data.get(slot)
 
-    # ---- workspace overview (Frame 20)
+    # ---- workspace overview (Frame 20; 1.png: no filler medians, nothing stretched down the page)
     def _build_overview_ws(self) -> QWidget:
         host = QWidget()
         row = QHBoxLayout(host)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(20)
         self.ws_regions = []
-        for width in (460, 680, None):
+        for width in (560, None):
             reg = _Region()
             if width:
                 reg.setFixedWidth(width)
@@ -811,13 +810,27 @@ class CollectionContent(QWidget):
             return
         sc = self.c.state.scope
         info = self.c.run_info(sc.run_id)
-        a, b, c = regs
+        a, b = regs
+        # what is in this collection and where it came from
         a.add(label("Population &amp; scope", "heading02"))
         self._notices(a.lay)
         a.add(KVRows(self._population_rows(pop, info), label_w=200, value_w=200, unit_w=0))
+        a.add(SectionHeading("Source"))
+        a.add(label(source_text(info, pop), "body", wrap=True))
+        specs = (info.source or {}).get("specs") if info else None
+        if specs:
+            a.add(DataTable([("Element", 100), ("Min", 90, "right"), ("Max", 90, "right"), ("Step", 90, "right"),
+                             ("Lock", None)],
+                            [[s_["element"], Cell(f"{s_['min']:g}", align="right"), Cell(f"{s_['max']:g}", align="right"),
+                              Cell(f"{s_['step']:g}", align="right"), "On (required)" if s_["required"] else "Off (optional)"]
+                             for s_ in specs], ROW_XS))
+        a.lay.addStretch(1)
+        # how it is made up: sizes, families, which models could evaluate it (counts only - no filler medians)
         b.add(label("Distributions", "heading02"))
         b.add(SectionHeading("System size", f"Denominator: {pop['n']:,}"))
         b.add(self._size_bars(pop, 420))
+        b.add(SectionHeading("Element families"))
+        b.add(self._family_table(pop, "W"))
         dist = self._current("dist")
         b.add(SectionHeading("Model coverage"))
         if dist is not None:
@@ -825,31 +838,6 @@ class CollectionContent(QWidget):
                      Cell(f"N/A {dist['models'][k]['na']:,}", color="text-secondary")] for k in MODEL_KEYS]
             b.add(DataTable([("Model", 240), ("", None), ("", 120)], rows, ROW_XS, header=False))
         b.lay.addStretch(1)
-        c.add(label("Families &amp; source", "heading02"))
-        fs = self._current("family_stats")
-        n = max(1, pop["n"])
-        rows = []
-        for k, _s, cnt in pop["families"][:200]:
-            med = lambda m: (format_value(m, fs["metrics"][m].get(k, {}).get("median"))  # noqa: E731
-                             if fs and k in fs["metrics"][m] else "…")
-            rows.append([k or "Not evaluable", Cell(f"{cnt:,}", align="right"), Cell(f"{100 * cnt / n:.2f} %",
-                                                                                     align="right"),
-                         Cell(med("delta"), align="right"), Cell(med("dhmix"), align="right"),
-                         Cell(med("vec"), align="right")])
-        c.add(SectionHeading("Results and medians by family"))
-        c.add(hscroll(DataTable([("Family", None), ("Results", None, "right"), ("Share", None, "right"),
-                                 ("δ (%)", None, "right"), ("ΔH<sub>mix</sub> (kJ mol⁻¹)", None, "right"),
-                                 ("VEC", None, "right")], rows, ROW_SM)))
-        c.add(SectionHeading("Source"))
-        c.add(label(source_text(info, pop), "body", wrap=True))
-        specs = (info.source or {}).get("specs") if info else None
-        if specs:
-            c.add(DataTable([("Element", 100), ("Min", 90, "right"), ("Max", 90, "right"), ("Step", 90, "right"),
-                             ("Lock", None)],
-                            [[s_["element"], Cell(f"{s_['min']:g}", align="right"), Cell(f"{s_['max']:g}", align="right"),
-                              Cell(f"{s_['step']:g}", align="right"), "On (required)" if s_["required"] else "Off (optional)"]
-                             for s_ in specs], ROW_XS))
-        c.lay.addStretch(1)
 
     # ================================================================== Plots
     def _build_plots(self) -> QWidget:
@@ -1002,8 +990,6 @@ class CollectionContent(QWidget):
         self.plot.active_id = self.c.state.active
         self.plot.point_clicked.connect(self._point_clicked)
         self.plot.point_activated.connect(lambda rid: self.c.set_active(rid, by="inspector"))
-        self.plot.selection_made.connect(lambda ids: self.c.apply(S.select_points, ids) if ids
-                                         else self.c.apply(S.clear_selection))
         self.skeleton = Skeleton()
         self.plot_empty = QWidget()
         QVBoxLayout(self.plot_empty).setContentsMargins(0, 0, 0, 0)
@@ -1173,7 +1159,7 @@ class CollectionContent(QWidget):
                 plotted.append((dd.symbol, format_value(mid, rec.raw(mid)), dd.unit))
         if plotted:
             lay.addWidget(label("Plotted values", "heading"))
-            lay.addWidget(KVRows(plotted, label_w=120, value_w=100, unit_w=80))
+            lay.addWidget(KVRows(plotted, label_w=96, value_w=88, unit_w=80))
         if full:
             lay.addWidget(label("Key descriptors", "heading"))
             rows = []
@@ -1185,29 +1171,24 @@ class CollectionContent(QWidget):
                 if k == "vec" and rec.raw("cstr"):
                     unit = rec.raw("cstr")
                 rows.append((dd.symbol, format_value(k, rec.raw(k)), unit))
-            lay.addWidget(KVRows(rows, label_w=120, value_w=100, unit_w=80))
+            lay.addWidget(KVRows(rows, label_w=96, value_w=88, unit_w=80))
         lay.addWidget(label("Model predictions", "heading"))
-        tags = QWidget()
-        from PySide6.QtWidgets import QGridLayout
-        tg = QGridLayout(tags)
-        tg.setContentsMargins(0, 0, 0, 0)
-        tg.setHorizontalSpacing(8)
-        tg.setVerticalSpacing(8)
         from .composition_view import _ModelCell
+        from .widgets import FlowBox
 
         class _O:
             def __init__(self, lab, status, caution):
                 self.label, self.status, self.caution, self.reason, self.na_kind = lab, status or "in_domain", \
                     caution, None, None
-        for i, k in enumerate(MODEL_KEYS):
-            cell = _ModelCell(k, _O(rec.model_label(k), rec.model_status(k), rec.model_caution(k)), 72)
-            tg.addWidget(cell, i // 4, i % 4)
-        lay.addWidget(tags)
-        acts = QVBoxLayout() if full else QHBoxLayout()
+        # tags wrap to the inspector width (2.png: a fixed 4-column grid ran past the region's right edge)
+        lay.addWidget(FlowBox([_ModelCell(k, _O(rec.model_label(k), rec.model_status(k), rec.model_caution(k)), 72)
+                               for k in MODEL_KEYS]))
+        acts = QVBoxLayout()                    # md buttons stacked: they fit the popover and the region
         acts.setSpacing(8)
-        a = button("Analyse composition", "primary", "sm")
+        # Carbon Button md (40 px), brief §29
+        a = button("Analyse composition", "primary", "md")
         a.clicked.connect(lambda: self.c.set_active(rid, by="inspector"))
-        b = button("Show in results table", "secondary", "sm")
+        b = button("Show in results table", "secondary", "md")
         b.clicked.connect(lambda: self.c.show_in_table.emit([rid]))
         acts.addWidget(a)
         acts.addWidget(b)
@@ -1218,7 +1199,7 @@ class CollectionContent(QWidget):
         content = self._inspector_content(rid, full=False)
         if content is None or self.plot is None:
             return
-        open_popover(self.plot, content, 300, prefer="right", align="center", title="Point inspector")
+        open_popover(self.plot, content, 320, prefer="right", align="center", title="Point inspector")
 
     # ---- workspace plots (Frame 21)
     def _build_plots_ws(self, info, cfg) -> QWidget:
@@ -1275,16 +1256,7 @@ class CollectionContent(QWidget):
             b = IconButton(name, tip)
             b.clicked.connect(fn)
             head.addWidget(b)
-        head.addSpacing(8)
-        self.mode_btns = {}
-        for name, tip, mode in (("box_select", "Box select", "box"), ("lasso", "Lasso select", "lasso"),
-                                ("pan", "Pan", "pan")):
-            b = IconButton(name, tip)
-            b.setCheckable(True)
-            b.clicked.connect(lambda _c=False, m=mode: self._set_mode(m))
-            head.addWidget(b)
-            self.mode_btns[mode] = b
-        head.addSpacing(8)
+        # no selection / pan modes: drag with the middle or right button pans, the wheel zooms (brief §27, §28)
         ex = IconButton("download", "Export")
         ex.clicked.connect(lambda: self._export_menu(ex))
         head.addWidget(ex)
@@ -1299,23 +1271,13 @@ class CollectionContent(QWidget):
         self._fill_inspector()
         return host
 
-    def _set_mode(self, mode: str) -> None:
-        cur = self.plot.mode if self.plot else "select"
-        new = "select" if cur == mode else mode
-        if self.plot:
-            self.plot.mode = new
-            self.plot.setCursor(Qt.CursorShape.CrossCursor if new in ("box", "lasso") else
-                                (Qt.CursorShape.OpenHandCursor if new == "pan" else Qt.CursorShape.ArrowCursor))
-        for m, b in self.mode_btns.items():
-            b.setChecked(m == new)
-
     def _export_menu(self, anchor) -> None:
         from ..widgets.menu import CarbonMenu
         menu = CarbonMenu(parent=anchor)
         menu.add_action("Plot as SVG…", lambda: self.c.export_requested.emit("plot_svg"))
         menu.add_action("Plot as PNG…", lambda: self.c.export_requested.emit("plot_png"))
         menu.add_action("Plotted data as CSV…", lambda: self.c.export_requested.emit("plot_csv"))
-        menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+        menu.open_below(anchor, align_right=True)
         menu.deleteLater()
 
     def _update_ws_plot_header(self, spec: PlotSpec, data) -> None:
@@ -1577,20 +1539,23 @@ class CollectionContent(QWidget):
         # either); it scrolls inside when the metric list is long
         self.ws_stats.setMinimumHeight(220)
         right.addWidget(self.ws_stats, 5)
+        # one visualization of the user's selected descriptor (4.png: no permanent second chart); Compare
+        # groups is an explicit choice (Carbon content switcher, sm)
         dist = QHBoxLayout()
         dist.setSpacing(8)
         dist.addWidget(self._focus_selector())
         dist.addStretch(1)
+        from .widgets import ContentSwitcher
+        self.stats_view_sw = ContentSwitcher(["Histogram", "Compare groups"], segment=136)
+        self.stats_view_sw.setAccessibleName("Visualization")
+        self.stats_view_sw.set_index(1 if st.stats_view == "groups" else 0)
+        self.stats_view_sw.changed.connect(
+            lambda i: self.c.apply(S.update, stats_view="groups" if i == 1 else "histogram"))
+        dist.addWidget(self.stats_view_sw)
         right.addLayout(dist)
-        low = QHBoxLayout()
-        low.setSpacing(20)
-        self.ws_hist = _Region()
-        self.ws_box = _Region()
-        for reg in (self.ws_hist, self.ws_box):
-            reg.setMinimumHeight(260)
-        low.addWidget(self.ws_hist, 1)
-        low.addWidget(self.ws_box, 1)
-        right.addLayout(low, 4)
+        self.ws_viz = _Region()
+        self.ws_viz.setMinimumHeight(300)
+        right.addWidget(self.ws_viz, 4)
         row.addLayout(right, 1)
         self._fill_statistics_ws()
         return host
@@ -1640,41 +1605,56 @@ class CollectionContent(QWidget):
             self.ws_stats.add(InlineLoading("Calculating statistics…"))
         self.ws_stats.lay.addStretch(1)
         focus = st.stats_focus
+        reg = self.ws_viz
+        reg.clear()
         if not focus or focus not in DESCRIPTORS:
             # no metric chosen: a neutral prompt - no descriptor is shown by default
-            for reg, what in ((self.ws_hist, "histogram"), (self.ws_box, "box plot")):
-                reg.clear()
-                reg.add(EmptyBlock("Select a descriptor",
-                                   f"Choose a metric in “Distribution of” or activate a statistics row to see its "
-                                   f"{what}.", "magnifier", centred=True), 1)
+            reg.add(EmptyBlock("Select a descriptor",
+                               "Choose a metric in “Distribution of” or activate a statistics row to see its "
+                               "distribution.", "magnifier", centred=True), 1)
             return
         dd = DESCRIPTORS[focus]
-        hist = self._current("hist")
-        self.ws_hist.clear()
-        if hist is not None and hist.get("n_valid"):
-            w = hist.get("width") or 0
-            self.ws_hist.add(label(f"{dd.symbol} ({dd.unit or '–'}) · histogram · bins {format_value(focus, w)} "
-                                   f"{dd.unit}".strip(), "heading"))
-            pw = PlotWidget()
-            from ...core.analysis.queries import descriptor_metric
-            pw.set_spec(PlotSpec("histogram", hist, x=descriptor_metric(focus),
-                                 tag=representation_text(BINNED, bins=(len(hist["counts"]),), population=hist["n_valid"])
-                                 .replace(" bins ·", " bins ·"),
-                                 caption=f"{hist['n'] - hist['n_valid']:,} omitted (no value)"))
-            self.ws_hist.add(pw, 1)
-        box = self._current("box")
-        self.ws_box.clear()
-        if box is not None:
-            g = st.stats_group if st.stats_group != "none" else DIM_FAMILY
-            self.ws_box.add(label(f"{dd.symbol} ({dd.unit or '–'}) by {dim_label(g).lower()}", "heading"))
-            from ...core.analysis.queries import descriptor_metric
-            groups = box["metrics"].get(focus, {})
-            pw = PlotWidget()
-            pw.set_spec(PlotSpec("box", {"groups": dict(list(groups.items())[:30])}, x=descriptor_metric(focus),
-                                 tag=representation_text("AGGREGATED", group=dim_label(g).lower()),
-                                 extra={"group": g},
-                                 caption="Whiskers: minimum and maximum; quartiles type 7"))
-            self.ws_box.add(pw, 1)
+        from ...core.analysis.queries import descriptor_metric
+        head = QHBoxLayout()
+        head.setSpacing(4)
+        pw = None
+        if st.stats_view == "groups":
+            box = self._current("box")
+            if box is not None:
+                g = st.stats_group if st.stats_group != "none" else DIM_FAMILY
+                head.addWidget(label(f"{dd.symbol} ({dd.unit or '–'}) by {dim_label(g).lower()}", "heading"))
+                groups = box["metrics"].get(focus, {})
+                pw = PlotWidget()
+                pw.set_spec(PlotSpec("box", {"groups": dict(list(groups.items())[:30])}, x=descriptor_metric(focus),
+                                     tag=representation_text("AGGREGATED", group=dim_label(g).lower()),
+                                     extra={"group": g},
+                                     caption="Whiskers: minimum and maximum; quartiles type 7"))
+        else:
+            hist = self._current("hist")
+            if hist is not None and hist.get("n_valid"):
+                w = hist.get("width") or 0
+                head.addWidget(label(f"{dd.symbol} ({dd.unit or '–'}) · histogram · bins {format_value(focus, w)} "
+                                     f"{dd.unit}".strip(), "heading"))
+                pw = PlotWidget()
+                pw.set_spec(PlotSpec("histogram", hist, x=descriptor_metric(focus),
+                                     tag=representation_text(BINNED, bins=(len(hist["counts"]),),
+                                                             population=hist["n_valid"]),
+                                     caption=f"{hist['n'] - hist['n_valid']:,} omitted (no value)"))
+        if pw is None:
+            reg.add(InlineLoading("Loading distribution…"))
+            return
+        head.addStretch(1)
+        self.outlier_note = None
+        out = self._current("outliers")
+        if out is not None and out.get("metric") == focus and out["fences"] is not None:
+            n_out = out["n_low"] + out["n_high"]
+            if n_out:
+                # a statistical indication, not a data-quality or model warning (brief §35, §72): neutral text
+                self.outlier_note = label(f"{n_out:,} statistical outlier{'s' if n_out != 1 else ''}", "secondary")
+                head.addWidget(self.outlier_note)
+                head.addWidget(InfoButton(OUTLIER_TIP, title="Statistical outliers"))
+        reg.lay.addLayout(head)
+        reg.add(pw, 1)
 
     # ================================================================== Models
     def _build_models(self) -> QWidget:
@@ -1891,16 +1871,7 @@ def _fill(w, color, hatch: bool = False):
     p.end()
 
 
-def hscroll(table: QWidget) -> QWidget:
-    """A table in a horizontal-only scroll strip: the table keeps its content-based minimum width (no clipped
-    column) and the strip scrolls sideways only when the region is narrower than that."""
-    from ..widgets.scroll import inner_scroll_area
-    sa = inner_scroll_area(table, horizontal=True)
-    sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-    sa.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-    sa.setFixedHeight(table.height() + 12)        # room for the 12 px hit target of the thin bar
-    sa.setMinimumWidth(120)
-    return sa
+OUTLIER_TIP = ("Values outside Q1 − 1.5 × IQR to Q3 + 1.5 × IQR are marked as statistical outliers. They are not excluded from the analysis and do not necessarily indicate erroneous data.")
 
 
 def _clear_layout(lay) -> None:
@@ -2112,7 +2083,9 @@ def build_spec(cfg, data, info, size_class: str) -> tuple[PlotSpec | None, tuple
         title_v = MD.title(cfg.value[6:]) if cfg.value.startswith("model:") else \
             (descriptor_metric(cfg.value).symbol if vid else cfg.value)
         return PlotSpec("heatmap", data, x=x, y=y, title=f"{title_v} on ({x.symbol}, {y.symbol})",
-                        tag=representation_text("GRID", cells=len(data["cells"])), extra={"value_id": vid}), None
+                        tag=representation_text("GRID", cells=len(data["cells"])),
+                        extra={"value_id": vid, "value_label": cfg.value[6:] if cfg.value.startswith("model:") else
+                               (descriptor_metric(cfg.value).plain if vid else dim_label(cfg.value))}), None
     if cfg.type == BAR_STACKED:
         return PlotSpec("bars_stacked", bars_data(data["models"], "evaluated", True, 32 if size_class != "W" else 44,
                                                    160 if size_class != "W" else 220, 140),

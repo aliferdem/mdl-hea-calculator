@@ -20,12 +20,11 @@ import time
 
 from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QTextDocument
-from PySide6.QtWidgets import (QAbstractButton, QApplication, QCheckBox, QHBoxLayout, QSizePolicy, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import QAbstractButton, QApplication, QSizePolicy, QVBoxLayout, QWidget
 
 from .. import crisp, icons
 from ..theme import BODY_COMPACT_01, FOCUS_WIDTH, HAIRLINE, LABEL_01, THEME, font, t
-from .common import button, sup_html
+from .common import sup_html
 from .menu import CarbonMenu
 from .tooltip import CARET_H, body_rect, bubble_path, place_popover, popover_size
 
@@ -145,11 +144,16 @@ class Dropdown(QAbstractButton):
     index_changed = Signal(int)
 
     def __init__(self, items=(), value=None, prefix: str = "", inline: bool = False, accessible: str = "",
-                 parent=None, width: int | None = None, placeholder: str = ""):
+                 parent=None, width: int | None = None, placeholder: str = "", open_label: str = "",
+                 row_height: int = 32, max_rows: int = 10):
         super().__init__(parent)
         self.prefix = prefix
         self.inline = inline
         self.placeholder = placeholder
+        self.open_label = open_label        # shown in the trigger while the list is open (Range basis)
+        self.row_height = row_height
+        self.max_rows = max_rows
+        self.popup = None
         self.items: list[tuple] = []
         self.value = None
         self.invalid = False
@@ -248,24 +252,31 @@ class Dropdown(QAbstractButton):
         self.update()
 
     # -------------------------------------------------------------- menu
-    def open_menu(self) -> None:
-        menu = RichMenu(parent=self)
-        menu.trigger_width = self.width()
+    def list_options(self) -> list:
+        from .listbox import Option
+        out = []
         for it in self.items:
             if it[0] == "--section--":
-                act = menu.add_action(plain_text(it[1]), enabled=False)
-                act.setProperty("section", True)
+                out.append(Option(None, plain_text(it[1]), False, "", True))
                 continue
-            enabled = it[2] if len(it) > 2 else True
-            act = menu.add_action(plain_text(it[1]), lambda v=it[0]: self.set_value(v, emit=True),
-                                  enabled=enabled, checkable=True, checked=it[0] == self.value)
-            act.setProperty("html", it[1])
-            if len(it) > 3 and it[3]:
-                act.setToolTip(it[3])
+            out.append(Option(it[0], it[1], it[2] if len(it) > 2 else True, it[3] if len(it) > 3 else ""))
+        return out
+
+    def open_menu(self) -> None:
+        """Open the shared Carbon list (scrollable, screen-clamped; see ``listbox.py``)."""
+        from .listbox import open_list
+        pop = open_list(self, self.list_options(), value=self.value, row_height=self.row_height,
+                        max_rows=self.max_rows)
+        if pop is None:
+            return
+        self.popup = pop
         self._open = True
         self.update()
-        menu.exec(self.mapToGlobal(QPoint(0, self.height())))
-        menu.deleteLater()
+        pop.selected.connect(lambda v: self.set_value(v, emit=True))
+        pop.closed.connect(self._popup_closed)
+
+    def _popup_closed(self) -> None:
+        self.popup = None
         self._open = False
         self.update()
 
@@ -312,7 +323,7 @@ class Dropdown(QAbstractButton):
         if self.prefix:
             x += paint_html(p, QRectF(x, 0, r.width() - x - 40, r.height()), self.prefix, BODY_COMPACT_01,
                             "text-secondary" if enabled else "text-disabled") + 8
-        html = self.current_html()
+        html = self.open_label if (self._open and self.open_label) else self.current_html()
         empty = self.value is None and not isinstance(self, MultiSelect)
         color = "text-disabled" if not enabled else ("text-placeholder" if empty else
                                                      ("link-primary" if getattr(self, "link", False) else "text-primary"))
@@ -328,8 +339,8 @@ class Dropdown(QAbstractButton):
         p.restore()
         if self.invalid:
             crisp.frame(p, r, FOCUS_WIDTH, t("support-error"))
-        elif self.hasFocus():
-            crisp.frame(p, r, FOCUS_WIDTH, t("focus"))
+        elif self.hasFocus() or self._open:
+            crisp.frame(p, r, FOCUS_WIDTH, t("focus"))     # Carbon: the open field keeps the focus frame
         p.end()
 
 
@@ -401,13 +412,19 @@ def open_popover(anchor: QWidget, content: QWidget, width: int = 320, prefer: st
 
 # ====================================================================== multi-select
 class MultiSelect(Dropdown):
-    """Carbon MultiSelect (sm): the list is a checkbox popover; ``changed`` carries the selected values
-    (an empty tuple means "all").  Field text: "All families (4)" / "2 selected"."""
+    """Carbon MultiSelect (sm): the shared list popup with a checkbox per option; every toggle applies at once
+    (``changed`` carries the selected values; an empty tuple means "all").  ``all_label`` adds an "All" option
+    (System size); field text: "All families (4)" / "2 selected" / ``summary(values)``."""
 
-    def __init__(self, noun: str, items=(), selected=(), parent=None, accessible: str = ""):
+    ALL = "__all__"
+
+    def __init__(self, noun: str, items=(), selected=(), parent=None, accessible: str = "", all_label: str = "",
+                 summary=None, width: int | None = None):
         self.noun = noun
+        self.all_label = all_label
+        self.summary = summary
         self.selected: tuple = tuple(selected)
-        super().__init__([], None, accessible=accessible or noun, parent=parent)
+        super().__init__([], None, accessible=accessible or noun, parent=parent, width=width)
         self.set_options(items, selected)
 
     def set_options(self, items, selected=()) -> None:
@@ -417,6 +434,8 @@ class MultiSelect(Dropdown):
         self.update()
 
     def current_html(self) -> str:
+        if self.summary is not None:
+            return self.summary(self.selected)
         if not self.selected:
             return f"All {self.noun} ({len(self.options)})"
         if len(self.selected) == 1:
@@ -425,45 +444,42 @@ class MultiSelect(Dropdown):
                     return h
         return f"{len(self.selected)} selected"
 
+    def list_options(self) -> list:
+        from .listbox import Option
+        out = [Option(self.ALL, self.all_label)] if self.all_label else []
+        return out + [Option(v, h) for v, h in self.options]
+
+    def _checked_values(self) -> list:
+        if not self.selected:
+            return ([self.ALL] if self.all_label else []) + ([] if self.all_label else [v for v, _h in self.options])
+        return list(self.selected)
+
     def open_menu(self) -> None:
-        content = QWidget()
-        lay = QVBoxLayout(content)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        boxes = []
-        for v, h in self.options:
-            cb = QCheckBox(plain_text(h))
-            cb.setChecked(v in self.selected)
-            cb.setFixedHeight(32)
-            cb.setProperty("value", v)
-            lay.addWidget(cb)
-            boxes.append(cb)
-        foot = QHBoxLayout()
-        clear = button("Clear", "ghost", "sm")
-        foot.addWidget(clear)
-        foot.addStretch(1)
-        done = button("Apply", "primary", "sm")
-        foot.addWidget(done)
-        lay.addSpacing(8)
-        lay.addLayout(foot)
-        pop = open_popover(self, content, max(self.width(), 280), title=self.noun)
+        from .listbox import open_list
+        pop = open_list(self, self.list_options(), values=self._checked_values(), multi=True,
+                        row_height=self.row_height, max_rows=self.max_rows)
         if pop is None:
             return
+        self.popup = pop
+        self._open = True
+        self.update()
+        pop.toggled.connect(lambda vals, p=pop: self._toggled(vals, p))
+        pop.closed.connect(self._popup_closed)
 
-        def apply():
-            sel = tuple(cb.property("value") for cb in boxes if cb.isChecked())
-            if len(sel) == len(boxes):
+    def _toggled(self, vals, pop) -> None:
+        values = [v for v, _h in self.options]
+        if self.all_label:
+            had_all = not self.selected
+            if self.ALL in vals and not had_all:
+                sel = ()                                         # "All" chosen: every size
+            else:
+                sel = tuple(v for v in values if v in vals and v != self.ALL)
+        else:
+            sel = tuple(v for v in values if v in vals)
+            if len(sel) == len(values):
                 sel = ()
-            self.selected = sel
-            self.update()
-            pop.close()
-            self.changed.emit(sel)
-
-        def clear_all():
-            for cb in boxes:
-                cb.setChecked(False)
-
-        clear.clicked.connect(clear_all)
-        done.clicked.connect(apply)
-
-
+        self.selected = sel
+        pop.values = self._checked_values()
+        pop.body.update()
+        self.update()
+        self.changed.emit(sel)

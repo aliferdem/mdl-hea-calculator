@@ -442,13 +442,15 @@ def test_carbon_menu_paints_from_theme_tokens(win, app, theme):
     app.processEvents()
     try:
         assert menu.width() >= 160
+        from hea_calc.ui.widgets.menu import SHADOW
         img = menu.grab().toImage()
-        assert img.pixelColor(4, 2).name() == t("layer-01")
+        # the surface is layer-02 (one step above the layer-01 panels it opens over), inside the shadow margin
+        assert img.pixelColor(SHADOW + 4, SHADOW + 2).name() == t("layer-02")
         menu.setActiveAction(danger)
         app.processEvents()
         r = menu.actionGeometry(danger)
         img = menu.grab().toImage()
-        assert img.pixelColor(r.left() + 4, r.center().y()).name() == t("button-danger-primary")
+        assert img.pixelColor(SHADOW + 4, r.center().y()).name() == t("support-error")
         assert THEME.name == theme
     finally:
         menu.close()
@@ -459,8 +461,9 @@ def test_every_application_menu_is_a_carbon_menu(win):
     from hea_calc.ui.widgets.menu import CarbonMenu
     assert isinstance(win.file_menu, CarbonMenu) and isinstance(win.theme_menu, CarbonMenu)
     assert isinstance(win.table.export_btn.menu(), CarbonMenu)
-    subs = [a.menu() for a in win.file_menu.actions() if a.menu() is not None]
-    assert subs and all(isinstance(s, CarbonMenu) for s in subs)
+    # CORRECT_FILE_BUTTON: File is a flat lg menu (no submenus, no shortcut column)
+    assert not [a for a in win.file_menu.actions() if a.menu() is not None]
+    assert win.file_menu.item_height == 48 and win.theme_menu.item_height == 48
 
 
 _ = (array, QSize)
@@ -487,7 +490,8 @@ def test_carbon_menu_keyboard_navigation(win, app):
     assert menu.activeAction() is c, "disabled items are skipped"
     img = menu.grab().toImage()
     r = menu.actionGeometry(c)
-    assert img.pixelColor(1, r.center().y()).name() == t("focus"), "keyboard focus ring on the item"
+    from hea_calc.ui.widgets.menu import SHADOW
+    assert img.pixelColor(SHADOW + 1, r.center().y()).name() == t("focus"), "keyboard focus ring on the item"
     key(Qt.Key.Key_Return)
     assert hit == ["third"] and not menu.isVisible()
     menu.popup(QPoint(200, 200))

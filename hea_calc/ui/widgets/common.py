@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QFrame, QHBoxLayout,
                                QLabel, QPushButton, QSizePolicy, QStyleOptionButton, QVBoxLayout,
                                QWidget)
 
-from .. import icons
+from .. import crisp, icons
 from .tooltip import CarbonToolTip, InfoButton, Toggletip, install_tooltips  # noqa: F401 (re-exported)
 from ..theme import (BODY_COMPACT_01, CONTROL_HEIGHT, LABEL_01, PANEL_PADDING_X, TAG_LONG_NAMES,
                      THEME, font, t)
@@ -218,6 +218,27 @@ class MenuButton(QPushButton):
         super().initStyleOption(option)
         option.features &= ~QStyleOptionButton.ButtonFeature.HasMenu
 
+    def attach(self, menu) -> None:
+        """Carbon MenuButton: the click opens ``menu`` right-aligned and flush under the button; the chevron
+        points up while it is open (CORRECT_MENU_BUTTON)."""
+        self.menu_ = menu
+        self.open = False
+        self.clicked.connect(self._open_menu)
+        menu.aboutToHide.connect(self._closed)
+
+    def menu(self):                                # the attached Carbon menu (not QPushButton.setMenu)
+        return getattr(self, "menu_", None) or super().menu()
+
+    def _open_menu(self) -> None:
+        self.open = True
+        self.update()
+        self.menu_.trigger_width = self.width()
+        self.menu_.open_below(self, align_right=True)
+
+    def _closed(self) -> None:
+        self.open = False
+        self.update()
+
     def paintEvent(self, e):
         super().paintEvent(e)
         if not self.isEnabled():
@@ -226,8 +247,15 @@ class MenuButton(QPushButton):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         size = self.CHEVRON
         x = self.width() - self.INDICATOR_PAD - size
-        icons.paint(p, "chevron_down", QRectF(x, (self.height() - size) / 2, size, size),
-                    "icon-primary" if not self.isDown() else "icon-primary")
+        r = QRectF(x, (self.height() - size) / 2, size, size)
+        if getattr(self, "open", False):
+            p.translate(r.center())
+            p.rotate(180)
+            p.translate(-r.center())
+        # icons on a coloured (secondary / primary) button surface use icon-on-color
+        kind = self.property("kind")
+        token = "icon-on-color" if kind in ("primary", "secondary", "danger") else "icon-primary"
+        icons.paint(p, "chevron_down", r, token)
         p.end()
 
 
@@ -573,46 +601,85 @@ class TagLabel(QWidget):
 
 
 class InlineNotification(QFrame):
-    """Carbon inline notification (low-contrast) with optional close button."""
+    """Carbon inline notification, low contrast - the one notification component of the application
+    (CORRECT_NOTIFICATION; Carbon MCP components/notification "Specifications - Low contrast / Inline").
+
+    Painted: ``notification-<kind>-bg`` surface, a 1 px ``$support-<kind>`` border at 40 % opacity, the 3 px
+    ``$support-<kind>`` left accent and the 20 px filled status icon 16 px in; title (heading-compact-01) above the
+    message (body-compact-01), both ``$text-primary``, 12 px block padding (min height 48).  Optional ghost
+    action (actionable notification) and the 48 px close button.
+    """
 
     closed = Signal()
+    action = Signal()
+    ICONS = {"error": "notify_error", "warning": "notify_warning", "success": "notify_success",
+             "info": "notify_info"}
+    ICON_SIZE = 20
+    TEXT_X = 48
 
-    ICONS = {"error": "status_none", "warning": "status_warn", "success": "status_ok", "info": "information"}
-
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, closable: bool = True):
         super().__init__(parent)
         self.setObjectName("InlineNotification")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.kind = "info"
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(13, 0, 0, 0)
-        lay.setSpacing(12)
-        self.icon = QLabel()
-        self.icon.setFixedSize(20, 20)
+        lay.setContentsMargins(self.TEXT_X, 12, 0 if closable else 16, 12)
+        lay.setSpacing(16)
+        texts = QVBoxLayout()
+        texts.setContentsMargins(0, 0, 0, 0)
+        texts.setSpacing(0)
         self.title = QLabel()
-        self.title.setStyleSheet("font-weight: 600;")
+        self.title.setObjectName("NotificationTitle")
+        self.title.setTextFormat(Qt.TextFormat.RichText)
+        self.title.setWordWrap(True)
         self.body = QLabel()
+        self.body.setObjectName("NotificationBody")
+        self.body.setTextFormat(Qt.TextFormat.RichText)
         self.body.setWordWrap(True)
         self.body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        texts.addWidget(self.title)
+        texts.addWidget(self.body)
+        lay.addLayout(texts, 1)
+        self.button = button("", "ghost", "sm")
+        self.button.clicked.connect(self.action.emit)
+        self.button.hide()
+        lay.addWidget(self.button, 0, Qt.AlignmentFlag.AlignVCenter)
         self.close_btn = IconButton("close", "Close notification")
+        self.close_btn.setFixedSize(48, 48)
         self.close_btn.clicked.connect(self.dismiss)
-        lay.addWidget(self.icon)
-        lay.addWidget(self.title)
-        lay.addWidget(self.body, 1)
-        lay.addWidget(self.close_btn)
+        self.close_btn.setVisible(closable)
+        lay.addWidget(self.close_btn, 0, Qt.AlignmentFlag.AlignTop)
+        self.closable = closable
         self.setMinimumHeight(48)
         self.hide()
 
-    def show_message(self, kind: str, title: str, body: str = ""):
-        self.setProperty("kind", kind)
-        refresh_style(self)
-        self.icon.setPixmap(icons.pixmap(self.ICONS.get(kind, "information"), "icon-primary", 20))
-        self.title.setText(title)
-        self.body.setText(body)
+    def show_message(self, kind: str, title: str, body: str = "", action: str = ""):
+        self.kind = kind if kind in self.ICONS else "info"
+        self.setProperty("kind", self.kind)
+        self.title.setText(sup_html(title))
+        self.body.setText(sup_html(body))
+        self.body.setVisible(bool(body))
+        self.title.setVisible(bool(title))
+        self.button.setText(action)
+        self.button.setVisible(bool(action))
         self.show()
+        self.update()
 
     def dismiss(self):
         self.hide()
         self.closed.emit()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = self.rect()
+        support = QColor(t(f"support-{self.kind}"))
+        crisp.fill_rect(p, r, t(f"notification-{self.kind}-bg"))
+        edge = QColor(support)
+        edge.setAlphaF(0.4)
+        crisp.frame(p, r, 1, edge)
+        crisp.fill_rect(p, QRect(0, 0, 3, r.height()), support)
+        icons.paint(p, self.ICONS[self.kind], QRectF(16, 14, self.ICON_SIZE, self.ICON_SIZE))
+        p.end()
 
 
 def key_value_label(key_html: str, value_html: str) -> tuple[QLabel, QLabel]:

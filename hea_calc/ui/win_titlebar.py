@@ -61,9 +61,9 @@ def caption_attributes(theme: str, tokens: dict, build: int) -> list[tuple[int, 
     elif build >= 17763:
         out.append((DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, dark))
     if build >= 22000:
-        out.append((DWMWA_CAPTION_COLOR, colorref(tokens["background"])))
+        out.append((DWMWA_CAPTION_COLOR, colorref(tokens.get("shell", tokens["background"]))))
         out.append((DWMWA_TEXT_COLOR, colorref(tokens["text-primary"])))
-        out.append((DWMWA_BORDER_COLOR, colorref(tokens["background"])))
+        out.append((DWMWA_BORDER_COLOR, colorref(tokens.get("shell", tokens["background"]))))
     return out
 
 

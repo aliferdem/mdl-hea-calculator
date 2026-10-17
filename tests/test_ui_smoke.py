@@ -78,8 +78,6 @@ def settle_counts(win, app):
         wait_task(comp.sweep._counter, app)
     elif comp.mode == "expression":
         e = comp.expr
-        e._parse_timer.stop()
-        e._count_timer.stop()
         e.parse()
         wait_task(e._counter, app)
     app.processEvents()
@@ -232,13 +230,12 @@ def test_expression_mode(win, app):
     win.composition.set_mode(2)
     e = win.composition.expr
     assert not win.composition.calc_btn.isEnabled()
-    e.edit.setPlainText("(FeCoNi)1-xAlx")
+    # inline syntax: the range is a line of the same block - no Min / Max / Step fields
+    e.edit.setPlainText("(FeCoNi)1-xAlx\n0 <= x <= 0.5, step=0.1")
+    assert not win.composition.calc_btn.isEnabled(), "draft: Calculate waits for Parse"
     assert e.parse()
+    assert not hasattr(e, "var_rows")
     assert set(win.elements.table.selected()) == {"Fe", "Co", "Ni", "Al"}
-    row = e.var_rows["x"]
-    row.min.setText("0")
-    row.max.setText("0.5")
-    row.step.setText("0.1")
     settle_counts(win, app)
     assert win.composition.calc_btn.isEnabled()
     win.composition.calc_btn.click()
@@ -256,11 +253,8 @@ def test_expression_mode(win, app):
 def test_expression_blocks_in_ui(win, app):
     win.composition.set_mode(2)
     e = win.composition.expr
-    e.edit.setPlainText("CoCrFeNi\n\nAl{x}CoCrFeNi")
+    e.edit.setPlainText("CoCrFeNi\n\nAl{x}CoCrFeNi\n0.5 <= x <= 1, step=0.5")
     assert e.parse()
-    e.var_rows["x"].min.setText("0.5")
-    e.var_rows["x"].max.setText("1")
-    e.var_rows["x"].step.setText("0.5")
     settle_counts(win, app)
     win.composition.calc_btn.click()
     wait_worker(win, app)
@@ -557,7 +551,7 @@ def test_icon_only_buttons_centre_their_icon(win, app):
 
     buttons = [win.table.delete_btn, win.table.filter_btn, win.table.columns_btn,
                win.table.pagination.prev_btn, win.table.pagination.next_btn,
-               win.composition.expr.preview_btn]
+               win.composition.expr.edit.parse_btn]
     buttons += win.findChildren(IconButton)
     assert len(buttons) >= 8, "the audit must cover every icon-only button"
     for b in buttons:
@@ -648,7 +642,7 @@ def test_results_toolbar_has_no_copy_button(win):
     assert not any("copy" in t.lower() for t in tips), tips
     menu = tb.export_btn.menu()
     assert menu is not None
-    labels = [a.text() for a in menu.actions() if a.text()]
+    labels = [a.text() for a in menu.actions() if a.text() and a.isVisible()]
     assert "Copy table to clipboard" in labels, labels
     # and the File menu still offers it
     file_actions = [a.text() for a in win.file_menu.actions()]

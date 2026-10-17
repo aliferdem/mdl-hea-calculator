@@ -114,7 +114,9 @@ class AnalysisWorkspace(QWidget):
         for content in (self.composition, self.composition_details):
             content.batch_mass = controller.batch_mass
             controller.batch_mass_changed.connect(content.set_batch_mass)
-        self.model_list = DataTable([("Model", None)], [], 48, activatable=True)
+        # Model details selection list (6.png): compact 40 px rows, the selected model filled; no chevron - choosing
+        # a model shows its details beside the list, it does not navigate
+        self.model_list = DataTable([("Model", None)], [], 40, activatable=True, header=False, chevron=False)
         self._build_comp_pages()
         self.collection = CollectionContent(controller, "W")
         self.body.addWidget(self.comp_body)
@@ -247,7 +249,7 @@ class AnalysisWorkspace(QWidget):
 
     def open_overflow(self):
         menu = overflow_menu(self, self.c)
-        menu.exec(self.overflow_btn.mapToGlobal(self.overflow_btn.rect().bottomLeft()))
+        menu.open_below(self.overflow_btn, align_right=True)
         menu.deleteLater()
 
     def focus_title(self):

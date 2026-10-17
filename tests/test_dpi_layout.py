@@ -392,7 +392,7 @@ def test_scrollbars_are_four_pixels_visible(app):
         img = render(bar, dpr, (1, 0))
         y = math.floor(20 * dpr)
         row = [img.pixelColor(x, y).name() for x in range(img.width())]
-        assert row.count(QColor(t("border-strong-01")).name()) == math.floor(4 * dpr), dpr
+        assert row.count(QColor(t("scrollbar-thumb")).name()) == math.floor(4 * dpr), dpr
 
 
 def test_main_scrollbar_is_an_overlay_in_the_right_margin(app):
@@ -558,11 +558,11 @@ def test_composition_panel_states_fit_at_150_percent(app):
         assert comp.title.width() >= comp.title.sizeHint().width(), "panel title clipped"
         # expression: the wrapped helper sits below the field, not over it
         comp.set_mode(2)
-        comp.expr.edit.setPlainText("(FeCoNi)1-xAlx")
+        comp.expr.edit.setPlainText("(FeCoNi)1-xAlx\n0 <= x <= 1, step=0.1")
         comp.expr.parse()
         QApplication.processEvents()
         e = comp.expr
-        assert e.helper.y() >= e.edit.y() + e.edit.height(), (e.helper.geometry(), e.edit.geometry())
+        assert e.feedback.y() >= e.edit.y() + e.edit.height(), (e.feedback.geometry(), e.edit.geometry())
         assert e.minimumSizeHint().height() <= e.height()
     finally:
         w.close()

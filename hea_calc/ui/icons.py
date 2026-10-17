@@ -52,10 +52,13 @@ _INLINE = {
     "chart_scatter": '<svg viewBox="0 0 32 32" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M30,30H4a2,2,0,0,1-2-2V2H4V28H30Z"/><circle cx="10" cy="22" r="2"/><circle cx="14" cy="15" r="2"/><circle cx="22" cy="15" r="2"/><circle cx="26" cy="6" r="2"/><circle cx="14" cy="8" r="2"/></svg>',
     "chart_histogram": '<svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M2,14V2H1v13h14v-1H2z M4,8h2v5H4V8z M7,4h2v9H7V4z M10,6h2v7h-2V6z"/></svg>',
     "side_panel_close": '<svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M14,2H2C1.4,2,1,2.4,1,3v10c0,0.6,0.4,1,1,1h12c0.6,0,1-0.4,1-1V3C15,2.4,14.6,2,14,2z M2,3h3v10H2V3z M14,13H6V3h8V13z"/></svg>',
-    "box_select": '<svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M2,2h3v1H3v2H2V2z M11,2h3v3h-1V3h-2V2z M2,11h1v2h2v1H2V11z M13,11h1v3h-3v-1h2V11z M6,2h4v1H6V2z M6,13h4v1H6V13z M2,6h1v4H2V6z M13,6h1v4h-1V6z"/></svg>',
-    "lasso": '<svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M8,2C4.1,2,1,3.8,1,6c0,1.6,1.6,3,4,3.6V11c0,0.6,0.4,1,1,1s1-0.4,1-1v-1.1c0.3,0,0.7,0.1,1,0.1c3.9,0,7-1.8,7-4S11.9,2,8,2z M8,9C4.7,9,2,7.7,2,6s2.7-3,6-3s6,1.3,6,3S11.3,9,8,9z"/></svg>',
-    "pan": '<svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><polygon points="8,1 10.5,3.5 9.8,4.2 8.5,2.9 8.5,7.5 13.1,7.5 11.8,6.2 12.5,5.5 15,8 12.5,10.5 11.8,9.8 13.1,8.5 8.5,8.5 8.5,13.1 9.8,11.8 10.5,12.5 8,15 5.5,12.5 6.2,11.8 7.5,13.1 7.5,8.5 2.9,8.5 4.2,9.8 3.5,10.5 1,8 3.5,5.5 4.2,6.2 2.9,7.5 7.5,7.5 7.5,2.9 6.2,4.2 5.5,3.5"/></svg>',
     # Carbon "help", "light", "asleep" (32, @carbon/icons v11.117.0): UI shell header actions
+    "brightness_contrast": '<svg viewBox="0 0 32 32" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><rect x="15" y="2" width="2" height="3"/><rect x="27" y="15" width="3" height="2"/><rect x="15" y="27" width="2" height="3"/><rect x="2" y="15" width="3" height="2"/><rect x="6.22" y="5.73" width="2" height="3" transform="translate(-3 7.23) rotate(-45)"/><rect x="23.27" y="6.23" width="3" height="2" transform="translate(2.14 19.63) rotate(-45)"/><rect x="23.77" y="23.27" width="2" height="3" transform="translate(-10.26 24.77) rotate(-45)"/><polygon points="5.47 25.13 7.59 23 9 24.42 6.88 26.54 5.47 25.13"/><path d="M16,8a8,8,0,1,0,8,8A8,8,0,0,0,16,8Zm0,14a6,6,0,0,1,0-12Z"/></svg>',
+    "contrast": '<svg viewBox="0 0 32 32" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M29.37,11.84a13.6,13.6,0,0,0-1.06-2.51A14.17,14.17,0,0,0,25.9,6.1a14,14,0,1,0,0,19.8,14.17,14.17,0,0,0,2.41-3.23,13.6,13.6,0,0,0,1.06-2.51,14,14,0,0,0,0-8.32ZM4,16A12,12,0,0,1,16,4V28A12,12,0,0,1,4,16Z"/></svg>',
+    "paste": '<svg viewBox="0 0 32 32" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M26,20H17.83l2.58-2.59L19,16l-5,5,5,5,1.41-1.41L17.83,22H26v8h2V22A2,2,0,0,0,26,20Z"/><path d="M23.71,9.29l-7-7A1,1,0,0,0,16,2H6A2,2,0,0,0,4,4V28a2,2,0,0,0,2,2h8V28H6V4h8v6a2,2,0,0,0,2,2h6v2h2V10A1,1,0,0,0,23.71,9.29ZM16,4.41,21.59,10H16Z"/></svg>',
+    # Carbon "search--locate" (32): the Parse expression button (COMPOSITION_EXPRESSION_* references)
+    "search_locate": '<svg viewBox="0 0 32 32" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M30,28.5859l-4.6885-4.6884a8.028,8.028,0,1,0-1.414,1.414L28.5859,30ZM19,25a6,6,0,1,1,6-6A6.0066,6.0066,0,0,1,19,25Z"/><rect x="2" y="12" width="8" height="2"/><rect x="2" y="2" width="16" height="2"/><rect x="2" y="7" width="16" height="2"/></svg>',
+    "delete_key": '<svg viewBox="0 0 32 32" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="m29,26H12c-.2651,0-.5195-.1053-.707-.2928L2.293,16.7072c-.3906-.3906-.3906-1.0237,0-1.4143L11.293,6.2928c.1875-.1875.4419-.2928.707-.2928h17c.5522,0,1,.4478,1,1v18c0,.5522-.4478,1-1,1Zm-16.5857-2h15.5857V8h-15.5857l-8,8,8,8Z"/> <polygon points="20.4141 16 25 11.4141 23.5859 10 19 14.5859 14.4143 10 13 11.4141 17.5859 16 13 20.5859 14.4143 22 19 17.4141 23.5859 22 25 20.5859 20.4141 16"/></svg>',
     "help": '<svg viewBox="0 0 32 32" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M16,2A14,14,0,1,0,30,16,14,14,0,0,0,16,2Zm0,26A12,12,0,1,1,28,16,12,12,0,0,1,16,28Z"/><circle cx="16" cy="23.5" r="1.5"/><path d="M17,8H15.5A4.49,4.49,0,0,0,11,12.5V13h2v-.5A2.5,2.5,0,0,1,15.5,10H17a2.5,2.5,0,0,1,0,5H15v4.5h2V17a4.5,4.5,0,0,0,0-9Z"/></svg>',
     "light": '<svg viewBox="0 0 32 32" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><rect x="15" y="2" width="2" height="5"/><rect x="21.6675" y="6.8536" width="4.958" height="1.9998" transform="translate(1.5191 19.3744) rotate(-45)"/><rect x="25" y="15" width="5" height="2"/><rect x="23.1466" y="21.6675" width="1.9998" height="4.958" transform="translate(-10.0018 24.1465) rotate(-45)"/><rect x="15" y="25" width="2" height="5"/><rect x="5.3745" y="23.1466" width="4.958" height="1.9998" transform="translate(-14.7739 12.6256) rotate(-45)"/><rect x="2" y="15" width="5" height="2"/><rect x="6.8536" y="5.3745" width="1.9998" height="4.958" transform="translate(-3.253 7.8535) rotate(-45)"/><path d="M16,12a4,4,0,1,1-4,4,4.0045,4.0045,0,0,1,4-4m0-2a6,6,0,1,0,6,6,6,6,0,0,0-6-6Z"/></svg>',
     "asleep": '<svg viewBox="0 0 32 32" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M13.5025,5.4136A15.0755,15.0755,0,0,0,25.096,23.6082a11.1134,11.1134,0,0,1-7.9749,3.3893c-.1385,0-.2782.0051-.4178,0A11.0944,11.0944,0,0,1,13.5025,5.4136M14.98,3a1.0024,1.0024,0,0,0-.1746.0156A13.0959,13.0959,0,0,0,16.63,28.9973c.1641.006.3282,0,.4909,0a13.0724,13.0724,0,0,0,10.702-5.5556,1.0094,1.0094,0,0,0-.7833-1.5644A13.08,13.08,0,0,1,15.8892,4.38,1.0149,1.0149,0,0,0,14.98,3Z"/></svg>',
@@ -82,6 +85,8 @@ STATUS_ROLES = {
     "notify_info": {"primary": "support-info", "inner": "text-on-color"},
     "notify_error": {"primary": "support-error", "inner": "text-on-color"},
     "notify_success": {"primary": "support-success", "inner": "text-on-color"},
+    # Carbon text-input invalid icon: warning--filled in $support-error
+    "field_invalid": {"primary": "support-error", "inner": "text-on-color"},
 }
 # The same icons on an inverse surface (tooltip / toggletip): Carbon's $support-*-inverse / $icon-inverse
 # tokens, resolved in the *current* theme - a light application has a dark popup and vice versa.  Never an
@@ -96,11 +101,14 @@ STATUS_ROLES_INVERSE = {
     "notify_info": {"primary": "support-info-inverse", "inner": "text-on-color"},
     "notify_error": {"primary": "support-error-inverse", "inner": "text-on-color"},
     "notify_success": {"primary": "support-success-inverse", "inner": "text-on-color"},
+    "field_invalid": {"primary": "support-error-inverse", "inner": "text-on-color"},
 }
 
 
 @lru_cache(maxsize=None)
 def _source(name: str) -> str:
+    if name == "field_invalid":
+        return _INLINE["notify_warning"]
     if name in _INLINE:
         return _INLINE[name]
     path = ICON_DIR / f"{name}.svg"

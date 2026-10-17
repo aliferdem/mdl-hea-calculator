@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPoint, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QStackedWidget, QWidget
 
@@ -202,11 +202,9 @@ class SplitButton(QWidget):
                 continue
             menu.add_action(text, slot, enabled=enabled, icon=icon)
         menu.trigger_width = self.width()
-        menu._fit_width()
         self._open = True
         self.chevron.update()
-        pos = self.mapToGlobal(QPoint(self.width() - menu.width(), self.height()))
-        menu.exec(pos)
+        menu.open_below(self, align_right=True)
         menu.deleteLater()
         self._open = False
         self.chevron.update()

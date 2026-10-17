@@ -7,9 +7,11 @@ hit-tested through a uniform screen grid.  Missing values never reach the widget
 and counts them).  Every plot shows its representation tag; the same painter renders exports (SVG / PNG)
 and report images, so what is exported is what is shown.
 
-Interaction (plotting spec section 5): hover Tooltip; click selects (visual, inspector); double-click
-asks for "Analyse composition"; box / lasso selection; wheel zoom (Ctrl+wheel when ``ctrl_zoom``); pan
-mode; Reset axes; ←/→ move between points in data order, Enter inspects, Esc clears the selection.
+Interaction (plotting spec section 5): hover shows the Carbon chart tooltip (``ChartTooltip``: the point's
+name, its values on both axes and its colour group); click selects (visual, inspector); double-click asks for
+"Analyse composition"; wheel zoom (Ctrl+wheel when ``ctrl_zoom``); middle- or right-button drag pans (no pan
+mode, no box / lasso selection - brief 2026-10-16 §27, §28); Reset axes; ←/→ move between points in data
+order, Enter inspects, Esc clears the selection.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from ...core.analysis import models as MD
 from ...core.analysis.metrics import format_value
-from ...core.analysis.queries import dim_value_text
+from ...core.analysis.queries import dim_label as dim_label_text, dim_value_text
 from ...core.engine import MODEL_KEYS, NA
 from ...core.results import format_number
 from .. import crisp
@@ -45,16 +47,33 @@ STATUS_COLORS = {"In domain": "#8d8d8d", "Extrapolated": "#c6c6c6", "Flagged dat
 MAX_CATEGORIES = 10           # > 10 families: top 9 + "Other families"
 
 # Published thresholds drawn as reference lines when the coloured model uses that metric (display only;
-# each is the number printed by the model's publication, as in ``models.threshold_text``).
+# each is the number printed by the model's publication).  Each label states the side the model accepts and
+# whether the boundary is inclusive, exactly as ``models.threshold_text`` / the engine rule (brief §26):
+# "SS: δ ≤ 6.6 %" reads "solid solution where δ ≤ 6.6 %".
 REFERENCE_LINES = {
-    "M1": {"omega": [(1.1, "Ω = 1.1")], "delta_cn12": [(6.6, "δCN12 = 6.6 %")]},
-    "M2": {"delta": [(6.6, "δ = 6.6 %")], "dhmix": [(-11.6, "ΔHmix = −11.6"), (3.2, "ΔHmix = 3.2")]},
-    "M3": {"gamma": [(1.175, "γ = 1.175")]},
-    "M4": {"lambda": [(0.96, "Λ = 0.96"), (0.24, "Λ = 0.24")]},
-    "M5": {"phi_ye": [(20.0, "φ = 20")]},
-    "M8": {"phi_king": [(1.0, "Φ = 1")]},
+    "M1": {"omega": [(1.1, "SS: Ω ≥ 1.1")], "delta_cn12": [(6.6, "SS: δCN12 ≤ 6.6 %")]},
+    "M2": {"delta": [(6.6, "SS: δ ≤ 6.6 %")], "dhmix": [(-11.6, "SS: ΔHmix ≥ −11.6"), (3.2, "SS: ΔHmix ≤ 3.2")]},
+    "M3": {"gamma": [(1.175, "SS: γ < 1.175")]},
+    "M4": {"lambda": [(0.96, "SS: Λ > 0.96"), (0.24, "IM: Λ < 0.24")]},
+    "M5": {"phi_ye": [(20.0, "SS: φ ≥ 20")]},
+    "M8": {"phi_king": [(1.0, "SS: Φ ≥ 1")]},
 }
 VEC_RULE = [(8.0, "FCC ≥ 8.0"), (6.87, "BCC < 6.87")]
+# Carbon Charts thresholds (CORRECT_TRESHOLD): a dashed line in the threshold colour with a label filled in the
+# same colour.  Colours from the Carbon palette, kept apart from the model-class marks (green / magenta / red /
+# blue / purple); assigned in drawing order.
+THRESHOLD_COLORS = ["#1192e8", "#ff832b", "#f1c21b", "#009d9a"]
+
+
+def on_color(fill: str) -> str:
+    """Text colour on a filled label: Carbon $text-on-color or Gray 100, whichever reads (WCAG luminance)."""
+    c = QColor(fill)
+
+    def lin(v):
+        v /= 255.0
+        return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+    lum = 0.2126 * lin(c.red()) + 0.7152 * lin(c.green()) + 0.0722 * lin(c.blue())
+    return "#161616" if lum > 0.179 else "#ffffff"
 
 
 def class_color(label: str) -> str:
@@ -122,7 +141,6 @@ class PlotWidget(QWidget):
 
     point_clicked = Signal(object)          # result id or None
     point_activated = Signal(object)        # result id (double-click / Enter): "Analyse composition"
-    selection_made = Signal(object)         # set of result ids (box / lasso)
     view_changed = Signal(object)           # (x0, x1, y0, y1) zoom window
     category_toggled = Signal(object)
 
@@ -131,7 +149,6 @@ class PlotWidget(QWidget):
         self.spec: PlotSpec | None = None
         self.compact = compact
         self.legend_mode = "overlay"        # overlay | column | row
-        self.mode = "select"                # select | box | lasso | pan
         self.ctrl_zoom = False
         self.window: tuple | None = None    # zoom window (data coords) or None = data limits
         self.hidden: set = set()            # categories hidden from the drawing (legend toggle)
@@ -144,10 +161,9 @@ class PlotWidget(QWidget):
         self._grid: dict = {}
         self._screen: list = []             # (sx, sy, index) of drawn points
         self._press: QPointF | None = None
-        self._drag: QPointF | None = None
-        self._lasso: list[QPointF] = []
-        self._pan_start = None
+        self._pan_start = None              # (press position, window) while a middle / right drag pans
         self._hover = -1
+        self.tip = ChartTooltip(self)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -377,22 +393,32 @@ class PlotWidget(QWidget):
         if s.extra.get("vec_rule") and s.y is not None and s.y.id == "vec":
             lines += [("y", v, lab) for v, lab in VEC_RULE]
         x0, x1, y0, y1 = win
-        pen = QPen(QColor(t("border-strong-01")), 1, Qt.PenStyle.CustomDashLine)
-        pen.setDashPattern([4, 4])
         p.setFont(font(LABEL_01))
-        for axis, v, lab in lines:
+        from PySide6.QtGui import QFontMetricsF
+        fm = QFontMetricsF(p.font())
+        self._threshold_labels = []
+        for k, (axis, v, lab) in enumerate(lines):
+            col = THRESHOLD_COLORS[k % len(THRESHOLD_COLORS)]
+            pen = QPen(QColor(col), 1.5, Qt.PenStyle.CustomDashLine)
+            pen.setDashPattern([3, 2])
+            tw = fm.horizontalAdvance(lab) + 12
             if axis == "x" and x0 <= v <= x1:
                 x = fx(v)
                 p.setPen(pen)
                 p.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
-                p.setPen(QColor(t("text-secondary")))
-                p.drawText(QRectF(x - 104, rect.top() + 2, 100, 14), int(Qt.AlignmentFlag.AlignRight), lab)
+                box = QRectF(x - tw / 2, rect.top() + 4, tw, 18)
             elif axis == "y" and y0 <= v <= y1:
                 y = fy(v)
                 p.setPen(pen)
                 p.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
-                p.setPen(QColor(t("text-secondary")))
-                p.drawText(QRectF(rect.left() + 6, y - 16, 200, 14), int(Qt.AlignmentFlag.AlignLeft), lab)
+                box = QRectF(rect.right() - tw - 8, y - 9, tw, 18)
+            else:
+                continue
+            box.moveLeft(max(rect.left() + 1, min(rect.right() - tw - 1, box.left())))
+            p.fillRect(box, QColor(col))
+            p.setPen(QColor(on_color(col)))
+            p.drawText(box, int(Qt.AlignmentFlag.AlignCenter), lab)
+            self._threshold_labels.append((box, lab, col))
         return lines
 
     def _paint_xy(self, p, w, h, interactive):
@@ -707,9 +733,7 @@ class PlotWidget(QWidget):
                 from PySide6.QtGui import QFontMetricsF
                 x += paint_html(p, QRectF(0, y, 220, 16), f"<b>{title}:</b>", LABEL_01, "text-primary") + 10
             for col, text, key in items:
-                p.setBrush(QColor(col))
-                p.setPen(Qt.PenStyle.NoPen)
-                p.drawEllipse(QPointF(x + 5, y + 8), 4, 4)
+                p.fillRect(QRectF(x, y + 3, 10, 10), QColor(col))
                 p.setPen(QColor(t("text-disabled" if key in self.hidden else "text-primary")))
                 from PySide6.QtGui import QFontMetricsF
                 tw = QFontMetricsF(p.font()).horizontalAdvance(text)
@@ -728,9 +752,7 @@ class PlotWidget(QWidget):
             ly += 20
         self._legend_hits = []
         for col, text, key in items:
-            p.setBrush(QColor(col))
-            p.setPen(Qt.PenStyle.NoPen)
-            p.drawEllipse(QPointF(lx + 5, ly + 8), 4, 4)
+            p.fillRect(QRectF(lx, ly + 3, 10, 10), QColor(col))
             p.setPen(QColor(t("text-disabled" if key in self.hidden else "text-primary")))
             p.drawText(QRectF(lx + 16, ly, lw - 16, 16), int(Qt.AlignmentFlag.AlignVCenter), text)
             self._legend_hits.append((QRectF(lx, ly, lw, 16), key))
@@ -769,19 +791,6 @@ class PlotWidget(QWidget):
                 p.setPen(QPen(QColor(t("text-primary")), 1.5))
                 p.setBrush(Qt.BrushStyle.NoBrush)
                 p.drawEllipse(QPointF(fx(xs[self._hover]), fy(ys[self._hover])), 5, 5)
-        if self._drag is not None and self._press is not None and self.mode == "box":
-            r = QRectF(self._press, self._drag).normalized()
-            fill = QColor(t("border-interactive"))
-            fill.setAlpha(40)
-            p.fillRect(r, fill)
-            p.setPen(QPen(QColor(t("border-interactive")), 1))
-            p.drawRect(r)
-        if self._lasso and self.mode == "lasso":
-            p.setPen(QPen(QColor(t("border-interactive")), 1))
-            fill = QColor(t("border-interactive"))
-            fill.setAlpha(40)
-            p.setBrush(fill)
-            p.drawPolygon(QPolygonF(self._lasso))
 
     def _selected_indices(self) -> list[int]:
         if not self.selection or self.spec is None:
@@ -966,7 +975,7 @@ class PlotWidget(QWidget):
                     qc = QColor(col)
                     p.setPen(QColor("#161616" if qc.lightness() > 140 else "#f4f4f4"))
                     p.drawText(seg, int(Qt.AlignmentFlag.AlignCenter), f"{100 * count / denom:.1f} %")
-                self._segments.append((seg, row, name, count))
+                self._segments.append((seg, row, name, count, col))
                 bx += sw
             p.setPen(QColor(t("text-secondary")))
             p.drawText(QRectF(label_w + bar_w + 8, y, right_w, row_h),
@@ -992,77 +1001,82 @@ class PlotWidget(QWidget):
                         best, bd = idx, dd
         return best
 
-    def hover_text(self, idx: int) -> str:
+    def hover_rows(self, idx: int) -> tuple[str, list]:
+        """Tooltip content for a point: (title, [(label, value, colour or None)]) - Carbon chart anatomy: the
+        values on both axes and the colour group (its legend colour as the row indicator)."""
         s = self.spec
         d = s.data
         names = d.get("names")
         name = names[idx] if names and idx < len(names) else f"Result {d['ids'][idx]}"
         xv = d["x"][idx]
         yv = d["y"][idx] if s.kind == "scatter" else d["y"][s.y.id][idx]
-        parts = [name, f"{s.x.plain} {format_value(s.x.id, xv)} {s.x.unit}".strip(),
-                 f"{s.y.plain} {format_value(s.y.id, yv)} {s.y.unit}".strip()]
+        rows = [(s.x.symbol or s.x.plain, f"{format_value(s.x.id, xv)} {s.x.unit}".strip(), None),
+                (s.y.symbol or s.y.plain, f"{format_value(s.y.id, yv)} {s.y.unit}".strip(), None)]
         cs = d.get("c")
         if cs and idx < len(cs) and s.color not in ("none", ""):
             c = cs[idx]
             if s.color.startswith("model:"):
-                parts.append(f"{s.color[6:]} {c or NA}")
+                rows.append((s.color[6:], c or NA, class_color(c or NA)))
             elif s.color_metric is not None:
-                parts.append(f"{s.color_metric.plain} {format_value(s.color_metric.id, c)}")
+                rows.append((s.color_metric.symbol or s.color_metric.plain, format_value(s.color_metric.id, c), None))
             else:
-                parts.append(dim_value_text(s.color, c))
-        return " · ".join(parts)
+                rows.append((dim_label_text(s.color), dim_value_text(s.color, c), self._color_map().get(c)))
+        return name, rows
+
+    def hover_text(self, idx: int) -> str:
+        """The tooltip as one line (accessible description, keyboard navigation)."""
+        title, rows = self.hover_rows(idx)
+        return " · ".join([title] + [f"{plain_text(lab)} {plain_text(val)}" for lab, val, _c in rows])
 
     def mouseMoveEvent(self, e):
         pos = e.position()
         s = self.spec
         if s is None:
             return
-        if self._press is not None and e.buttons() & Qt.MouseButton.LeftButton:
-            if self.mode == "box":
-                self._drag = pos
-                self.update()
-                return
-            if self.mode == "lasso":
-                self._lasso.append(pos)
-                self.update()
-                return
-            if self.mode == "pan" and self._pan_start is not None:
-                self._pan(pos)
-                return
-        tip = ""
+        if self._pan_start is not None:
+            self._pan(pos)
+            return
+        tip = None
         if s.kind in ("scatter", "line"):
             i = self._nearest(pos)
             if i != self._hover:
                 self._hover = i
                 self.update()
             if i >= 0:
-                tip = self.hover_text(i)
+                from ...core.composition import name_html
+                name, rows = self.hover_rows(i)
+                tip = (name_html(name) if s.data.get("names") else name, rows)
         elif s.kind == "heatmap":
             for r, rid, name, v, xv, yv in getattr(self, "_cells", []):
                 if r.contains(pos):
-                    vx = s.x.plain
-                    vy = s.y.plain
                     val = v if isinstance(v, str) else format_value(s.extra.get("value_id", ""), v)
-                    tip = f"{vx} = {format_number(xv, 2)}, {vy} = {format_number(yv, 2)} · {name} · {val}"
+                    model = str(s.data.get("value", "")).startswith("model:")
+                    tip = (name, [(s.x.plain, format_number(xv, 2), None), (s.y.plain, format_number(yv, 2), None),
+                                  (s.extra.get("value_label", "Value"), val if v is not None else NA,
+                                   class_color(v if v is not None else NA) if model else None)])
                     break
         elif s.kind in ("bars_stacked", "bars_grouped"):
-            for seg, row, name, count in getattr(self, "_segments", []):
+            for seg, row, name, count, col in getattr(self, "_segments", []):
                 if seg.contains(pos):
-                    tip = f"{row['label']} · {name}: {count:,} of {row['denominator']:,} ({100 * count / max(1, row['denominator']):.1f} %)"
+                    denom = max(1, row["denominator"])
+                    rows = [(name, f"{count:,} of {row['denominator']:,} ({100 * count / denom:.1f} %)", col)]
                     if row.get("status_text", {}).get(name):
-                        tip += " · " + row["status_text"][name]
+                        rows.append(("Status", row["status_text"][name], None))
+                    tip = (row["label"], rows)
                     break
         elif s.kind == "binned":
             tip = self._bin_tip(pos)
-        if tip != self.toolTip():
-            self.setToolTip(tip)
+        if tip is None:
+            self.tip.hide()
+        else:
+            self.tip.show_at(pos, *tip)
 
-    def _bin_tip(self, pos) -> str:
+    def _bin_tip(self, pos):
         s = self.spec
         d = s.data
         lim = self._limits()
         if lim is None:
-            return ""
+            return None
         rect = self._frame_rect(self.width(), self.height())
         _fx, _fy, inv = self._to_screen(rect, self.window or lim)
         xv, yv = inv(pos.x(), pos.y())
@@ -1072,31 +1086,40 @@ class PlotWidget(QWidget):
         bx, by = int((xv - x0) / dx), int((yv - y0) / dy)
         for cx, cy, n, v in d["cells"]:
             if cx == bx and cy == by:
-                text = (f"{s.x.plain} {format_value(s.x.id, x0 + bx * dx)}–{format_value(s.x.id, x0 + (bx + 1) * dx)} "
-                        f"{s.x.unit}, {s.y.plain} {format_value(s.y.id, y0 + by * dy)}…"
-                        f"{format_value(s.y.id, y0 + (by + 1) * dy)} {s.y.unit} · {n:,} results")
+                rows = [(s.x.plain, f"{format_value(s.x.id, x0 + bx * dx)} – {format_value(s.x.id, x0 + (bx + 1) * dx)} "
+                         f"{s.x.unit}".strip(), None),
+                        (s.y.plain, f"{format_value(s.y.id, y0 + by * dy)} – {format_value(s.y.id, y0 + (by + 1) * dy)} "
+                         f"{s.y.unit}".strip(), None)]
                 if isinstance(v, tuple):
-                    text += f" · majority {v[0]} ({100 * v[1] / max(1, n):.0f} %)"
+                    rows.append(("Majority", f"{v[0]} ({100 * v[1] / max(1, n):.0f} %)",
+                                 class_color(v[0]) if str(d.get("value", "")).startswith("model:") else None))
                 elif isinstance(v, (int, float)) and s.color_metric is not None:
-                    text += f" · mean {s.color_metric.plain} {format_value(s.color_metric.id, v)}"
-                return text
-        return ""
+                    rows.append((f"Mean {s.color_metric.plain}", format_value(s.color_metric.id, v), None))
+                return f"{n:,} result{'s' if n != 1 else ''}", rows
+        return None
 
     def leaveEvent(self, e):
+        self.tip.hide()
         if self._hover >= 0:
             self._hover = -1
             self.update()
 
+    PAN_BUTTONS = (Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton)
+
     def mousePressEvent(self, e):
-        if e.button() != Qt.MouseButton.LeftButton or self.spec is None:
+        if self.spec is None:
+            return
+        if e.button() in self.PAN_BUTTONS:
+            # direct pan (no pan mode): middle- or right-button drag moves the axes window
+            if self.spec.kind in ("scatter", "binned", "line", "histogram") and self._limits() is not None:
+                self._pan_start = (e.position(), self.window or self._limits())
+                self.tip.hide()
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            return
+        if e.button() != Qt.MouseButton.LeftButton:
             return
         self.setFocus(Qt.FocusReason.MouseFocusReason)
         self._press = e.position()
-        self._drag = None
-        self._lasso = [e.position()] if self.mode == "lasso" else []
-        if self.mode == "pan":
-            lim = self._limits()
-            self._pan_start = (e.position(), self.window or lim)
         for r, key in getattr(self, "_legend_hits", []):
             if r.contains(e.position()):
                 (self.hidden.discard if key in self.hidden else self.hidden.add)(key)
@@ -1106,29 +1129,15 @@ class PlotWidget(QWidget):
                 return
 
     def mouseReleaseEvent(self, e):
+        if e.button() in self.PAN_BUTTONS:
+            if self._pan_start is not None:
+                self._pan_start = None
+                self.unsetCursor()
+            return
         if self._press is None or self.spec is None:
             return
         press, self._press = self._press, None
         s = self.spec
-        if self.mode == "box" and self._drag is not None:
-            r = QRectF(press, self._drag).normalized()
-            self._drag = None
-            ids = {s.data["ids"][idx] for sx, sy, idx in self._screen if r.contains(QPointF(sx, sy))}
-            self.selection_made.emit(ids)
-            self.update()
-            return
-        if self.mode == "lasso" and len(self._lasso) > 2:
-            poly = QPolygonF(self._lasso)
-            self._lasso = []
-            ids = {s.data["ids"][idx] for sx, sy, idx in self._screen
-                   if poly.containsPoint(QPointF(sx, sy), Qt.FillRule.OddEvenFill)}
-            self.selection_made.emit(ids)
-            self.update()
-            return
-        self._lasso = []
-        if self.mode == "pan":
-            self._pan_start = None
-            return
         if (e.position() - press).manhattanLength() > 4:
             return
         if s.kind in ("scatter", "line"):
@@ -1201,7 +1210,6 @@ class PlotWidget(QWidget):
             return
         if k == Qt.Key.Key_Escape:
             self.point_clicked.emit(None)
-            self.selection_made.emit(set())
             return
         super().keyPressEvent(e)
 
@@ -1228,6 +1236,66 @@ class PlotWidget(QWidget):
         self.render_to(p, w, h)
         p.end()
 
+
+
+# ---------------------------------------------------------------------- chart tooltip
+class ChartTooltip(QWidget):
+    """Carbon Charts tooltip (CORRECT_DATA_VISUALIZATION item 9): a header (the hovered item) over label /
+    value rows; a row that encodes a colour group carries that colour as a 4 px indicator at its left edge.
+    Painted on the menu surface ($layer-02 + elevation shadow); never the application's text tooltip.
+    A child of the plot, transparent for the mouse, kept inside the plot beside the pointer."""
+
+    ROW_H = 24
+    PAD = 8
+
+    def __init__(self, plot: QWidget):
+        super().__init__(plot)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.title = ""
+        self.rows: list = []
+        self.hide()
+
+    def show_at(self, pos: QPointF, title: str, rows: list) -> None:
+        from ..widgets.dropdown import html_width
+        from ..widgets.listbox import SHADOW
+        if (title, rows) != (self.title, self.rows):
+            self.title, self.rows = title, rows
+            lw = max((html_width(lab, LABEL_01) for lab, _v, _c in rows), default=0)
+            vw = max((html_width(val, LABEL_01) for _l, val, _c in rows), default=0)
+            w = max(html_width(f"<b>{title}</b>", LABEL_01), lw + 24 + vw) + 2 * self.PAD + 4
+            w = int(min(360, max(160, w)))
+            h = int((len(rows) + (1 if title else 0)) * self.ROW_H + 2 * 4)
+            self.resize(w + 2 * SHADOW, h + 2 * SHADOW)
+        par = self.parentWidget()
+        x = pos.x() + 16 - SHADOW
+        if x + self.width() > par.width():
+            x = pos.x() - 16 - self.width() + SHADOW
+        y = pos.y() - self.height() / 2
+        self.move(int(max(0, x)), int(max(0, min(par.height() - self.height(), y))))
+        self.show()
+        self.raise_()
+        self.update()
+
+    def paintEvent(self, _e):
+        from ..widgets.listbox import SHADOW, paint_shadow
+        p = QPainter(self)
+        surface = self.rect().adjusted(SHADOW, SHADOW, -SHADOW, -SHADOW)
+        paint_shadow(p, surface)
+        p.fillRect(surface, QColor(t("layer-02")))
+        x0, x1 = surface.left() + self.PAD + 4, surface.right() + 1 - self.PAD
+        y = surface.top() + 4
+        if self.title:
+            paint_html(p, QRectF(x0, y, x1 - x0, self.ROW_H), f"<b>{self.title}</b>", LABEL_01, "text-primary")
+            y += self.ROW_H
+            crisp.hline(p, surface.left() + self.PAD, surface.right() + 1 - self.PAD, y, t("border-subtle-02"))
+        for k, (lab, val, col) in enumerate(self.rows):
+            if col:
+                p.fillRect(QRectF(surface.left() + self.PAD - 4, y + 4, 4, self.ROW_H - 8), QColor(col))
+            paint_html(p, QRectF(x0, y, x1 - x0, self.ROW_H), lab, LABEL_01, "text-secondary")
+            paint_html(p, QRectF(x0, y, x1 - x0, self.ROW_H), val, LABEL_01, "text-primary",
+                       Qt.AlignmentFlag.AlignRight)
+            y += self.ROW_H
+        p.end()
 
 # ---------------------------------------------------------------------- helpers
 def _log(v: float) -> float:

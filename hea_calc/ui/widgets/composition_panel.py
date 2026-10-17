@@ -19,22 +19,19 @@ The panel only builds compositions; calculations are requested through ``calcula
 from __future__ import annotations
 
 import math
-import re
 
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QFrame, QHBoxLayout, QLabel, QLineEdit,
-                               QPlainTextEdit, QRadioButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
+                               QRadioButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
 
 from ...core import composition as C
 from ...core.data import Datasets
-from ...core.expression import (MAX_COMBINATIONS, ExpressionError, GenerationCancelled, VariableRange,
-                                 block_variables, count_combinations, generate_blocks, parse_blocks)
+from ...core.expression import ExpressionError
 from ...core.generation import SUM_UNITS, RangeError, SweepSpec, summarize_space
 from ...core.limits import HARD_LIMIT, LARGE, capacity_problem, describe, estimate, fmt_short_bytes, \
     fmt_short_duration
-from ...core.recipes import (ExpressionRecipe, SweepRecipe, compositions_tsv, expression_count, recipe_preview,
-                             recipe_tsv)
+from ...core.recipes import SweepRecipe, compositions_tsv, recipe_tsv
 from .. import crisp
 from ..preferences import DEFAULT_TOTAL_MASS, format_mass, valid_mass
 from ..theme import COMPOSITION_PANEL_WIDTH, FOCUS_WIDTH, HAIRLINE, t
@@ -43,6 +40,7 @@ from .common import (Divider, EmptyState, IconContentSwitcher, InfoButton, Panel
                      refresh_style, retire)
 from .composition_footer import CompositionFooter, Status, WorkloadSummary
 from .dropdown import Dropdown, MultiSelect
+from .expression_view import ExpressionView
 from .menu import carbon_context_menu
 from .scroll import own_wheel, thin_scrollbars
 
@@ -815,7 +813,8 @@ class SystemSizeSelect(MultiSelect):
     """System size (Figma: 116 px field, "4, 5, 6" / "All"): the element counts N a generated alloy may have."""
 
     def __init__(self, parent=None):
-        super().__init__("system sizes", parent=parent, accessible="System size")
+        # CORRECT_SYSTEM_SIZE_DROPDOWN: a field-width checkbox list with an "All" option; toggles apply at once
+        super().__init__("system sizes", parent=parent, accessible="System size", all_label="All")
         self.setFixedWidth(116)
 
     def current_html(self) -> str:
@@ -1222,363 +1221,6 @@ class SweepView(QWidget):
 
 
 # ======================================================================== expression
-class VariableRow(QWidget):
-    def __init__(self, name: str, parent=None):
-        super().__init__(parent)
-        self.name = name
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(COL_GAP)
-        self.var = Field(COL_ELEMENT, cell="element-filled")
-        self.var.setText(name)
-        self.var.setReadOnly(True)
-        self.var.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.var.setStyleSheet("font-style: italic;")
-        lay.addWidget(self.var)
-        self.min, self.max, self.step = Field(COL_VALUE), Field(COL_VALUE), Field(COL_VALUE)
-        for f, label in ((self.min, "Min"), (self.max, "Max"), (self.step, "Step")):
-            f.setAccessibleName(f"{name} {label}")
-            lay.addWidget(f)
-        lay.addStretch(1)
-        self.setFixedHeight(ROW_H)
-
-
-HELPER_TEXT = "Enter one expression per block. Separate blocks with a blank line."
-
-EXPRESSION_HELP = (
-    "<b>Composition expression</b><br>"
-    "Elements: Fe, Co, Al … · Variables: lowercase names (x, y1).<br>"
-    "Amounts follow an element or a group: <i>Al0.5</i>, <i>Alx</i>, <i>(FeCoNi)1-x</i>, "
-    "<i>Ti{0.1*k}</i>, <i>Mo_(1-y)</i>.<br>"
-    "Groups (…) are normalised: (FeCoNi)90Al10 = 30/30/30/10 at.%.<br>"
-    "Use braces when a variable would merge with a symbol: B{a}.<br>"
-    "Enter one expression per block; separate blocks with a blank line.<br>"
-    "<a href='help://expression-syntax'>Expression syntax reference</a>"
-)
-
-
-class ExpressionView(QWidget):
-    """Composition expression (Figma "_Composition setup Composition expression bases" 392:65835): multi-block
-    expression text area, detected variables with Min / Max / Step, live count of valid compositions."""
-
-    grid = ColumnGrid()
-    changed = Signal()
-    elements_parsed = Signal(list)
-    message = Signal(str, str)
-    preview_requested = Signal()
-
-    def __init__(self, datasets: Datasets, parent=None):
-        super().__init__(parent)
-        self.data = datasets
-        self.expressions: list = []
-        self.var_rows: dict[str, VariableRow] = {}
-        self._remembered: dict[str, tuple[str, str, str]] = {}
-        self.parse_error: str | None = None
-        self.range_error: str | None = None
-        self.counting = False
-        self.count_data = None
-        root = QVBoxLayout(self)
-        root.setContentsMargins(20, 14, 20, 0)
-        root.setSpacing(0)
-        lab_row = QHBoxLayout()
-        lab_row.setSpacing(8)
-        lab = QLabel("Composition expression")
-        lab.setObjectName("Label01")
-        lab_row.addWidget(lab)
-        lab_row.addWidget(InfoButton(EXPRESSION_HELP, title="Expression syntax"))
-        lab_row.addStretch(1)
-        root.addLayout(lab_row)
-        root.addSpacing(8)
-        self.edit = QPlainTextEdit()
-        thin_scrollbars(self.edit)
-        own_wheel(self.edit)
-        self.edit.setPlaceholderText("e.g. (Fe1.6CoCr0.4Mn)0.9Al0.1")
-        self.edit.setFixedHeight(142)
-        self.edit.setAccessibleName("Composition expression")
-        carbon_context_menu(self.edit)
-        self.edit.textChanged.connect(self._dirty)
-        from .common import IconButton
-        self.preview_btn = IconButton("data_table", "Preview generated compositions", self.edit)
-        self.preview_btn.clicked.connect(self.preview_requested.emit)
-        self.edit.installEventFilter(self)
-        root.addWidget(self.edit)
-        root.addSpacing(6)
-        self.detected = (0, [], [])
-        self.helper = QLabel(HELPER_TEXT)
-        self.helper.setObjectName("Helper")
-        self.helper.setWordWrap(True)
-        self.helper.setTextFormat(Qt.TextFormat.RichText)
-        self.helper.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        root.addWidget(self.helper)
-        root.addSpacing(10)
-        cols = QHBoxLayout()
-        cols.setContentsMargins(0, 0, 0, 0)
-        cols.setSpacing(COL_GAP)
-        cols.addWidget(header_label("Var.", COL_ELEMENT, True))
-        for text in ("Min", "Max", "Step"):
-            cols.addWidget(header_label(text, COL_VALUE))
-        cols.addStretch(1)
-        self.var_header = QWidget()
-        self.var_header.setLayout(cols)
-        self.var_header.setFixedHeight(ROW_H)
-        root.addWidget(self.var_header)
-        self.rows_widget = _Rows(margin=0)
-        self.scroll = scroll_wrap(self.rows_widget)
-        self.scroll.setMinimumHeight(ROW_H)
-        root.addWidget(self.scroll, 1)
-        self.summary = QLabel("")
-        self.summary.setTextFormat(Qt.TextFormat.RichText)
-        self.summary.setFixedHeight(40)
-        root.addWidget(self.summary)
-        self._parse_timer = QTimer(self)
-        self._parse_timer.setSingleShot(True)
-        self._parse_timer.setInterval(350)
-        self._parse_timer.timeout.connect(self.parse)
-        self._count_timer = QTimer(self)
-        self._count_timer.setSingleShot(True)
-        self._count_timer.setInterval(COUNT_DEBOUNCE_MS)
-        self._count_timer.timeout.connect(self._preview)
-        # the valid-composition count needs every combination evaluated (skips, duplicates), so it
-        # runs on a background thread; the combination bound is checked first, instantly
-        self._counter = BackgroundTask(self)
-        self._counter.done.connect(self._show_preview)
-        self._counter.failed.connect(self._preview_failed)
-        self._set_variables([])
-
-    def eventFilter(self, obj, ev):
-        if obj is self.edit and ev.type() == ev.Type.Resize:
-            self.preview_btn.move(self.edit.width() - 40, 8)
-            self._fit_helper()
-        return False
-
-    def _fit_helper(self):
-        w = self.edit.width()
-        if w > 0:
-            self.helper.setMinimumHeight(self.helper.heightForWidth(w))
-
-    def _dirty(self):
-        self._parse_timer.start()
-        self.counting = bool(self.text().strip())
-        self.changed.emit()
-
-    def text(self) -> str:
-        return self.edit.toPlainText()
-
-    def parse(self) -> bool:
-        self._parse_timer.stop()
-        if not self.text().strip():
-            self.expressions = []
-            self.parse_error = None
-            self.counting = False
-            self.count_data = None
-            self._set_state(None)
-            self.helper.setText(HELPER_TEXT)
-            self._fit_helper()
-            self._set_variables([])
-            self.summary.setText("")
-            self.changed.emit()
-            return False
-        try:
-            exprs = parse_blocks(self.text(), self.data)
-        except ExpressionError as exc:
-            self.expressions = []
-            self.parse_error = str(exc)
-            self.counting = False
-            self.count_data = None
-            self._set_state("invalid")
-            # the per-expression detail stays under the field (Figma: block number, text, reason)
-            self.helper.setText(f"<span style='color:{t('text-error')}'>{exc}</span>")
-            self._fit_helper()
-            self._set_variables([])
-            self.summary.setText("")
-            self.changed.emit()
-            return False
-        self.expressions = exprs
-        self.parse_error = None
-        self._set_state("valid")
-        els: list[str] = []
-        for ex in exprs:
-            _collect_elements(ex.items, els)
-        names = block_variables(exprs)
-        self.helper.setText(HELPER_TEXT)
-        self._fit_helper()
-        self.detected = (len(exprs), els, names)
-        self._set_variables(names)
-        self.elements_parsed.emit(els)
-        self.changed.emit()
-        self._preview()
-        return True
-
-    def _set_state(self, state: str | None):
-        for prop, on in (("invalid", state == "invalid"), ("valid", state == "valid")):
-            if bool(self.edit.property(prop)) != on:
-                self.edit.setProperty(prop, on)
-                refresh_style(self.edit)
-
-    def _set_variables(self, names: list[str]):
-        if list(self.var_rows) == names:
-            return
-        for name, row in list(self.var_rows.items()):
-            self._remembered[name] = (row.min.text(), row.max.text(), row.step.text())
-            retire(row)
-        self.var_rows = {}
-        for name in names:
-            row = VariableRow(name)
-            self.grid.apply(row)
-            mn, mx, st = self._remembered.get(name, ("0", "1", "0.1"))
-            row.min.setText(mn)
-            row.max.setText(mx)
-            row.step.setText(st)
-            for f in (row.min, row.max, row.step):
-                f.textEdited.connect(lambda _t, fld=f: (fld.set_invalid(False), self._ranges_edited()))
-            self.var_rows[name] = row
-            self.rows_widget.insert(row)
-        has = bool(names)
-        self.var_header.setVisible(has)
-        self.scroll.setVisible(has)
-
-    def _ranges_edited(self):
-        self.counting = True
-        self.changed.emit()
-        self._count_timer.start()
-
-    def ranges(self) -> dict[str, VariableRange]:
-        out = {}
-        for name, row in self.var_rows.items():
-            vals = []
-            for f, label in ((row.min, "Min"), (row.max, "Max"), (row.step, "Step")):
-                v = f.number()
-                f.set_invalid(v is None, f"{name}: {label} is missing or invalid")
-                vals.append(v)
-            if None in vals:
-                raise RangeError("Missing range values")
-            out[name] = VariableRange(name, *vals)
-        return out
-
-    def batch(self):
-        if not self.expressions:
-            if not self.parse():
-                raise ExpressionError("Enter a valid expression first.")
-        return generate_blocks(self.expressions, self.ranges())
-
-    def _preview(self):
-        if not self.expressions:
-            self._counter.cancel()
-            self.summary.setText("")
-            self.counting = False
-            self.changed.emit()
-            return
-        self.range_error = None
-        try:
-            exprs, ranges = list(self.expressions), self.ranges()
-            n = count_combinations(exprs, ranges)
-            if n > MAX_COMBINATIONS:
-                raise RangeError(f"{n:,} combinations exceed the limit of {MAX_COMBINATIONS:,}; increase the steps")
-        except (RangeError, ExpressionError) as exc:
-            self._counter.cancel()
-            self._preview_failed(exc)
-            return
-        self.counting = True
-        self.changed.emit()
-        if n <= HEAVY_THRESHOLD:
-            self._counter.run(lambda cancelled=None: generate_blocks(exprs, ranges, cancelled=cancelled))
-        else:
-            self._counter.run_heavy(expression_count, tuple(exprs), tuple(ranges.items()))
-
-    def _preview_failed(self, exc):
-        if isinstance(exc, GenerationCancelled):
-            return
-        self.counting = False
-        self.count_data = None
-        self.range_error = str(exc)
-        self.summary.setText("")
-        self.changed.emit()
-
-    def _show_preview(self, b):
-        n = len(b.compositions) if hasattr(b, "compositions") else b.count
-        self.counting = False
-        self.count_data = (n, b.skipped, b.duplicates)
-        extra = []
-        if b.skipped:
-            extra.append(f"{b.skipped:,} skipped")
-        if b.duplicates:
-            extra.append(f"{b.duplicates:,} duplicate{'s' if b.duplicates != 1 else ''}")
-        blocks, els, names = self.detected
-        sep = f"<span style='color:{t('text-helper')}'> | </span>"
-        self.summary.setText(f"<span style='font-size:12px; color:{t('text-secondary')}'>{blocks} block"
-                             f"{'s' if blocks != 1 else ''}{sep}{len(els)} elements{sep}"
-                             f"{len(names)} variable{'s' if len(names) != 1 else ''}</span><br>"
-                             f"<b>{n:,}</b> <span style='font-size:12px'>valid composition{'s' if n != 1 else ''}"
-                             + (sep + ", ".join(extra) if extra else "") + "</span>")
-        self.changed.emit()
-
-    def status(self) -> Status | None:
-        if not self.text().strip():
-            return None
-        if self._parse_timer.isActive():
-            return Status("loading", "Updating…")
-        if self.parse_error:
-            return Status("error", "Invalid expression")
-        bad = [f for row in self.var_rows.values() for f in (row.min, row.max, row.step) if f.error]
-        if bad:
-            return Status("error", "Missing range values" if all("missing" in f.error for f in bad)
-                          else bad[0].error)
-        if self.range_error:
-            return Status("error", self.range_error.rstrip("."))
-        if self.counting or self._count_timer.isActive():
-            return Status("loading", "Updating…")
-        if self.count_data is not None:
-            n, skipped, _dups = self.count_data
-            if not n:
-                return Status("error", "No valid compositions")
-            if n >= LARGE:
-                svc = getattr(self.window(), "jobs", None)
-                _tier, tip = size_note(n, getattr(svc, "workers", 1))
-                return Status("info", "Large workload", [tip, "<a href='help://workload'>About workload "
-                                                              "estimates</a>"], "Large workload")
-            if skipped:
-                return Status("info", f"{skipped:,} combination{'s' if skipped != 1 else ''} skipped",
-                              "Skipped: variable values giving negative amounts or fewer than two elements.")
-        return None
-
-    def can_calculate(self) -> bool:
-        st = self.status()
-        return bool(self.text().strip()) and (st is None or (not st.blocking and st.kind != "loading"))
-
-    def compositions(self):
-        return self.recipe()()[1:]
-
-    def recipe(self):
-        """Parse and validate on the GUI thread (cheap); generate in the calculation job."""
-        self.parse()
-        if not self.expressions:
-            raise ExpressionError("Enter a valid expression first.")
-        exprs, ranges = list(self.expressions), self.ranges()
-        n = count_combinations(exprs, ranges)
-        if n > MAX_COMBINATIONS:
-            raise RangeError(f"{n:,} combinations exceed the limit of {MAX_COMBINATIONS:,}; increase the steps.")
-        return ExpressionRecipe(tuple(exprs), tuple(ranges.items()))
-
-    # periodic-table interaction: append / remove element tokens in the last block
-    def add_element(self, el: str):
-        text = self.text().rstrip()
-        if re.search(rf"{el}(?![a-z])", text):
-            return
-        self.edit.setPlainText(text + el)
-        self.parse()
-
-    def remove_element(self, el: str):
-        new = re.sub(rf"{el}(?![a-z])(\{{[^}}]*\}}|_\([^)]*\)|_\{{[^}}]*\}}|[0-9.]*[a-z0-9_+\-*/.]*)?", "",
-                     self.text())
-        self.edit.setPlainText(new.replace("()", ""))
-        self.parse()
-
-    def clear(self):
-        self.edit.clear()
-        self.count_data = None
-        self.parse()
-
-
 def _collect_elements(items, out):
     for it in items:
         if hasattr(it, "symbol"):
@@ -1610,9 +1252,10 @@ class CompositionPanel(Panel):
         self._coverage_cache: dict[frozenset, dict] = {}
         self.title_holder.setFixedHeight(55)
         # Range basis (Figma: an inline dropdown at x 229, 12 px before the mode switcher; Composition space only)
-        self.unit_box = Dropdown(RANGE_BASES, "ratio", inline=True, accessible="Range basis")
-        self.unit_box.setFixedWidth(self.unit_box.width_for_items())     # the widest basis never clips
-        self.unit_box.setToolTip("Range basis of Min / Max / Step")
+        # CORRECT_RANGE_BASIS / Figma 392:60079: 140 px inline trigger showing the basis; while open it reads
+        # "Range basis" inside the focus frame above the divided list (no tooltip - the label is the explanation)
+        self.unit_box = Dropdown(RANGE_BASES, "ratio", inline=True, accessible="Range basis",
+                                 open_label="Range basis", width=140)
         self.unit_box.hide()
         self.title_row.addWidget(self.unit_box)
         self.title_row.addSpacing(12)
@@ -1632,7 +1275,6 @@ class CompositionPanel(Panel):
             v.message.connect(self.message.emit)
         self.root.addWidget(self.stack, 1)
         self.expr.elements_parsed.connect(self.elements_changed.emit)
-        self.expr.preview_requested.connect(self.preview_expression)
         self.single.element_renamed.connect(self._renamed)
         self.sweep.element_renamed.connect(self._renamed)
         self.single.total_mass_committed.connect(self.total_mass_committed.emit)
@@ -1721,6 +1363,7 @@ class CompositionPanel(Panel):
 
     def set_total_mass(self, grams: float) -> None:
         self.single.set_total_mass(grams)
+        self.expr.set_total_mass(grams)
 
     def set_service(self, service) -> None:
         """The calculation service whose worker processes run heavy pre-flight work."""
@@ -1732,6 +1375,11 @@ class CompositionPanel(Panel):
         """State=Calculating: Cancel + inline "Calculating…" in the footer; progress is in the shell header."""
         self._calculating = running
         self.footer.set_running(running)
+        # CORRECT_CALCULATING_STATE: the inputs of the running recipe are read-only (disabled tokens), the
+        # basis / mode controls too; the footer keeps its status (never "Ready" while a run is going)
+        self.stack.setEnabled(not running)
+        self.unit_box.setEnabled(not running)
+        self.switcher.setEnabled(not running)
         self._update_actions()
 
     # ---------------------------------------------------------------- status / actions
@@ -1757,7 +1405,8 @@ class CompositionPanel(Panel):
             cov = coverage_status(self.coverage(self.current_elements()))
             if cov is not None:
                 return cov
-            if self.mode != "single" and self.view().can_calculate():
+            # the expression editor reports its own state in place (COMPOSITION_EXPRESSION_* show no footer status)
+            if self.mode == "sweep" and self.view().can_calculate() and not self._calculating:
                 return Status("ready", "Ready")
         return st
 
@@ -1776,7 +1425,7 @@ class CompositionPanel(Panel):
             self.clear_btn.setEnabled(bool(self._elements) or self._calculating)
         else:
             has = bool(self.expr.text().strip())
-            self.footer.calc.set_actions([("Copy table", self._copy_compositions, self.expr.can_calculate(),
+            self.footer.calc.set_actions([("Copy table", self._copy_expression, self.expr.can_calculate(),
                                            "copy")])
             self.clear_btn.setEnabled(has or self._calculating)
         self.calc_btn.setEnabled(v.can_calculate() and not self._calculating)
@@ -1824,20 +1473,13 @@ class CompositionPanel(Panel):
     def _copy_compositions(self):
         self._generate_then(recipe_tsv, self.copy_compositions.emit)
 
-    def preview_expression(self):
-        self._generate_then(recipe_preview, lambda out: self._show_generated(*out))
-
-    def _show_generated(self, total: int, lines: list[str], tsv: str):
-        from PySide6.QtWidgets import QListWidget
-        from .dialogs import Modal
-        dlg = Modal("Generated compositions", f"{total:,} valid", self, width=560)
-        lst = QListWidget()
-        thin_scrollbars(lst)
-        lst.addItems(lines)
-        dlg.body.addWidget(lst, 1)
-        dlg.add_footer_button("Copy table", "primary", lambda: self.copy_compositions.emit(tsv))
-        dlg.exec()
-        dlg.deleteLater()
+    def _copy_expression(self):
+        """One block: its composition preview table; several blocks: every generated composition."""
+        doc = self.expr.doc
+        if doc is not None and doc.ok and len(doc.blocks) == 1 and doc.blocks[0].kind == "fixed":
+            self.copy_text.emit(self.expr.preview_tsv(), "composition table")
+        else:
+            self._copy_compositions()
 
     def clear(self):
         if self.mode == "expression":

@@ -21,13 +21,14 @@ import time
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath
-from PySide6.QtWidgets import (QAbstractButton, QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout,
+from PySide6.QtWidgets import (QAbstractButton, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout,
                                QWidget)
 
 from .. import crisp, icons
 from ..theme import BODY_COMPACT_01, CORNER_RADIUS, FOCUS_WIDTH, HAIRLINE, HEADING_COMPACT_01, LABEL_01, font, t
 from ..widgets.common import button, paint_tag, retire
 # The selection controls are shared application primitives (widgets/dropdown.py); re-exported for Analysis.
+from ..widgets.common import InlineNotification
 from ..widgets.dropdown import (Dropdown, MultiSelect, Popover, RichMenu, html_width,  # noqa: F401
                                 open_popover, paint_html, plain_text, rich, text_doc)
 from ..widgets.scroll import inner_scroll_area
@@ -317,14 +318,17 @@ class DataTable(QWidget):
     hovered = Signal(int)
 
     def __init__(self, columns, rows=(), row_height: int = ROW_XS, activatable: bool = False, header: bool = True,
-                 parent=None, groups: dict | None = None, row_tips=None, selected: int = -1):
+                 parent=None, groups: dict | None = None, row_tips=None, selected: int = -1,
+                 chevron: bool = True):
         super().__init__(parent)
         self.columns = list(columns)
         self.row_height = row_height
         self.activatable = activatable
+        self.chevron = chevron              # rows that open something else; a selection list has none
         self.show_header = header
         self.hover = -1
         self.focus_row = -1
+        self.focus_visible = False          # Carbon :focus-visible - the ring is for keyboard focus only
         self.selected = selected
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.TabFocus if activatable else Qt.FocusPolicy.NoFocus)
@@ -380,7 +384,7 @@ class DataTable(QWidget):
         return out
 
     def _fit_minimum(self) -> None:
-        mins = sum(mn for mn, _nat in self.natural_widths()) + (24 if self.activatable else 0)
+        mins = sum(mn for mn, _nat in self.natural_widths()) + (24 if self.activatable and self.chevron else 0)
         self.setMinimumWidth(int(mins + 0.999))
 
     def _layout_rows(self) -> None:
@@ -462,6 +466,7 @@ class DataTable(QWidget):
         if not self.rows:
             return super().keyPressEvent(e)
         k = e.key()
+        self.focus_visible = True
         if k in (Qt.Key.Key_Down, Qt.Key.Key_Up):
             self.focus_row = max(0, min(len(self.rows) - 1, self.focus_row + (1 if k == Qt.Key.Key_Down else -1)))
             self.update()
@@ -474,6 +479,8 @@ class DataTable(QWidget):
     def focusInEvent(self, e):
         if self.focus_row < 0:
             self.focus_row = 0
+        self.focus_visible = e.reason() in (Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason,
+                                            Qt.FocusReason.ShortcutFocusReason)
         super().focusInEvent(e)
         self.update()
 
@@ -505,10 +512,11 @@ class DataTable(QWidget):
             crisp.hline_bottom(p, r, t("row-border"), HAIRLINE)
             for (x, cw), cell, c in zip(cols, row, self.columns):
                 self._cell(p, QRectF(x, y, cw, self.row_height), cell)
-            if self.activatable and (i == self.hover or (self.hasFocus() and i == self.focus_row)):
+            keyboard = self.hasFocus() and self.focus_visible and i == self.focus_row
+            if self.activatable and self.chevron and (i == self.hover or keyboard):
                 icons.paint(p, "chevron_right", QRectF(w - 24, y + (self.row_height - 16) / 2, 16, 16),
                             "icon-secondary")
-            if self.hasFocus() and i == self.focus_row:
+            if keyboard:
                 crisp.frame(p, r, FOCUS_WIDTH, t("focus"))
         p.end()
 
@@ -539,6 +547,50 @@ class DataTable(QWidget):
 
 
 # ====================================================================== key-value rows
+class FlowBox(QWidget):
+    """Equal-width cells that wrap to the available width (height for width): a grid of tags that never
+    overflows its column, whatever the panel width or DPI."""
+
+    def __init__(self, cells, hgap: int = 8, vgap: int = 8, parent=None):
+        super().__init__(parent)
+        self.cells = list(cells)
+        self.hgap, self.vgap = hgap, vgap
+        self.cell_w = max((c.width() for c in self.cells), default=0)
+        self.cell_h = max((c.height() for c in self.cells), default=0)
+        for c in self.cells:
+            c.setParent(self)
+            c.setFixedWidth(self.cell_w)
+        sp = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        sp.setHeightForWidth(True)
+        self.setSizePolicy(sp)
+
+    def columns(self, w: int) -> int:
+        return max(1, min(len(self.cells), (w + self.hgap) // max(1, self.cell_w + self.hgap)))
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, w: int) -> int:
+        rows = -(-len(self.cells) // self.columns(w)) if self.cells else 0
+        return max(0, rows * self.cell_h + (rows - 1) * self.vgap)
+
+    def sizeHint(self):
+        from PySide6.QtCore import QSize
+        n = min(4, len(self.cells))
+        w = n * self.cell_w + max(0, n - 1) * self.hgap
+        return QSize(w, self.heightForWidth(w))
+
+    def minimumSizeHint(self):
+        from PySide6.QtCore import QSize
+        return QSize(self.cell_w, self.heightForWidth(self.cell_w))
+
+    def resizeEvent(self, e):
+        n = self.columns(self.width())
+        for i, c in enumerate(self.cells):
+            c.move((i % n) * (self.cell_w + self.hgap), (i // n) * (self.cell_h + self.vgap))
+        super().resizeEvent(e)
+
+
 class KVRows(QWidget):
     """Read-only key-value rows (design guide 5.2): label (secondary), value (right, tabular), unit, optional
     Toggletip trigger; 24 px rows with a 1 px row rule.  ``rows``: ``(label, value, unit, info_html|None)``
@@ -623,48 +675,12 @@ class _KVRow(QWidget):
 
 
 # ====================================================================== notifications / loading / empty
-class ActionableNotification(QFrame):
-    """Carbon actionable inline notification (low contrast): icon, title, subtitle, ghost action; no close."""
-
-    action = Signal()
-    ICONS = {"info": ("information", "support-info"), "warning": ("warning_filled", "support-warning"),
-             "error": ("status_none", "support-error"), "success": ("status_ok", "support-success")}
+class ActionableNotification(InlineNotification):
+    """Carbon actionable inline notification (low contrast): the shared :class:`InlineNotification` with a ghost
+    action and no close button."""
 
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("AnaNotification")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(13, 8, 8, 8)
-        lay.setSpacing(12)
-        self.icon = QLabel()
-        self.icon.setFixedSize(20, 20)
-        lay.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignTop)
-        texts = QVBoxLayout()
-        texts.setSpacing(2)
-        self.title = label("", "heading", wrap=True)
-        self.body = label("", "body", wrap=True)
-        texts.addWidget(self.title)
-        texts.addWidget(self.body)
-        lay.addLayout(texts, 1)
-        self.button = button("", "ghost", "sm")
-        self.button.clicked.connect(self.action.emit)
-        lay.addWidget(self.button, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.setMinimumHeight(48)
-        self.hide()
-
-    def show_message(self, kind: str, title: str, body: str = "", action: str = "") -> None:
-        self.setProperty("kind", kind)
-        self.style().unpolish(self)
-        self.style().polish(self)
-        name, token = self.ICONS.get(kind, self.ICONS["info"])
-        self.icon.setPixmap(icons.pixmap(name, token, 20))
-        self.title.setText(rich(title))
-        self.body.setText(rich(body))
-        self.body.setVisible(bool(body))
-        self.button.setText(action)
-        self.button.setVisible(bool(action))
-        self.show()
+        super().__init__(parent, closable=False)
 
 
 class InlineLoading(QWidget):
@@ -787,9 +803,13 @@ class EmptyBlock(QWidget):
         self.title.setWordWrap(True)
         self.body = label(body, "secondary", wrap=True)
         self.body.setMaximumWidth(420)
-        lay.addWidget(self.title, 0, Qt.AlignmentFlag.AlignHCenter if centred else Qt.AlignmentFlag.AlignLeft)
+        # wrapped labels take the column width (an alignment flag would shrink them to their size hint and clip
+        # the second line: "This composition was" in fix-needed 18.png); the text itself is aligned instead
+        for w in (self.title, self.body):
+            w.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        lay.addWidget(self.title)
         lay.addSpacing(8)
-        lay.addWidget(self.body, 0, Qt.AlignmentFlag.AlignHCenter if centred else Qt.AlignmentFlag.AlignLeft)
+        lay.addWidget(self.body)
         if centred:
             self.title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
             self.body.setAlignment(Qt.AlignmentFlag.AlignHCenter)
@@ -807,9 +827,15 @@ class EmptyBlock(QWidget):
             lay.addLayout(row)
         if centred:
             outer.addStretch(1)
-            outer.addWidget(col, 0, Qt.AlignmentFlag.AlignHCenter)
+            col.setMaximumWidth(480)
+            row_ = QHBoxLayout()
+            row_.addStretch(1)
+            row_.addWidget(col, 4)
+            row_.addStretch(1)
+            outer.addLayout(row_)
             outer.addStretch(2)
         else:
+            col.setMaximumWidth(460)
             outer.addWidget(col)
             outer.addStretch(1)
 

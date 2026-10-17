@@ -85,7 +85,9 @@ class ThinScrollBar(QScrollBar):
         if self.maximum() <= self.minimum():
             return
         p = QPainter(self)
-        token = "border-strong-02" if (self._hover or self._drag) else "border-strong-01"
+        # rest / hover / drag: the thumb only changes colour - its 4 px pill geometry never moves (brief 22)
+        token = ("scrollbar-thumb-active" if self._drag else
+                 "scrollbar-thumb-hover" if self._hover else "scrollbar-thumb")
         crisp.fill_pill(p, self.thumb_rect(), t(token))        # maximum roundness: a 4 px pill
         p.end()
 

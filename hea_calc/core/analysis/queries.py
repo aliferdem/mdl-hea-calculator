@@ -21,7 +21,7 @@ from ..repository import RunInfo, design_table, q
 from .metrics import DESCRIPTORS, METRIC_KEYS, decimals_for
 from .models import CLASSES
 from .scope import CollectionScope
-from .stats import QUARTILES, type7_positions
+from .stats import QUARTILES, tukey_fences, type7_positions
 
 RAW_POINT_LIMIT = 50_000          # plotting spec section 4: RAW up to this many points
 SAMPLE_TARGET = 20_000            # points drawn in a sampled scatter
@@ -451,6 +451,23 @@ class ScopeQuery:
                 groups[gv].update(q1=vals[0], median=vals[1], q3=vals[2])
             out[m.id] = {k: groups[k] for k in dim_order(group, groups.keys())}
         return {"group": group, "exact": True, "metrics": out}
+
+    # -------------------------------------------------------------- statistical outliers
+    def outliers(self, mid: str) -> dict:
+        """Tukey fences of one metric and the number of values outside them (``stats.tukey_fences``).
+        ``fences`` is None where the method is not meaningful - then no outlier warning is shown."""
+        st = self.statistics([mid])
+        s = st["metrics"][mid]
+        out = {"metric": mid, "n_valid": s["n_valid"], "fences": None, "n_low": 0, "n_high": 0, "exact": st["exact"]}
+        f = tukey_fences(s["q1"], s["q3"], s["n_valid"])
+        if f is None:
+            return out
+        m = self.metric(mid)
+        frm = self._from(m.needs_design)
+        lo, hi = self._exec(f"SELECT SUM({m.sql} < ?), SUM({m.sql} > ?) FROM {frm} WHERE {self.where} "
+                            f"AND {m.sql} IS NOT NULL", [f[0], f[1]] + self.params).fetchone()
+        out.update(fences=f, n_low=lo or 0, n_high=hi or 0)
+        return out
 
     # -------------------------------------------------------------- histogram
     def histogram(self, mid: str, bins: int | None = None, width: float | None = None) -> dict:

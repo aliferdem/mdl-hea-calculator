@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QSettings, Qt
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 from hea_calc.core.analysis import samples
 from hea_calc.core.analysis import state as S
@@ -351,7 +351,12 @@ def test_plot_selection_is_visual_only(win, app):
     scope = c.state.scope
     plot = win.analysis.collection.plot
     ids = list(plot.spec.data["ids"])[:5]
-    plot.selection_made.emit(set(ids))
+    # a click selects one point (no box / lasso tools); the selection is visual only
+    plot.point_clicked.emit(ids[0])
+    pump(app)
+    assert c.state.selection == frozenset(ids[:1]) and c.state.scope == scope and c.state.active is None
+    assert not hasattr(plot, "selection_made") and not hasattr(plot, "mode")
+    c.apply(S.select_points, ids)           # several points (controller API): still never the scope / active
     pump(app)
     assert c.state.selection == frozenset(ids) and c.state.scope == scope and c.state.active is None
     # the selection reaches the table only through the explicit id filter (no hidden checked state)
@@ -361,6 +366,83 @@ def test_plot_selection_is_visual_only(win, app):
     from hea_calc.core.results import IdSetFilter
     assert any(isinstance(f, IdSetFilter) for f in win.table.model.filters)
     assert win.table.model.view_count() == 5
+
+
+def _mouse(app, w, kind, pos, button, buttons):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+    e = QMouseEvent(kind, QPointF(*pos), w.mapToGlobal(QPointF(*pos)), button, buttons,
+                    Qt.KeyboardModifier.NoModifier)
+    app.sendEvent(w, e)
+
+
+def test_chart_tooltip_follows_carbon_chart_anatomy(win, app):
+    """Hovering a point shows the Carbon chart tooltip (CORRECT_DATA_VISUALIZATION): the point as header, its
+    values on both axes and its colour group with the legend colour - painted, inside the plot."""
+    from hea_calc.ui.analysis.plot import ChartTooltip, class_color
+    run = add_run(win, app, samples.c1_recipe())
+    collection(win, app, run, "plots")
+    c = win.analysis_ctl
+    c.apply(S.set_plot, c.state.plot.with_(type=SCATTER, x="dhmix", y="delta", color="model:M2"))
+    settle(win, app)
+    plot = win.analysis.collection.plot
+    plot.grab()                                  # paints: the hit-test positions exist
+    sx, sy, idx = plot._screen[len(plot._screen) // 2]
+    _mouse(app, plot, QEvent.Type.MouseMove, (sx, sy), Qt.MouseButton.NoButton, Qt.MouseButton.NoButton)
+    tip = plot.tip
+    assert isinstance(tip, ChartTooltip) and tip.isVisible()
+    assert plot.toolTip() == "", "the chart never uses the application text tooltip"
+    labels = [lab for lab, _v, _c in tip.rows]
+    assert labels[:2] == [plot.spec.x.symbol, plot.spec.y.symbol] and labels[2] == "M2"
+    cls = plot.spec.data["c"][idx]
+    assert tip.rows[2][1] == cls and tip.rows[2][2] == class_color(cls), "group row carries the legend colour"
+    assert tip.title and plot.rect().contains(tip.geometry()), "the tooltip stays inside the plot"
+    _mouse(app, plot, QEvent.Type.MouseMove, (2, 2), Qt.MouseButton.NoButton, Qt.MouseButton.NoButton)
+    assert not tip.isVisible()
+
+
+@pytest.mark.parametrize("button", ["middle", "right"])
+def test_plot_pans_by_middle_or_right_drag(win, app, button):
+    """No Pan tool, no Box / Lasso tools: dragging with the middle or right button pans the axes window
+    (brief §27, §28); the selection is untouched."""
+    run = add_run(win, app, samples.c1_recipe())
+    collection(win, app, run, "plots")
+    c = win.analysis_ctl
+    c.apply(S.set_plot, c.state.plot.with_(type=SCATTER, x="dhmix", y="delta", color="model:M2"))
+    settle(win, app)
+    plot = win.analysis.collection.plot
+    plot.grab()
+    b = Qt.MouseButton.MiddleButton if button == "middle" else Qt.MouseButton.RightButton
+    lim = plot._limits()
+    start = (plot.width() / 2, plot.height() / 2)
+    _mouse(app, plot, QEvent.Type.MouseButtonPress, start, b, b)
+    _mouse(app, plot, QEvent.Type.MouseMove, (start[0] + 60, start[1] - 30), Qt.MouseButton.NoButton, b)
+    _mouse(app, plot, QEvent.Type.MouseButtonRelease, (start[0] + 60, start[1] - 30), b, Qt.MouseButton.NoButton)
+    assert plot.window is not None
+    x0, x1, y0, y1 = plot.window
+    assert x0 < lim[0] and x1 < lim[1], "dragging right moves the window to lower x"
+    assert y0 < lim[2] and y1 < lim[3], "dragging up moves the window to lower y"
+    assert abs((x1 - x0) - (lim[1] - lim[0])) < 1e-9, "pan keeps the zoom"
+    assert c.state.selection == frozenset() and plot._pan_start is None
+    win.analysis.expand_btn.click()          # the workspace toolbar had the Box / Lasso / Pan tools
+    settle(win, app)
+    ws = win.workspace.collection
+    tools = {w.toolTip() or getattr(w, "tip_text", "") for w in ws.findChildren(QWidget)}
+    assert {"Zoom in", "Zoom out", "Reset axes", "Export"} <= tools
+    assert not tools & {"Box select", "Lasso select", "Pan"}
+    # point inspector: Carbon md buttons, everything inside the region (2.png clipped the model tags)
+    c.apply(S.select_points, [ws.plot.spec.data["ids"][0]])
+    settle(win, app)
+    from PySide6.QtWidgets import QPushButton
+    reg = win.workspace.collection.inspector_region
+    btns = [b for b in reg.findChildren(QPushButton) if b.text() in ("Analyse composition", "Show in results table")]
+    assert len(btns) == 2 and all(b.height() == 40 for b in btns)
+    from hea_calc.ui.analysis.composition_view import _ModelCell
+    cells = reg.findChildren(_ModelCell)
+    assert len(cells) == 8
+    for w in cells + btns:
+        r = w.rect().translated(w.mapTo(reg, QPoint(0, 0)))
+        assert r.right() <= reg.width() - 20, (w, r, reg.width())
 
 
 # ====================================================================== expanded workspace
@@ -407,14 +489,86 @@ def test_workspace_pages_build(win, app):
             for metric in ("delta_cn12", "dhmix"):
                 c.apply(S.update, stats_focus=metric)
                 settle(win, app)
-                assert c.data_keys["hist"][-1] == (metric,) or metric in str(c.data_keys["hist"])
-                assert metric in c.data["box"]["metrics"]
+                assert metric in str(c.data_keys["hist"]) and c.data.get("box") is None, \
+                    "one visualization (histogram) - the group comparison is not queried until chosen"
+            coll = win.workspace.collection
+            from hea_calc.ui.analysis.plot import PlotWidget
+            assert len([p for p in coll.ws_viz.findChildren(PlotWidget)]) == 1, "4.png: one chart, not two"
+            c.apply(S.update, stats_view="groups")
+            settle(win, app)
+            assert "dhmix" in c.data["box"]["metrics"]
+            coll = win.workspace.collection
+            plots = coll.ws_viz.findChildren(PlotWidget)
+            assert len(plots) == 1 and plots[0].spec.kind == "box"
+            assert coll.stats_view_sw.index() == 1
     assert c.data.get("box") is not None and c.data.get("hist") is not None
     c.apply(S.switch_context, S.COMPOSITION)
     for tab in S.COMP_TABS:
         c.apply(S.set_tab, tab)
         pump(app)
     assert win.workspace.comp_body.currentIndex() == 1
+
+
+def test_model_details_list_and_mse_a_reference(win, app):
+    """6.png / brief §36-37: a compact selection list (no chevron, no ring after a click) and every model's
+    citation in the one MSE-A form of ``core/references.py`` - the same text About and Help use."""
+    from PySide6.QtGui import QTextDocumentFragment
+    from PySide6.QtWidgets import QLabel
+    from hea_calc.core import references as R
+    from hea_calc.core.engine import MODEL_KEYS
+    calc_single(win, app, samples.S1)
+    win.table.model.wait()
+    c = win.analysis_ctl
+    c.set_active(win.table.model.page_rows()[0].id, by="table")
+    c.apply(S.switch_context, S.COMPOSITION)
+    c.apply(S.set_tab, "model_details")
+    win.set_expanded(True)
+    settle(win, app)
+    lst = win.workspace.model_list
+    assert lst.row_height == 40 and not lst.chevron and not lst.show_header
+    parent = lst.parentWidget()
+    assert lst.geometry().right() <= parent.width() - 20, "the list keeps the region padding"
+    for k in MODEL_KEYS:
+        c.apply(S.select_model, k)
+        settle(win, app)
+        assert lst.selected == MODEL_KEYS.index(k)
+        refs = [lab for lab in win.workspace.composition_details.findChildren(QLabel)
+                if lab.objectName() == "ModelReference"]
+        assert len(refs) == 1
+        text = QTextDocumentFragment.fromHtml(refs[0].text()).toPlainText()
+        assert text == R.model_citation(k) and "https://doi.org/" in text, (k, text)
+    md = R.markdown(R.MODEL_REFERENCES)
+    assert all(R.MODEL_REFERENCES[i].text() in md for i in range(8)), "Help uses the same citations"
+
+
+def test_statistics_outlier_indication(win, app):
+    """Brief §35 / §72: "N statistical outliers" (Tukey fences) beside the chart with the method in a toggletip;
+    a neutral statistical note, not a warning; absent where nothing lies outside the fences."""
+    from hea_calc.core.analysis.queries import ScopeQuery
+    from hea_calc.ui.analysis.collection_view import OUTLIER_TIP
+    from hea_calc.ui.widgets.tooltip import InfoButton
+    run = add_run(win, app, samples.c1_recipe())
+    collection(win, app, run, "statistics")
+    win.set_expanded(True)
+    c = win.analysis_ctl
+    con = win.repo.reader_connection()
+    try:
+        for metric in ("omega", "dhmix", "vec", "delta"):
+            c.apply(S.update, stats_focus=metric)
+            settle(win, app)
+            ref = ScopeQuery(con, c.state.scope, win.repo.get_run(run)).outliers(metric)
+            n = ref["n_low"] + ref["n_high"]
+            note = win.workspace.collection.outlier_note
+            if n:
+                assert note is not None and note.text() == f"{n:,} statistical outlier{'s' if n != 1 else ''}"
+                tips = [b for b in win.workspace.collection.ws_viz.findChildren(InfoButton)
+                        if b.tip_text == OUTLIER_TIP]
+                assert len(tips) == 1
+            else:
+                assert note is None, metric
+    finally:
+        con.close()
+    assert OUTLIER_TIP.startswith("Values outside Q1 − 1.5 × IQR to Q3 + 1.5 × IQR are marked as statistical outliers.")
 
 
 # ====================================================================== reports

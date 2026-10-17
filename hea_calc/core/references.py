@@ -107,6 +107,16 @@ def number(key: str) -> int:
     return next(i for i, r in enumerate(REFERENCES, 1) if r.key == key)
 
 
+def citation(r: Reference) -> str:
+    """The full MSE-A citation with its DOI URL - the one form used everywhere (Analysis, reports, About, Help)."""
+    return f"{r.text()} {r.url}".strip()
+
+
+def model_citation(key: str) -> str:
+    """Citation of model ``key`` (M1-M8)."""
+    return citation(next(r for r in MODEL_REFERENCES if r.key == key))
+
+
 def markdown(refs: tuple[Reference, ...] = REFERENCES, start: int = 1) -> str:
     """Numbered Markdown paragraphs ``[n] citation. DOI-link`` (Help › Scientific References)."""
     out = []

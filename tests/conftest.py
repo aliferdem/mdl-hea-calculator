@@ -30,9 +30,7 @@ def settle_composition(win, app, timeout: float = 60.0) -> None:
         sw._update_summary()
         task = sw._counter
     elif comp.mode == "expression":
-        e = comp.expr
-        e._parse_timer.stop()
-        e._count_timer.stop()
+        e = comp.expr                      # explicit Parse (inline syntax), then the background count
         e.parse()
         task = e._counter
     else:

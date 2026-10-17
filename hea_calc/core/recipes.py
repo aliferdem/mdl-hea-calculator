@@ -155,14 +155,22 @@ class ExpressionRecipe:
     expressions: tuple[Expression, ...]
     ranges: tuple[tuple[str, VariableRange], ...]
     text: str = ""
+    block_ranges: tuple = ()          # one tuple of (name, VariableRange) per block (inline syntax)
     kind = "expression"
 
+    @property
+    def spec(self):
+        """The range spec: per-block dicts (inline syntax) or one shared dict."""
+        if self.block_ranges:
+            return [dict(r) for r in self.block_ranges]
+        return dict(self.ranges)
+
     def estimate(self) -> int:
-        return count_combinations(list(self.expressions), dict(self.ranges))
+        return count_combinations(list(self.expressions), self.spec)
 
     @cached_property
     def space(self) -> ExpressionSpace:
-        return ExpressionSpace(list(self.expressions), dict(self.ranges))
+        return ExpressionSpace(list(self.expressions), self.spec)
 
     @property
     def variables(self) -> list[str]:
@@ -176,12 +184,21 @@ class ExpressionRecipe:
         axes = [{"name": v, "col": f"x{i}", "kind": "variable"} for i, v in enumerate(self.variables)]
         axes += [{"name": f"{el} at.%", "col": f"f{j}", "kind": "fraction", "unit": "at.%", "element": el}
                  for j, el in enumerate(self.elements)]
-        r = dict(self.ranges)
+        spec = self.spec
+
+        def rng(v):
+            return [v.minimum, v.maximum, v.step] + ([v.points] if v.points else [])
+        blocks = []
+        merged: dict = {}
+        for i, ex in enumerate(self.expressions):
+            r = spec[i] if isinstance(spec, list) else spec
+            mine = {k: rng(r[k]) for k in ex.variables if k in r}
+            for k, v in mine.items():
+                merged.setdefault(k, v)
+            blocks.append({"index": i, "name": None, "expression": ex.source, "variables": list(ex.variables),
+                           "ranges": mine})
         return {"mode": "expression", "elements": self.elements, "axes": axes,
-                "source": {"text": self.text,
-                           "blocks": [{"index": i, "name": None, "expression": ex.source,
-                                       "variables": list(ex.variables)} for i, ex in enumerate(self.expressions)],
-                           "ranges": {k: [v.minimum, v.maximum, v.step] for k, v in r.items()}}}
+                "source": {"text": self.text, "blocks": blocks, "ranges": merged}}
 
     def design(self, comps, envs, results) -> array:
         """Variable values (NaN = not used by the block) then the engine's at.% of every element."""
@@ -246,13 +263,13 @@ class ExpressionRecipe:
         return comps, names, envs, blocks
 
     def __call__(self):
-        b = generate_blocks(list(self.expressions), dict(self.ranges))
+        b = generate_blocks(list(self.expressions), self.spec)
         if not b.compositions:
             raise RangeError("No valid compositions for these ranges.")
         return "expression", b.names, b.compositions, b.variables
 
     def materialise(self) -> dict:
-        b = generate_blocks(list(self.expressions), dict(self.ranges))
+        b = generate_blocks(list(self.expressions), self.spec)
         if not b.compositions:
             raise RangeError("No valid compositions for these ranges.")
         return {"sources": "expression", "names": b.names, "comps": b.compositions, "variables": b.variables,
@@ -326,9 +343,17 @@ class BatchCount:
 
 
 def expression_count(expressions, ranges) -> BatchCount:
-    """Valid / skipped / duplicate counts of expression blocks (the live pre-flight summary)."""
-    valid, skipped, dups = count_blocks(list(expressions), dict(ranges))
+    """Valid / skipped / duplicate counts of expression blocks (the live pre-flight summary).  ``ranges`` is a
+    tuple of (name, range) pairs (shared) or a list of per-block dicts (inline syntax)."""
+    spec = ranges if (isinstance(ranges, list) and (not ranges or isinstance(ranges[0], dict))) else dict(ranges)
+    valid, skipped, dups = count_blocks(list(expressions), spec)
     return BatchCount(valid, skipped, dups)
+
+
+def expression_count_detail(expressions, ranges) -> dict:
+    """Per-block counts for the inline expression editor (runs in a worker process for large documents)."""
+    from .expression import count_blocks_detail
+    return count_blocks_detail(list(expressions), ranges)
 
 
 def compositions_tsv(names, comps) -> str:
