@@ -18,9 +18,10 @@ dev = [
     "pytest>=8",
     "matplotlib>=3.9",    # only for tools/render_equations.py (generated equation SVGs are committed)
 ]
-# optional Windows build: `uv sync --group build`
+# app build (tools/build.py): `uv run --group build tools/build.py`
 build = [
-    "Nuitka==2.4.8",
+    "Nuitka==4.3.3",
+    "patchelf==0.19.1.0 ; sys_platform == 'linux'",  # Nuitka needs it for Linux builds
 ]
 # installed by default too; CI installs only this group
 lint = [
