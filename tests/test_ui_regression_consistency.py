@@ -282,7 +282,6 @@ def test_at_percent_input_is_labelled_by_its_basis(win, app):
     html = C.name_html(rec.name)
     assert html.startswith("Cr<sub>12</sub>Mn<sub>20</sub>") and html.endswith(" (at.%)")
     # the table shows the full label; copy carries it
-    from hea_calc.ui.widgets.results_table import cell_runs
     assert win.table.model.cell_text(1, 0) == rec.name
 
 

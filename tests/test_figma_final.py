@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 from hea_calc.core.data import default_datasets  # noqa: E402
 from hea_calc.core import expression_lexer as L  # noqa: E402
-from hea_calc.core.expression import (VariableRange, count_combinations, parse_expression,  # noqa: E402
+from hea_calc.core.expression import (count_combinations, parse_expression,  # noqa: E402
                                       range_from_meta)
 from hea_calc.core.expression_doc import (DEFAULT_RANGE, LEXICAL, SEMANTIC, SYNTAX,  # noqa: E402
                                           apply_declaration_edits, parse_document, plan_declarations)
@@ -539,7 +539,6 @@ def test_analysis_identity_names_the_run_not_the_elements(win, app):
 
 def test_results_table_is_newest_first_until_a_column_is_sorted(win, app):
     for n in ("AlCoCrFeNi", "CoCrFeNi", "CoCrFeMnNi"):
-        els = {"Al": "Al", "Co": "Co"}
         comp = {e: 1 for e in ("Co", "Cr", "Fe", "Ni")}
         if n.startswith("Al"):
             comp["Al"] = 1

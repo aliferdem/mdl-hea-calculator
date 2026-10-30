@@ -634,7 +634,7 @@ def test_export_all_and_filtered_cover_the_dataset_not_the_page(win, app, engine
 
 
 def test_copy_visible_rows_is_page_scoped_and_copy_table_is_view_scoped(win, app, engine):
-    m = loaded(win, engine, 3_000)
+    loaded(win, engine, 3_000)
     win.table.pagination.size_box.setCurrentIndex(1)                 # 20
     win.copy_visible_rows()
     assert len(QApplication.clipboard().text().strip("\r\n").split("\r\n")) == 21

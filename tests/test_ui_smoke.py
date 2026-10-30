@@ -9,7 +9,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QRect, QSettings  # noqa: E402
-from PySide6.QtGui import QColor, QImage  # noqa: E402
+from PySide6.QtGui import QImage  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from hea_calc.ui.widgets.common import IconButton  # noqa: E402
@@ -545,7 +545,6 @@ def test_icon_only_buttons_centre_their_icon(win, app):
     """
     from hea_calc.ui.widgets.common import IconButton  # noqa: E402
 
-    from collections import Counter
     _one_result(win, app)
 
     def hx(c):

@@ -4,8 +4,8 @@ per-model data-support indicators and the element property readout.  Fixed geome
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (QAbstractButton, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QSpacerItem, QVBoxLayout,
                                QWidget)
 

@@ -36,11 +36,10 @@ def main():
     # Everything runs under the __main__ guard: the results writer and calculation workers are
     # spawned processes that re-import this file as __mp_main__.
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    from hea_calc.core import composition as C                                          # noqa: E402
     from PySide6.QtCore import QSettings, Qt                                    # noqa: E402
     from PySide6.QtWidgets import QApplication                                   # noqa: E402
 
-    app = QApplication(sys.argv)
+    _app = QApplication(sys.argv)
     from hea_calc.ui.theme import THEME, load_fonts                              # noqa: E402
 
     load_fonts()
@@ -261,7 +260,6 @@ def main():
         from hea_calc.core.results import ResultRow
         from hea_calc.core.spreadsheet import export_rows, read_compositions
         from hea_calc.core.engine import Engine
-        from hea_calc.core.composition import parse_formula
         tmp = Path(tempfile.mkdtemp())
         src = tmp / "in.csv"
         src.write_text("Formula\nCoCrFeNiMn\nFeCoNi(AlCu)0.2\n", encoding="utf-8")

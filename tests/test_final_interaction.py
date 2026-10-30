@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QSettings, Qt
-from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLabel, QApplication, QWidget
 

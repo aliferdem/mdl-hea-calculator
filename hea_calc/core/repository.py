@@ -1140,7 +1140,7 @@ class ViewBuilder:
         # keeps the GUI process 55 MiB smaller; helper threads make large sorts ~15 % faster.
         con = _connect(db_path, same_thread=False, cache_kib=16_384)
         con.execute("PRAGMA threads=4")
-        con.execute(f"ATTACH DATABASE ? AS vw", (str(views_path),))
+        con.execute("ATTACH DATABASE ? AS vw", (str(views_path),))
         con.execute("PRAGMA vw.journal_mode=WAL")
         con.execute("PRAGMA vw.synchronous=OFF")      # derived data only: rebuilt from results if lost
         # (the former Checked-results table vw.checked is gone with the Results checkbox column; explicit

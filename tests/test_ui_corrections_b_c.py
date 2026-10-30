@@ -59,7 +59,7 @@ def win(app):
 
 
 def enter(app, widget):
-    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtCore import QPointF
     from PySide6.QtGui import QEnterEvent
     from PySide6.QtWidgets import QApplication
     c = QPointF(widget.width() / 2, widget.height() / 2)
@@ -99,7 +99,6 @@ def test_caption_buttons_have_accessible_names_and_no_tooltip(win, app):
     assert bar.max_btn.accessibleName() == "Restore down" and bar.max_btn.toolTip() == ""
     bar.max_btn.set_maximized(False)
     # Snap Layouts / hit-testing are unchanged: the maximise button still answers HTMAXBUTTON's zone
-    from PySide6.QtCore import QPoint
     c = bar.max_btn.geometry().center()
     assert bar.hit_test(bar.row.mapTo(bar, c)) == "max"
     assert bar.hit_test(bar.row.mapTo(bar, bar.close_btn.geometry().center())) == "client"

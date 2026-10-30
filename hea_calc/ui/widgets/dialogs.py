@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QCheckBox, QDialog, QGridLayout, QHBoxLayout, QLa
                                QVBoxLayout, QWidget)
 
 from ...core.composition import parse_number
-from ...core.engine import DEFAULT_TCRIT_FRACTION, MODEL_KEYS, MODELS
+from ...core.engine import DEFAULT_TCRIT_FRACTION, MODELS
 from ...core.results import (COLUMNS, COLUMN_BY_KEY, DEFAULT_COLUMNS, IdSetFilter, ModelFilter, RangeFilter,
                                chooser_groups)
 from .scroll import inner_scroll_area
