@@ -287,7 +287,7 @@ class ScopeQuery:
             return self._grouped_statistics(metrics, group, exact_limit)
         design = any(m.needs_design for m in metrics)
         frm = self._from(design)
-        first = [f"COUNT(*)", "SUM(r.err != 0)"]
+        first = ["COUNT(*)", "SUM(r.err != 0)"]
         for m in metrics:
             und = f"SUM(r.err = 0 AND {m.sql} IS NULL AND ({m.undefined_sql}))" if m.undefined_sql else "0"
             first += [f"COUNT({m.sql})", f"AVG({m.sql})", f"MIN({m.sql})", f"MAX({m.sql})", und]
@@ -649,7 +649,7 @@ class ScopeQuery:
         for name, value in (fixed or {}).items():
             where += f" AND abs({self.metric(name).sql} - ?) <= ?"
             params += [float(value), tol]
-        cols = [f"r.result_id", "r.name", mx_.sql] + [m.sql for m in yms]
+        cols = ["r.result_id", "r.name", mx_.sql] + [m.sql for m in yms]
         if models:
             cols += [f"COALESCE(r.{q(k)}, '{NA}')" for k in MODEL_KEYS]
         rows = self._fetchall(self._exec(f"SELECT {', '.join(cols)} FROM {frm} WHERE {where} "

@@ -7,7 +7,12 @@ changes while a title-bar menu opens (flicker check).  Prints one JSON line; cap
 A multiplier other than 1 sets QT_SCALE_FACTOR for this diagnostic process only (100 / 150 % emulation on a 125 %
 display), as tools/dpi_harness.py does; production never sets it.
 """
-import ctypes, json, os, sys, tempfile, time
+import ctypes
+import json
+import os
+import sys
+import tempfile
+import time
 from pathlib import Path
 
 APP = str(Path(__file__).resolve().parents[1])

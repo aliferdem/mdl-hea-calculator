@@ -16,7 +16,7 @@ from hea_calc.core.analysis.scope import (FILTERED, CollectionScope, ResolvedSco
                                           freeze_filters)
 from hea_calc.core.analysis.stats import describe, quantile_type7
 from hea_calc.core.engine import NA_ERROR, NA_MISSING_DATA, NA_UNDEFINED
-from hea_calc.core.repository import ResultRepository, ViewTask
+from hea_calc.core.repository import ResultRepository
 from hea_calc.core.results import ModelFilter, RangeFilter
 
 

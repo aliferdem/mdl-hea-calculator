@@ -1068,7 +1068,6 @@ def test_setup_edits_undo_and_redo_one_step_each(win, app):
     win.composition.remove_element("Co")
     pump(app)
     assert undo_texts(win)[-1] == "Remove element Co" and "Co" not in tiles_selected(win)
-    states = []
     # Undo repeatedly: every step restores order, values and the periodic table
     win.undo()
     pump(app)
@@ -1172,7 +1171,7 @@ def test_rename_and_lock_undo(win, app):
 
 
 def test_undo_returns_to_the_mode_of_the_edit_and_mode_switches_are_not_steps(win, app):
-    sv = single_with(win, app, ("Co", "Fe"), "ratio")
+    single_with(win, app, ("Co", "Fe"), "ratio")
     n = win.undo_mgr.stack.count()
     win.composition.set_mode(1)
     win.composition.set_mode(0)

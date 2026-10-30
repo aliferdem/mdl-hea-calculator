@@ -368,6 +368,14 @@ The complete test suite contains approximately 1,650 tests and takes about 3–4
 machine. Tests involving native windows are optional and require a Windows desktop session. They can be enabled by
 setting `HEA_NATIVE_TESTS=1`.
 
+The code is checked with [ruff](https://docs.astral.sh/ruff/) (settings in `pyproject.toml`) on every pull request
+and every push to `main`. The same check can be run locally before committing; `--fix` removes unused imports and
+similar leftovers automatically:
+
+```powershell
+uv run ruff check --fix
+```
+
 When changing an equation, constant, numerical boundary or dataset value, the corresponding publication should be
 checked. The change must also be documented in `CALCULATION_AUDIT.md` and supported by a regression test against
 published numerical results.

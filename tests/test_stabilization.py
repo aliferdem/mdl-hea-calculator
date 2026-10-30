@@ -133,7 +133,7 @@ def test_compiled_evaluator_is_bit_identical_to_the_tree_evaluator(formula):
 
 def test_compiled_function_is_not_pickled_with_the_expression():
     import pickle
-    from hea_calc.core.expression import ExpressionSpace, parse_expression
+    from hea_calc.core.expression import ExpressionSpace
     from hea_calc.core.expression_doc import parse_document
     doc = parse_document("Al{x}CoCrFeNi\n0 <= x <= 1, step=0.5")
     space = ExpressionSpace(doc.expressions, doc.block_ranges)
@@ -651,7 +651,7 @@ def _rows(win, n=30):
 
 
 def _mouse(view, kind, r, c=2):
-    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtCore import QPointF
     from PySide6.QtGui import QMouseEvent
     vp = view.viewport()
     pos = view.visualRect(view.model().index(r, c)).center()
@@ -1564,7 +1564,6 @@ def test_documentation_links_have_hover_active_and_focus_states_without_layout_s
 
 @pytest.mark.parametrize("theme", ["dark", "light"])
 def test_inactive_state_line_keeps_its_meaning_subdued(win, app, theme):
-    from PySide6.QtGui import QColor
     from hea_calc.ui.theme import THEME, t
     THEME.set_theme(theme)
     win.apply_theme()

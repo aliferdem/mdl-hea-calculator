@@ -307,7 +307,7 @@ def test_drag_selects_cell_text_and_ctrl_c_copies_it(win, app):
     assert sel.isVisible() and sel.selected_text() == text
     assert not v.selectionModel().hasSelection(), "text selection, not item selection"
     QApplication.clipboard().setText("")
-    from PySide6.QtGui import QKeyEvent, QKeySequence
+    from PySide6.QtGui import QKeyEvent
     QApplication.sendEvent(sel, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier))
     assert QApplication.clipboard().text() == text.replace("−", "-")
     # a plain click ends it; nothing stays highlighted

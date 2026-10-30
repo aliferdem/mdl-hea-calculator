@@ -41,7 +41,7 @@ from ...core import composition as CMP
 from ...core.analysis import state as S
 from ...core.engine import MODEL_KEYS
 from ..theme import DETAILS_PANEL_MIN, PANEL_PADDING_X
-from ..widgets.common import IconButton, LineTabs
+from ..widgets.common import LineTabs
 from ..widgets.menu import CarbonMenu
 from ..widgets.tooltip import InfoButton
 from .collection_view import CollectionContent, ScopeBar

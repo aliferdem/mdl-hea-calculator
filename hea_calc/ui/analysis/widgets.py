@@ -938,7 +938,6 @@ def hstrip(table: QWidget) -> QWidget:
     scroll).  The table keeps its content-based minimum width - no clipped column - and scrolls sideways only
     when the region is narrower; 12 px under the rows are reserved for the bar so it never covers a row
     (§23)."""
-    from ..widgets.scroll import inner_scroll_area
     sa = inner_scroll_area(table, horizontal=True)
     sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     sa.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)

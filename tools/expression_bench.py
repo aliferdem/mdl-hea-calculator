@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import tempfile
 import time
@@ -65,9 +64,8 @@ def peak_mb() -> float:
 
 
 def recipes(nvars: int, n: int):
-    from hea_calc.core.expression_doc import parse_document
     from hea_calc.core.generation import SweepSpec
-    from hea_calc.core.recipes import ExpressionRecipe, SweepRecipe
+    from hea_calc.core.recipes import SweepRecipe
     lo, hi, step = grid(n)
     specs = [SweepSpec(el, 1.0, 1.0, 0.1, True) for el in ("Fe", "Co", "Ni")]
     specs += [SweepSpec(VARIED[i], lo, hi, step, True) for i in range(nvars)]

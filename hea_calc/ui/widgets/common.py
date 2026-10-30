@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QFrame, QHBoxLayou
 
 from .. import crisp, icons
 from .tooltip import CarbonToolTip, InfoButton, Toggletip, install_tooltips  # noqa: F401 (re-exported)
-from ..theme import (BODY_COMPACT_01, CONTROL_HEIGHT, LABEL_01, PANEL_PADDING_X, TAG_LONG_NAMES,
+from ..theme import (BODY_COMPACT_01, LABEL_01, PANEL_PADDING_X, TAG_LONG_NAMES,
                      THEME, font, t)
 
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import html as _html
 
-from PySide6.QtCore import QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (QBoxLayout, QCheckBox, QFrame, QHBoxLayout, QLabel, QSizePolicy, QStackedWidget, QVBoxLayout,
                                QWidget)
@@ -23,7 +23,7 @@ from ...core.analysis.metrics import DESCRIPTORS, GROUP_SHORT, METRIC_KEYS, form
 from ...core.analysis.plotting import (AUTO, BAR_GROUPED, BAR_STACKED, BINNED, BOX, HEATMAP, HISTOGRAM, LINE,
                                        PLOT_TYPES, RAW, SAMPLED, SCATTER, TYPE_LABELS, TYPE_SHORT, available_types,
                                        default_config, representation_text, validate)
-from ...core.analysis.queries import (DIM_BLOCK, DIM_CSTR, DIM_FAMILY, DIM_NONE, DIM_SIZE, RAW_POINT_LIMIT,
+from ...core.analysis.queries import (DIM_BLOCK, DIM_CSTR, DIM_FAMILY, DIM_SIZE, RAW_POINT_LIMIT,
                                       dim_label, dim_value_text, is_dimension, run_metrics)
 from ...core.analysis.scope import BASE_LABELS, COMBINED_RUN_ID, FILTERED, FULL, filter_text
 from ...core.engine import MODEL_KEYS, NA, NA_ERROR, NA_MISSING_DATA, NA_UNDEFINED, MODELS
@@ -33,7 +33,7 @@ from ..widgets.common import IconButton, button
 from ..widgets.common import retire
 from ..widgets.tooltip import InfoButton
 from .composition_view import mode_name
-from .plot import PlotSpec, PlotWidget, class_color, categorical
+from .plot import PlotSpec, PlotWidget, categorical
 from .widgets import (ROW_SM, ROW_XS, ActionableNotification, Cell, DataTable, Divider, Dropdown, EmptyBlock,
                       InlineLoading, KVRows, LabeledField, MultiSelect, SectionHeading, Skeleton, label,
                       CurrentStack, hstrip, open_popover, plain_text, rich, scroll_page)
@@ -719,7 +719,7 @@ class CollectionContent(QWidget):
         elif info is not None and info.status in ("cancelled", "failed", "interrupted"):
             note = ActionableNotification()
             verb = {"cancelled": "was cancelled", "failed": "failed", "interrupted": "was interrupted"}[info.status]
-            note.show_message("warning", f"Partial run",
+            note.show_message("warning", "Partial run",
                               f"This run {verb} after {info.calculated:,} of {info.expected or info.calculated:,} "
                               "compositions. The collection contains the stored results only.")
             lay.addWidget(note)

@@ -36,13 +36,13 @@ import re
 
 from PySide6.QtCore import QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QTextCursor, QTextBlockUserData
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from ...core import composition as C
 from ...core.data import Datasets
 from ...core.expression import MAX_COMBINATIONS, ExpressionError, GenerationCancelled, evaluate_positive
 from ...core.expression_doc import (Diagnostic, Document, LEXICAL, SEMANTIC, SYNTAX, parse_document,
-                                    plan_declarations, summary)
+                                    plan_declarations)
 from ...core.expression_lexer import ROLE_EXPRESSION, line_roles
 from ...core.generation import RangeError
 from ...core.limits import LARGE

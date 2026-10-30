@@ -55,8 +55,8 @@ def main() -> int:
         raise SystemExit("QT_SCALE_FACTOR is set: a native audit must run at the display's own scale")
     sys.path.insert(0, str(ROOT))
 
-    from PySide6.QtCore import QEvent, QPoint, QSettings, Qt, QTimer
-    from PySide6.QtGui import QCursor, QGuiApplication
+    from PySide6.QtCore import QPoint, QSettings, Qt, QTimer
+    from PySide6.QtGui import QGuiApplication
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication
 

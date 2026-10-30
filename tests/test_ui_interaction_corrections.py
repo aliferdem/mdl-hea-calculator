@@ -278,7 +278,6 @@ def test_committed_draft_rows_get_their_values(win, app):
 
 
 def test_drafts_never_reach_calculation_or_enumeration(win, app):
-    comp = win.composition
     sv = el_mode(win, app, 1)
     tiles(win, app, "Fe", "Ni", "Cr")
     pump(app, 30)
