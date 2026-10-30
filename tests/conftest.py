@@ -18,6 +18,38 @@ def engine():
     return Engine()
 
 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item):
+    """Destroy the main/analysis windows a test body created and left open.  close() only hides a top-level widget;
+    a leaked MainWindow stays connected to THEME.changed and is re-polished on every later theme switch, so the
+    suite slowed down the longer it ran.  Windows that existed before the body (fixtures, application singletons
+    such as the tooltip and Help) are left to their owners."""
+    app = _qapp()
+    before = set(app.topLevelWidgets()) if app is not None else set()
+    yield
+    app = _qapp()
+    if app is None:
+        return
+    from PySide6.QtCore import QEvent
+    from hea_calc.ui.analysis.panel import AnalysisPanel
+    from hea_calc.ui.main_window import MainWindow
+    leaked = [w for w in app.topLevelWidgets()
+              if w not in before and isinstance(w, (MainWindow, AnalysisPanel))]
+    for w in leaked:
+        w.close()
+        w.deleteLater()
+    if leaked:
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+
+
+def _qapp():
+    """The running QApplication, without importing Qt for the suites that never start one."""
+    if "PySide6.QtWidgets" not in sys.modules:
+        return None
+    return sys.modules["PySide6.QtWidgets"].QApplication.instance()
+
+
 def settle_composition(win, app, timeout: float = 60.0) -> None:
     """Composition setup recounts after a pause (debounced, in the background) and its footer says "Updating…"
     meanwhile, with Calculate disabled (Figma State=Recalculating).  Run the pending pre-flight now and wait for

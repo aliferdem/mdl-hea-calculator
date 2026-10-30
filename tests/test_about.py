@@ -56,7 +56,10 @@ def win(app):
     w.show()
     app.processEvents()
     yield w
+    from PySide6.QtCore import QEvent
     w.close()
+    w.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     app.processEvents()
 
 

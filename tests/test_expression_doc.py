@@ -191,7 +191,10 @@ def win(app):
     w.composition.set_mode(2)
     app.processEvents()
     yield w
+    from PySide6.QtCore import QEvent
     w.close()
+    w.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     THEME.set_theme("dark")
     app.processEvents()
 
