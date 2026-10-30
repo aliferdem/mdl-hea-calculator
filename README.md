@@ -1,8 +1,8 @@
-<div align="center">
+﻿<div align="center">
 
 # HEA Calculator
 
-**Desktop screening of high-entropy alloy compositions with eight published phase-formation criteria.**
+**Calculation of alloy descriptors and evaluation of eight published solid-solution formation criteria.**
 
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE.txt)
 ![Python 3.11](https://img.shields.io/badge/python-3.11-3776AB.svg)
@@ -10,8 +10,8 @@
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2011-0078D4.svg)
 ![Status: pre-release](https://img.shields.io/badge/status-pre--release-lightgrey.svg)
 
-[Features](#features) · [Science](#descriptors-and-models) · [Installation](#installation) ·
-[Quick start](#quick-start) · [Limitations](#interpreting-results) · [Citing](#citing)
+[Features](#features) Â· [Science](#descriptors-and-models) Â· [Installation](#installation) Â·
+[Quick start](#quick-start) Â· [Limitations](#interpreting-results) Â· [Citing](#citing)
 
 </div>
 
@@ -20,33 +20,41 @@
   <img src="docs/screenshots/dark/main-window.png" alt="HEA Calculator main window: periodic table, composition setup, Analysis panel and results table for CoCrFeMnNi" width="100%">
 </picture>
 
-HEA Calculator takes an alloy composition, or a whole family of them, and reports the thermodynamic and
-atomic-size descriptors used in the high-entropy alloy literature together with the verdicts of eight published
-solid-solution criteria (Yang & Zhang, Guo, Wang, Singh, Ye, Troparevsky, Senkov & Miracle, King). It is built for
-exploring composition space before experiments or before more expensive CALPHAD and first-principles work.
+HEA Calculator is a desktop application for calculating the thermodynamic and atomic-size parameters of high-entropy
+alloys (HEAs) and evaluating their tendency to form solid solutions. Eight criteria reported by Yang and Zhang, Guo,
+Wang, Singh, Ye, Troparevsky, Senkov and Miracle, and King are included. The application can be used to compare
+individual alloys or examine changes in the calculated parameters over a selected composition range. Such calculations
+are useful in the initial selection of alloy compositions, particularly before experimental work or more detailed
+CALPHAD and first-principles calculations.
 
-Every workflow (a single composition, a composition grid, parametric expressions or an imported spreadsheet) feeds
-one calculation engine. Each equation, radius set, binary dataset and threshold is traced to its publication in
-[`CALCULATION_AUDIT.md`](CALCULATION_AUDIT.md) and checked by regression tests against published tables.
+A single calculation engine is used for individual compositions, composition spaces, parametric expressions and
+compositions imported from spreadsheets. The equations, elemental properties, binary interaction data and limits
+used in the calculations are documented in [`CALCULATION_AUDIT.md`](CALCULATION_AUDIT.md). Reference values from
+the original publications are also used in regression tests.
 
 > [!IMPORTANT]
-> The criteria are empirical or semi-empirical screening rules. A prediction of **SS** says that a composition lies
-> inside a published criterion's solid-solution region. It does not show that a single phase is stable or will form
-> after a given processing route. See [Interpreting results](#interpreting-results).
+> The eight criteria are empirical or semi-empirical methods. An **SS** result indicates that the calculated
+> parameters satisfy the solid-solution condition of the corresponding model. It does not necessarily mean that the
+> alloy will form a single stable phase. Processing conditions, phase stability and transformation kinetics need to
+> be considered separately. Further details are given in [Interpreting results](#interpreting-results).
 
 ## Status
 
-HEA Calculator 1.0.0 is a pre-release. No binary distribution has been published yet. It runs from source.
+Version 1.0.0 is currently a pre-release, and a compiled installer has not been published. The application can be
+run from source.
 
 | | |
 |---|---|
-| **Tested** | Windows 11, Python 3.11, PySide6 6.7.3. Display scaling: 125 % on a physical 2160 × 1440 display; 100 % and 150 % in controlled, emulated tests |
-| **Not yet tested** | macOS and Linux. The Windows-specific code is guarded, but nobody has run the application on those systems |
-| **Not included** | A command-line interface or Python API. All workflows run through the desktop application |
+| **Tested** | Windows 11 with Python 3.11 and PySide6 6.7.3. Display scaling was tested at 125 % on a physical 2160 Ã— 1440 display, and at 100 % and 150 % under controlled emulation |
+| **Not yet tested** | Windows 10, macOS and Linux have not been tested. Windows-specific functionality is guarded in the code, but operation on macOS and Linux has not been verified |
+| **Not included** | There is currently no command-line interface or Python API. Calculations are carried out through the desktop interface |
 
 ## Features
 
 ### Defining compositions
+
+Three methods are available for entering alloy compositions, depending on whether a single alloy or a range of
+compositions is to be investigated.
 
 <table>
   <tr>
@@ -55,31 +63,34 @@ HEA Calculator 1.0.0 is a pre-release. No binary distribution has been published
     <td width="33%"><img src="docs/screenshots/dark/composition-expression.png" alt="Composition expression editor"></td>
   </tr>
   <tr>
-    <td><b>Single composition</b><br>Enter amounts as atomic ratio, at.%, wt.% or mass. The other columns are
-    converted live, with <i>Set equal</i> and <i>Normalize</i>.</td>
-    <td><b>Composition space</b><br>Min / max / step (or number of points) per element, in at. ratio, at.%, wt.%
-    or mass. Optional elements and a system-size filter produce sub-systems.</td>
-    <td><b>Composition expressions</b><br>Parametric formulas such as <code>AlxCoCrFeNi</code> with range lines,
-    several blocks and duplicate removal. Syntax highlighting and inline diagnostics are included.</td>
+    <td><b>Single composition</b><br>Element amounts can be entered as atomic ratios, at.%, wt.% or mass. The remaining units are converted automatically. <i>Set equal</i> and <i>Normalize</i> are available for adjusting the composition.</td>
+    <td><b>Composition space</b><br>A minimum, maximum and step size, or a number of points, can be defined for each element. Atomic ratio, at.%, wt.% and mass are supported. Optional elements and a system-size filter can be used to include smaller alloy systems.</td>
+    <td><b>Composition expressions</b><br>Parametric compositions, such as <code>AlxCoCrFeNi</code>, are defined using expressions and parameter ranges. Multiple expression blocks are supported, and repeated compositions are removed. The editor also provides syntax highlighting and error messages.</td>
   </tr>
 </table>
 
-- **Spreadsheet import.** Read `.xlsx`, `.xlsm` or `.csv` files with one formula column or one column per
-  element. Rows that can't be read are listed with a reason, and the valid rows are still calculated.
-- **Model coverage before you calculate.** The periodic table shows per-element data support for each model, and
-  composition setup warns when a selected element set leaves a model without data.
-- **Workload estimate.** Before a batch starts, the calculator gives the exact number of compositions, an estimated
-  runtime and the temporary disk space the results will need.
+Compositions can also be imported from `.xlsx`, `.xlsm` and `.csv` files. The files may contain either a column of
+alloy formulas or separate columns for the elements. If a row cannot be interpreted, the reason is reported without
+preventing the remaining valid rows from being calculated.
+
+Before starting a calculation, the available elemental data can be examined in the periodic table. The application
+indicates which models have sufficient data for the elements selected. For composition spaces and other batches, it
+also determines the number of compositions and estimates the calculation time and temporary disk-space requirement.
 
 ### Calculating and storing results
 
-- Batches are generated and calculated in background worker processes (up to eight), so the window stays
-  responsive. Results stream into a session SQLite database rather than into memory. Batches of up to 10,000,000
-  compositions are accepted.
-- The **results table** is a paged view of that database, with sorting, filtering, optional columns and an
-  Excel-style sticky header. Model verdicts appear as colour-coded class tags.
-- **Export** writes the whole dataset or the filtered view to Excel or CSV at full precision. Exports above Excel's
-  row limit are split or sent to CSV, never truncated. Results are temporary, so export what you want to keep.
+Batch calculations are performed using background worker processes, with up to eight workers. The calculated results
+are written to a temporary SQLite database in portions rather than keeping the complete dataset in memory. This
+allows the interface to remain responsive while calculations are running. The accepted upper limit is 10,000,000
+compositions per batch.
+
+The results table reads the database in pages and provides sorting, filtering and optional columns. Its header remains
+visible while scrolling, and the classifications obtained from the models are displayed with colour-coded labels.
+
+The complete set of results, or the results remaining after filtering, can be exported to Excel or CSV. Numerical
+values are exported at full precision. When the number of rows exceeds the Excel limit, the output is divided between
+files or written to CSV rather than omitting rows. The session database is temporary; results that need to be kept
+should therefore be exported.
 
 ### Analysis
 
@@ -89,22 +100,22 @@ HEA Calculator 1.0.0 is a pre-release. No binary distribution has been published
     <td width="50%"><img src="docs/screenshots/dark/analysis-statistics.png" alt="Collection statistics"></td>
   </tr>
   <tr>
-    <td><b>Composition analysis</b>: normalised composition in every unit, key and full-precision descriptors,
-    each model's verdict with its criterion, values, cautions and N/A reasons.</td>
-    <td><b>Collection analysis</b>: statistics, scatter, line, histogram, box, heatmap and class-count plots over a
-    calculation run. Missing values are counted, never plotted or averaged as zero.</td>
+    <td><b>Composition analysis</b><br>Shows the normalized composition in the supported units, the calculated descriptors with their full numerical values, and the classification, criterion and possible limitations of each model. Reasons for N/A results are included.</td>
+    <td><b>Collection analysis</b><br>Provides statistical results and scatter, line, histogram, box, heatmap and class-count plots for a calculation batch. Missing numerical values are counted separately; they are not included as zeros in the plots or statistical calculations.</td>
   </tr>
 </table>
 
-Collections can be opened in an expanded workspace or a separate window. Composition and collection reports export
-to PDF; statistics and plotted data export to CSV, and plots export to SVG or PNG.
+A collection can be examined in an expanded workspace or in a separate window. Reports for individual compositions
+and collections can be saved as PDF. Statistical tables and plotted data can be exported to CSV, while the figures can
+be saved as SVG or PNG.
 
 ### Interface
 
-Light and dark themes (or follow Windows), undo/redo, keyboard shortcuts, collapsible panels and built-in
-documentation (*Help › Documentation*). The layout is designed for high-DPI displays. The visual design follows the
-[Carbon Design System](https://carbondesignsystem.com/) v11 (tokens, interaction states, IBM Plex Sans, Carbon icons),
-reimplemented in Qt widgets. It is not an IBM product and does not use Carbon's web components.
+The application includes light and dark themes, an option to follow the Windows theme, undo and redo, keyboard
+shortcuts and panels that can be collapsed. Documentation is accessible through *Help â€º Documentation*. The interface
+was developed for high-DPI displays using PySide6. Its colours, typography, icons and interaction states are based on
+the [Carbon Design System](https://carbondesignsystem.com/) v11 and implemented as Qt widgets. The application is not
+an IBM product and does not use Carbon's web components.
 
 <details>
 <summary><b>Light theme</b></summary>
@@ -117,77 +128,92 @@ reimplemented in Qt widgets. It is not an IBM product and does not use Carbon's 
 
 ### Calculated quantities
 
-All quantities use normalised atomic fractions *c<sub>i</sub>*. Compositions need at least two elements.
+The calculations are based on normalized atomic fractions, *c<sub>i</sub>*. At least two elements must be present in
+a composition. Table 1 summarizes the main quantities, equations and data sources used in the application.
 
-| Quantity | As implemented | Data source | Nature |
+| Quantity | Equation or method | Data source | Description |
 |---|---|---|---|
-| ΔS<sub>mix</sub> | −R Σ *c<sub>i</sub>* ln *c<sub>i</sub>* | — | Ideal configurational entropy |
-| ΔH<sub>mix</sub> | Σ<sub>i&lt;j</sub> 4 *c<sub>i</sub>c<sub>j</sub>* ΔH<sub>ij</sub> | Takeuchi & Inoue (2005), Miedema liquid enthalpies | Regular-solution estimate |
-| T<sub>m</sub>, ρ | Rule of mixtures (ρ = Σ*c<sub>i</sub>M<sub>i</sub>* / Σ*c<sub>i</sub>V<sub>i</sub>*) | Elemental tables; Miedema molar volumes | Approximation without excess terms |
-| VEC | Σ *c<sub>i</sub>* VEC<sub>i</sub>; FCC if ≥ 8.0, BCC if < 6.87 | Guo et al. (2011) | Empirical structure rule |
-| δ | 100 √Σ *c<sub>i</sub>*(1 − *r<sub>i</sub>*/r̄)² | Guo & Liu (2011) radii | Size mismatch, used by M2–M5 |
-| δ<sub>CN12</sub> | Same equation | Kittel CN12 radii | Size mismatch, used by M1 |
-| Ω, γ, Λ, φ, Φ, ΔH<sub>IM</sub>, k<sub>1</sub><sup>cr</sup> | Per model, see below | — | Model-specific parameters |
+| Î”S<sub>mix</sub> | âˆ’R Î£ *c<sub>i</sub>* ln *c<sub>i</sub>* | â€” | Ideal configurational entropy |
+| Î”H<sub>mix</sub> | Î£<sub>i&lt;j</sub> 4 *c<sub>i</sub>c<sub>j</sub>* Î”H<sub>ij</sub> | Takeuchi & Inoue (2005), Miedema liquid enthalpies | Regular-solution estimate |
+| T<sub>m</sub>, Ï | Rule of mixtures (Ï = Î£*c<sub>i</sub>M<sub>i</sub>* / Î£*c<sub>i</sub>V<sub>i</sub>*) | Elemental tables; Miedema molar volumes | Approximation without excess terms |
+| VEC | Î£ *c<sub>i</sub>* VEC<sub>i</sub>; FCC if â‰¥ 8.0, BCC if < 6.87 | Guo et al. (2011) | Empirical structure rule |
+| Î´ | 100 âˆšÎ£ *c<sub>i</sub>*(1 âˆ’ *r<sub>i</sub>*/rÌ„)Â² | Guo & Liu (2011) radii | Atomic-size mismatch used in M2â€“M5 |
+| Î´<sub>CN12</sub> | Same equation | Kittel CN12 radii | Atomic-size mismatch used in M1 |
+| Î©, Î³, Î›, Ï†, Î¦, Î”H<sub>IM</sub>, k<sub>1</sub><sup>cr</sup> | Calculated according to the corresponding model | â€” | Model-dependent parameters |
 
-The two size mismatches are kept apart on purpose: each publication was calibrated with its own radius set.
-Electronegativity differences and an e/a ratio are **not** computed.
-[Symbols, parameters and units](hea_calc/docs/pages/symbols.md) has the full list.
+Two atomic-radius datasets are used because the models were developed with different definitions of atomic size.
+Using one common radius set would change the calculated values and, consequently, could affect the resulting
+classifications. Electronegativity differences and the e/a ratio are not calculated. The remaining symbols, their
+units and definitions are given under [Symbols, parameters and units](hea_calc/docs/pages/symbols.md).
 
 ### Phase-formation criteria
 
+The eight criteria and the conditions implemented in the calculation engine are given in Table 2. Their numerical
+limits are retained from the corresponding publications.
+
 | | Publication | Criterion (as implemented) | Classes |
 |---|---|---|---|
-| **M1** | Yang & Zhang (2012) | SS if Ω ≥ 1.1 and δ<sub>CN12</sub> ≤ 6.6 % | SS, MP |
-| **M2** | Guo et al. (2013) | SS if δ ≤ 6.6 % and −11.6 ≤ ΔH<sub>mix</sub> ≤ 3.2 kJ mol⁻¹; MG if δ > 6.4 % and ΔH<sub>mix</sub> < −12.2 kJ mol⁻¹ | SS, MG, MP |
-| **M3** | Wang et al. (2015) | SS if γ < 1.175 | SS, MP |
-| **M4** | Singh et al. (2014) | SS if Λ > 0.96; SS+IM if 0.24 ≤ Λ ≤ 0.96; IM if Λ < 0.24 | SS, SS+IM, IM |
-| **M5** | Ye et al. (2015) | SS if φ ≥ 20 | SS, MP |
-| **M6** | Troparevsky et al. (2015) | SS if −TΔS<sub>mix</sub> < ΔH<sub>f</sub>(i,j) < 37 meV/atom for every pair | SS, IM, MP |
-| **M7** | Senkov & Miracle (2016) | SS if ΔH<sub>mix</sub> − TΔS<sub>mix</sub> < ΔH<sub>IM</sub> − k<sub>2</sub>TΔS<sub>mix</sub>, k<sub>2</sub> = 0.6 | SS, IM |
-| **M8** | King et al. (2016) | SS if Φ ≥ 1, with Φ from Miedema-model ΔG<sub>ss</sub> and ΔG<sub>max</sub> | SS, MP |
+| **M1** | Yang & Zhang (2012) | SS if Î© â‰¥ 1.1 and Î´<sub>CN12</sub> â‰¤ 6.6 % | SS, MP |
+| **M2** | Guo et al. (2013) | SS if Î´ â‰¤ 6.6 % and âˆ’11.6 â‰¤ Î”H<sub>mix</sub> â‰¤ 3.2 kJ molâ»Â¹; MG if Î´ > 6.4 % and Î”H<sub>mix</sub> < âˆ’12.2 kJ molâ»Â¹ | SS, MG, MP |
+| **M3** | Wang et al. (2015) | SS if Î³ < 1.175 | SS, MP |
+| **M4** | Singh et al. (2014) | SS if Î› > 0.96; SS+IM if 0.24 â‰¤ Î› â‰¤ 0.96; IM if Î› < 0.24 | SS, SS+IM, IM |
+| **M5** | Ye et al. (2015) | SS if Ï† â‰¥ 20 | SS, MP |
+| **M6** | Troparevsky et al. (2015) | SS if âˆ’TÎ”S<sub>mix</sub> < Î”H<sub>f</sub>(i,j) < 37 meV/atom for every pair | SS, IM, MP |
+| **M7** | Senkov & Miracle (2016) | SS if Î”H<sub>mix</sub> âˆ’ TÎ”S<sub>mix</sub> < Î”H<sub>IM</sub> âˆ’ k<sub>2</sub>TÎ”S<sub>mix</sub>, k<sub>2</sub> = 0.6 | SS, IM |
+| **M8** | King et al. (2016) | SS if Î¦ â‰¥ 1, with Î¦ from Miedema-model Î”G<sub>ss</sub> and Î”G<sub>max</sub> | SS, MP |
 
-SS solid solution · MP multiple phases (not a single solid solution) · IM intermetallic · SS+IM solid solution with
-intermetallic · MG metallic glass · **N/A** not evaluated
+The classes are **SS** (solid solution), **MP** (multiple phases, or not classified as a single solid solution),
+**IM** (intermetallic), **SS+IM** (solid solution with intermetallic), and **MG** (metallic glass). **N/A** indicates
+that the model could not be evaluated.
 
-M6 and M7 are evaluated at 0.55 T<sub>m</sub> unless you set an annealing temperature in *Calculation settings*.
-Binary formation enthalpies come from the Troparevsky et al. supplemental matrix. King's Miedema terms use Bakker's
-(1998) parameters.
+For M6 and M7, the default temperature is 0.55 T<sub>m</sub>. This value can be replaced by an annealing temperature
+in *Calculation settings*. The binary formation enthalpies required by the Troparevsky model were taken from the
+supplementary matrix of the publication. The Miedema parameters used for King's criterion are based on Bakker (1998).
 
 <details>
-<summary><b>Implementation decisions that affect results</b></summary>
+<summary><b>Implementation details affecting the calculations</b></summary>
 <br>
 
-These are documented with evidence in [`CALCULATION_AUDIT.md`](CALCULATION_AUDIT.md):
+A number of decisions were necessary when the published criteria were implemented. Their sources and the reasons
+for the decisions are discussed in [`CALCULATION_AUDIT.md`](CALCULATION_AUDIT.md).
 
-- **Inclusive and strict bounds follow each publication.** Inclusive comparisons tolerate floating-point noise
-  (relative 10⁻¹²). Without that, CoCrFeNiCu would compute ΔH<sub>mix</sub> = 3.200000000000001 and fail M2.
-  Strict bounds are compared exactly.
-- **M2** has no numeric boundary for Guo's intermetallic region, which the paper only draws. Compositions outside
-  both printed criteria are reported as MP with a caution, and SS is not separated from IM.
-- **M7** was derived for ΔH<sub>mix</sub> < 0. Other compositions are still evaluated with Eq. 6 but marked
-  *Extrapolated*.
-- **M8** uses Φ ≥ 1 alone. The δ ≤ 6.6 % screen in King et al. is a candidate-generation filter (§3.4), not part of
-  the criterion (§3.1).
-- **Troparevsky data.** 43 published cells lie outside the range of the publication's own figure. They are kept as
-  published, not corrected. Predictions that depend on them are marked *Flagged binary data*.
-- **Undefined ratios** (for example Ω when ΔH<sub>mix</sub> = 0) give N/A with a reason, never ±∞.
-- **Missing data is never zero.** A missing elemental value or binary pair makes only the models that depend on it
-  N/A. Everything else is still evaluated.
+- **Numerical boundaries.** Strict and inclusive inequalities were implemented according to the publications. For
+  inclusive boundaries, a relative tolerance of 10â»Â¹Â² is used to account for floating-point rounding. For example,
+  Î”H<sub>mix</sub> for CoCrFeNiCu is represented as 3.200000000000001. Without the tolerance, the composition would
+  incorrectly fall outside the M2 boundary of 3.2 kJ molâ»Â¹. Strict inequalities are evaluated without this tolerance.
+- **M2.** Guo et al. illustrate the intermetallic region without giving a numerical boundary. Thus, compositions
+  satisfying neither of the two printed conditions are assigned MP with a caution. The calculation does not identify
+  a separate intermetallic region from the figure.
+- **M7.** The criterion was derived for Î”H<sub>mix</sub> < 0. Equation 6 is also evaluated for compositions outside
+  that range, but these results are identified as *Extrapolated*.
+- **M8.** The implemented criterion is Î¦ â‰¥ 1. The Î´ â‰¤ 6.6 % condition in Section 3.4 of King et al. was applied
+  during the selection of candidate compositions, whereas the criterion itself is given in Section 3.1.
+- **Troparevsky dataset.** There are 43 cells in the published data that lie outside the range represented in the
+  publication's figure. The original values were retained. Calculations involving these values are marked
+  *Flagged binary data*.
+- **Undefined parameters.** Some ratios cannot be calculated for particular compositions, such as Î© when
+  Î”H<sub>mix</sub> = 0. The model is then reported as N/A with an explanation rather than assigning an infinite value.
+- **Incomplete data.** When elemental or binary interaction data are unavailable, only the models requiring those
+  values are reported as N/A. The other models are still calculated; missing values are not replaced with zero.
 
 </details>
 
 ### Validation
 
-Regression tests in [`tests/`](tests) compare the engine with values transcribed from the publications
-([`tests/reference/`](tests/reference)): Yang & Zhang Table 1, Guo et al. Table 1, Singh et al. Table 1, Ye et al.
-excess entropies, Senkov & Miracle ΔH<sub>IM</sub> (44 of 45 values reproduced), King et al.'s worked examples, and
-Bakker Table A2 (all 840 transition-metal pairs within ±2.1 kJ mol⁻¹). Remaining disagreements with published
-tables, and the reason for each, are listed in section 8 of the audit.
+Regression tests were prepared using numerical values reported in the original publications. The test files are in
+[`tests/`](tests), and the transcribed reference data are in [`tests/reference/`](tests/reference). They include
+Table 1 of Yang and Zhang, Table 1 of Guo et al., Table 1 of Singh et al., the excess-entropy values of Ye et al.,
+Senkov and Miracle's Î”H<sub>IM</sub> values, and the worked examples of King et al.
+
+For Senkov and Miracle, 44 out of 45 reported Î”H<sub>IM</sub> values were reproduced. In addition, the 840
+transition-metal pairs of Bakker's Table A2 were reproduced within Â±2.1 kJ molâ»Â¹. The remaining differences from
+the published values, together with their possible causes, are documented in Section 8 of
+[`CALCULATION_AUDIT.md`](CALCULATION_AUDIT.md).
 
 ## Installation
 
-**Requirements:** Windows 11 (Windows 10 is untested) and Python 3.11. Large batches also need temporary disk
-space; the calculator estimates it before starting.
+Windows 11 and Python 3.11 are required for the tested configuration. Windows 10 has not been tested. Batch
+calculations also require temporary disk space, which is estimated before the calculation begins.
 
 ```powershell
 git clone <repository-url> hea-calculator
@@ -197,169 +223,202 @@ py -3.11 -m venv .venv
 .venv\Scripts\python main.py
 ```
 
-`requirements.txt` pins PySide6 6.7.3 and installs openpyxl (import) and XlsxWriter (Excel export). It also
-installs the development tools pytest, matplotlib and Nuitka, which the application doesn't need at runtime.
+The dependencies are listed in `requirements.txt`. PySide6 is pinned to version 6.7.3, while openpyxl and
+XlsxWriter are used for spreadsheet import and Excel export, respectively. The file also installs pytest,
+matplotlib and Nuitka as development tools, which are not required at runtime.
 
 ## Quick start
 
-**One composition.** Click Co, Cr, Fe, Mn and Ni in the periodic table, keep *At. ratio* at 1 each and select
-**Calculate**. For equiatomic CoCrFeMnNi the calculator reports ΔH<sub>mix</sub> = −4.16 kJ mol⁻¹,
-ΔS<sub>mix</sub> = 13.38 J mol⁻¹ K⁻¹, Ω = 5.79, δ = 3.27 % and VEC = 8.0 (FCC), and all eight models return SS.
+### Single composition
 
-Now try AlCoCrFeNi, which is experimentally BCC + B2. The models disagree:
+As a first example, select Co, Cr, Fe, Mn and Ni from the periodic table. Leave the atomic ratio of each element
+at 1 and press **Calculate**. For the equiatomic CoCrFeMnNi alloy, the following values are obtained:
+Î”H<sub>mix</sub> = âˆ’4.16 kJ molâ»Â¹, Î”S<sub>mix</sub> = 13.38 J molâ»Â¹ Kâ»Â¹, Î© = 5.79, Î´ = 3.27 %, and VEC = 8.0,
+corresponding to the FCC classification of the VEC rule. All eight models return SS for this composition.
+
+A different result is obtained for AlCoCrFeNi, for which BCC and B2 phases have been experimentally reported. The
+model classifications are shown below.
 
 | M1 | M2 | M3 | M4 | M5 | M6 | M7 | M8 |
 |:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | SS | MP | SS | SS+IM | MP | IM | IM | MP |
 
-This disagreement is expected. The criteria were calibrated on different alloy sets with different data, and
-comparing them is the point of the tool.
+It is seen that the criteria do not give the same result for this alloy. This is because they were developed using
+different datasets, assumptions and limits. The individual results should therefore be examined rather than treating
+the eight classifications as a single phase prediction.
 
-**A composition space.** Switch the mode to *Composition space* and give each element a range. For example, Cr, Mn
-and Ni from 0.5 to 1.5, Fe from 0.8 to 1.2 and Co fixed at 1.0, all in steps of 0.1, give 11 × 11 × 11 × 5 = 6,655
-compositions. The workload summary shows this count, with runtime and storage estimates, before you calculate.
-In at. ratio and mass bases, proportional duplicates such as 1:1 and 2:2 are calculated only once.
+### Composition space
 
-**An expression.** Switch to *Composition expression* and enter:
+Switch to *Composition space* and define the composition intervals for the elements. For example, Cr, Mn and Ni can
+be varied from 0.5 to 1.5, Fe from 0.8 to 1.2, while Co is kept constant at 1.0. Using a step size of 0.1 gives
+11 Ã— 11 Ã— 11 Ã— 5 = 6,655 compositions. The number of compositions, estimated runtime and temporary storage
+requirement are displayed before starting the calculation.
+
+When compositions are given as atomic ratios or masses, proportional entries such as 1:1 and 2:2 represent the same
+normalized alloy composition. These repeated entries are removed before calculation.
+
+### Composition expression
+
+In *Composition expression*, enter the following lines:
 
 ```text
 AlxCoCrFeNi
 0 <= x <= 1, step=0.1
 ```
 
-**Parse** (Ctrl+Enter) reports 11 compositions, from CoCrFeNi (x = 0) to AlCoCrFeNi (x = 1). In *Analysis ›
-Collection › Plots*, a *Line (ordered by parameter)* plot shows how each descriptor varies with x.
+Select **Parse**, or press Ctrl+Enter. The expression gives 11 compositions, starting with CoCrFeNi at x = 0 and
+ending with AlCoCrFeNi at x = 1. The resulting change in each descriptor can be examined in *Analysis â€º Collection â€º
+Plots* by selecting *Line (ordered by parameter)*.
 
-The built-in Help has walkthroughs: [first calculation](hea_calc/docs/pages/first-calculation.md),
+More detailed instructions are available in the documentation pages for the
+[first calculation](hea_calc/docs/pages/first-calculation.md),
 [composition space](hea_calc/docs/pages/composition-space.md),
 [expression syntax](hea_calc/docs/pages/expression-syntax.md) and
-[importing spreadsheets](hea_calc/docs/pages/importing.md).
+[spreadsheet import](hea_calc/docs/pages/importing.md).
 
 ## Interpreting results
 
-- **Treat verdicts as screening indicators.** All eight criteria are fitted to limited sets of mostly as-cast or
-  annealed alloys. They show tendencies, not equilibrium phase assemblages, kinetics or processing effects.
-- **MP means "not a single solid solution".** It does not identify which phases form.
-- **Only binary data are used.** Ternary and higher-order compounds are not considered.
-- **Read N/A as missing information, not as a phase.** The reason is shown in *Analysis › Models*.
-- **Check statuses.** *Extrapolated* and *Flagged binary data* mean a verdict carries less weight than an in-domain
-  prediction.
-- **Element coverage is not validation.** A model that can be evaluated for an element set has not been validated
-  on alloys of those elements.
-- **Rounding is for display only.** The table rounds values, but threshold comparisons use full precision. Exports
-  and *Analysis › Descriptors* show the full values.
+The calculated parameters and model classifications should be considered as preliminary indicators of phase
+formation. Each model was developed from a limited set of alloys, mainly in as-cast or annealed conditions. Thus,
+the classifications do not replace an examination of equilibrium phase stability, transformation kinetics or the
+effect of processing conditions.
 
-Details: [Scope and scientific limitations](hea_calc/docs/pages/scope.md) ·
-[Result labels](hea_calc/docs/pages/result-labels.md) ·
-[Binary interaction data](hea_calc/docs/pages/binary-data.md) ·
-[Elemental data](hea_calc/docs/pages/elemental-data.md)
+Several points are important when examining the results:
+
+- **MP** indicates that the criterion for a single solid solution was not satisfied. It does not determine which
+  additional phases are present.
+- **Binary interaction data** are used in the calculations. The formation of ternary or higher-order compounds is
+  not considered explicitly.
+- **N/A** indicates that a calculation could not be completed, rather than a predicted phase. The reason is given in
+  *Analysis â€º Models*.
+- Results marked **Extrapolated** or **Flagged binary data** require additional caution, since the criterion was
+  applied outside its stated range or uses a flagged data value.
+- The availability of elemental data does not mean that the model has been experimentally validated for every alloy
+  containing those elements.
+- Numerical values in the results table are rounded for readability. The calculations and boundary comparisons use
+  full precision. Full numerical values are available in exports and *Analysis â€º Descriptors*.
+
+For further explanation, see [Scope and scientific limitations](hea_calc/docs/pages/scope.md),
+[Result labels](hea_calc/docs/pages/result-labels.md),
+[Binary interaction data](hea_calc/docs/pages/binary-data.md) and
+[Elemental data](hea_calc/docs/pages/elemental-data.md).
 
 ## Documentation
 
 | Document | Contents |
 |---|---|
-| [`hea_calc/docs/pages/`](hea_calc/docs/pages) | The user documentation shown in *Help › Documentation*: workflows, models, data, results, export, shortcuts |
-| [`hea_calc/docs/pages/phase-models.md`](hea_calc/docs/pages/phase-models.md) | Each model's equation, criterion, bounds and limitations |
-| [`CALCULATION_AUDIT.md`](CALCULATION_AUDIT.md) | Scientific audit: sources, equations, units, datasets, decisions and remaining discrepancies |
+| [`hea_calc/docs/pages/`](hea_calc/docs/pages) | The documentation included in *Help â€º Documentation*, covering calculations, models, data, results, exports and keyboard shortcuts |
+| [`hea_calc/docs/pages/phase-models.md`](hea_calc/docs/pages/phase-models.md) | Equations, numerical limits and limitations of the eight models |
+| [`CALCULATION_AUDIT.md`](CALCULATION_AUDIT.md) | Sources of equations and data, implementation decisions, validation and remaining differences from published values |
 
-Links between Help pages use the application's internal `help://` scheme, so they don't resolve on GitHub.
+The Help window uses the internal `help://` address scheme for navigation between pages. These internal addresses
+do not function as links on GitHub.
 
 ## Architecture
+
+The main parts of the project are organized as follows:
 
 ```text
 main.py                 entry point (spawn-safe for worker processes)
 hea_calc/
   core/                 Qt-free logic
-    engine.py           the single calculation engine: descriptors, M1–M8, data-availability rules
+    engine.py           calculation engine: descriptors, M1â€“M8 and data-availability rules
     data.py             dataset loading (data/*.json, with provenance metadata)
     composition.py      unit conversion (at. ratio, at.%, wt.%, mass)
     generation.py       composition-space enumeration and exact counting
     expression*.py      expression lexer, parser, diagnostics and compiled evaluator
     jobs.py, recipes.py worker-process pool and batch generation
-    repository.py       session SQLite result store; sorting, filtering and export run in SQL
+    repository.py       session SQLite result store; SQL sorting, filtering and export
     analysis/           collection queries, statistics and report content
-  ui/                   PySide6 widgets, theme tokens, icons, Analysis views, Windows title-bar integration
+  ui/                   PySide6 widgets, theme tokens, icons, Analysis views and Windows title-bar integration
   docs/pages/           in-app documentation (Markdown)
-data/                   elemental properties, Takeuchi & Inoue ΔH_mix, Troparevsky ΔH_f
-tests/                  pytest suite; tests/reference/ holds values transcribed from publications
-tools/                  developer tools: screenshots, DPI and performance harnesses
+data/                   elemental properties, Takeuchi & Inoue Î”H_mix and Troparevsky Î”H_f
+tests/                  pytest tests; tests/reference/ contains values transcribed from publications
+tools/                  developer tools for screenshots, DPI and performance tests
 ```
 
-The user interface formats engine output and never computes a descriptor or verdict itself. Batches never hold the
-whole result set in one process. Workers send result chunks to a single writer process, and the table, plots and
-exports query the database.
+The calculation engine is separated from the Qt interface. The interface displays the descriptors and
+classifications returned by the engine rather than calculating them independently. For batch operations, the workers
+send portions of the results to one writer process. The results table, analysis functions and export operations then
+retrieve the required data from SQLite. Therefore, the complete batch does not have to be stored in the memory of a
+single process.
 
 ## Development
+
+The tests can be executed from the project directory using the following commands:
 
 ```powershell
 $env:QT_QPA_PLATFORM = "offscreen"
 .venv\Scripts\python -m pytest -q
 ```
 
-The full suite (about 740 tests) takes 15 to 20 minutes. Native-window tests are opt-in (`HEA_NATIVE_TESTS=1`) and need a Windows
-desktop session.
+The complete test suite contains approximately 740 tests and takes about 15â€“20 minutes. Tests involving native
+windows are optional and require a Windows desktop session. They can be enabled by setting `HEA_NATIVE_TESTS=1`.
 
-Scientific changes (equations, constants, thresholds or dataset values) need literature evidence, an entry in
-`CALCULATION_AUDIT.md` and a regression test against published values.
+When changing an equation, constant, numerical boundary or dataset value, the corresponding publication should be
+checked. The change must also be documented in `CALCULATION_AUDIT.md` and supported by a regression test against
+published numerical results.
 
 ## Origins and acknowledgements
 
-HEA Calculator is derived from **[HEACalculator](https://github.com/dogusariturk/HEACalculator)** by
-Doğuhan Sarıtürk, a GPL-3.0-licensed Python tool for the same family of parameters and solid-solution criteria. This
-project began in 2024 as an adaptation of that application. Its calculation engine, datasets, workflows and
-interface have since been rewritten and independently re-verified against the original publications. The original
-HEACalculator was used as a reference implementation during that work, and copyright in it remains with its author.
-If HEA Calculator is useful in your work, please also cite HEACalculator (see below).
+HEA Calculator was developed from [HEACalculator](https://github.com/dogusariturk/HEACalculator), an open-source
+Python application by DoÄŸuhan SarÄ±tÃ¼rk, distributed under GPL-3.0. The original application calculates a related
+set of thermodynamic parameters and solid-solution formation criteria. The present project started in 2024 as an
+adaptation of that work. During subsequent development, the calculation engine, datasets, composition-input methods
+and interface were rewritten. The numerical results were then checked against the corresponding publications, while
+the original HEACalculator was retained as a reference implementation. Copyright in the original project remains
+with its author.
 
-HEA Calculator is developed at the Metals Development Laboratory (MDL), Department of Metallurgical and Materials
-Engineering, Middle East Technical University (METU), Ankara.
+Development takes place at the Metals Development Laboratory (MDL), Department of Metallurgical and Materials
+Engineering, Middle East Technical University (METU), Ankara. The scientific models and source data are based on
+the publications listed under [References](#references). The project also uses Qt for Python (LGPL-3.0), openpyxl (MIT), XlsxWriter
+(BSD-2-Clause), IBM Plex Sans (SIL Open Font License 1.1) and Carbon icons (Apache-2.0).
 
-The scientific content rests on the publications listed under [References](#references). Third-party components:
-Qt for Python (LGPL-3.0), openpyxl (MIT), XlsxWriter (BSD-2-Clause), IBM Plex Sans (SIL Open Font License 1.1) and
-Carbon icons (Apache-2.0).
+The original HEACalculator should be cited alongside this project when the software is used in scientific work.
 
 ## Citing
 
-HEA Calculator has no DOI yet. Until a release is archived, cite the software by name, version and repository
-URL, together with the publications of the models you report.
+HEA Calculator does not currently have a DOI. Until an archived version is available, it can be referenced using
+the software name, version and repository URL. The publications corresponding to the reported models should also
+be cited.
 
-Please also cite the original HEACalculator:
+For the original HEACalculator, the following references are provided:
 
-> D. Sarıtürk, Y.E. Kalay, R. Arróyave, HEACalculator: An open-source Python tool for thermodynamic property
+> D. SarÄ±tÃ¼rk, Y.E. Kalay, R. ArrÃ³yave, HEACalculator: An open-source Python tool for thermodynamic property
 > calculation and solid solution prediction in high-entropy alloys, arXiv (2026).
 > https://doi.org/10.48550/arXiv.2606.19661
 >
-> D. Sarıtürk, HEACalculator, Zenodo (2019). https://doi.org/10.5281/zenodo.3590318
+> D. SarÄ±tÃ¼rk, HEACalculator, Zenodo (2019). https://doi.org/10.5281/zenodo.3590318
 
 ## References
 
 **Models**
 
 1. X. Yang, Y. Zhang, Prediction of high-entropy stabilized solid-solution in multi-component alloys, *Mater. Chem.
-   Phys.* 132 (2012) 233–238. https://doi.org/10.1016/j.matchemphys.2011.11.021
+   Phys.* 132 (2012) 233â€“238. https://doi.org/10.1016/j.matchemphys.2011.11.021
 2. S. Guo, Q. Hu, C. Ng, C.T. Liu, More than entropy in high-entropy alloys: Forming solid solutions or amorphous
-   phase, *Intermetallics* 41 (2013) 96–103. https://doi.org/10.1016/j.intermet.2013.05.002
+   phase, *Intermetallics* 41 (2013) 96â€“103. https://doi.org/10.1016/j.intermet.2013.05.002
 3. Z. Wang, Y. Huang, Y. Yang, J. Wang, C.T. Liu, Atomic-size effect and solid solubility of multicomponent alloys,
-   *Scr. Mater.* 94 (2015) 28–31. https://doi.org/10.1016/j.scriptamat.2014.09.010
+   *Scr. Mater.* 94 (2015) 28â€“31. https://doi.org/10.1016/j.scriptamat.2014.09.010
 4. A.K. Singh, N. Kumar, A. Dwivedi, A. Subramaniam, A geometrical parameter for the formation of disordered solid
-   solutions in multi-component alloys, *Intermetallics* 53 (2014) 112–119.
+   solutions in multi-component alloys, *Intermetallics* 53 (2014) 112â€“119.
    https://doi.org/10.1016/j.intermet.2014.04.019
 5. Y.F. Ye, Q. Wang, J. Lu, C.T. Liu, Y. Yang, Design of high entropy alloys: A single-parameter thermodynamic rule,
-   *Scr. Mater.* 104 (2015) 53–55. https://doi.org/10.1016/j.scriptamat.2015.03.023
+   *Scr. Mater.* 104 (2015) 53â€“55. https://doi.org/10.1016/j.scriptamat.2015.03.023
 6. M.C. Troparevsky, J.R. Morris, P.R.C. Kent, A.R. Lupini, G.M. Stocks, Criteria for predicting the formation of
    single-phase high-entropy alloys, *Phys. Rev. X* 5 (2015) 011041. https://doi.org/10.1103/PhysRevX.5.011041
 7. O.N. Senkov, D.B. Miracle, A new thermodynamic parameter to predict formation of solid solution or intermetallic
-   phases in high entropy alloys, *J. Alloys Compd.* 658 (2016) 603–607.
+   phases in high entropy alloys, *J. Alloys Compd.* 658 (2016) 603â€“607.
    https://doi.org/10.1016/j.jallcom.2015.10.279
 8. D.J.M. King, S.C. Middleburgh, A.G. McGregor, M.B. Cortie, Predicting the formation and stability of single phase
-   high-entropy alloys, *Acta Mater.* 104 (2016) 172–179. https://doi.org/10.1016/j.actamat.2015.11.040
+   high-entropy alloys, *Acta Mater.* 104 (2016) 172â€“179. https://doi.org/10.1016/j.actamat.2015.11.040
 
 **Data**
 
-9. S. Guo, C.T. Liu, *Prog. Nat. Sci.: Mater. Int.* 21 (2011) 433–446. Atomic radii (Table 1).
+9. S. Guo, C.T. Liu, *Prog. Nat. Sci.: Mater. Int.* 21 (2011) 433â€“446. Atomic radii (Table 1).
 10. A. Takeuchi, A. Inoue, Classification of bulk metallic glasses by atomic size difference, heat of mixing and
     period of constituent elements and its application to characterization of the main alloying element,
-    *Mater. Trans.* 46 (2005) 2817–2829. Liquid mixing enthalpies.
+    *Mater. Trans.* 46 (2005) 2817â€“2829. Liquid mixing enthalpies.
 11. H. Bakker, *Enthalpies in Alloys: Miedema's Semi-Empirical Model*, Trans Tech Publications, 1998. Miedema
     parameters (Tables A1, A2, A5).
 12. C. Kittel, *Introduction to Solid State Physics*, 8th ed., John Wiley & Sons, 2004. 12-coordination radii
@@ -368,6 +427,6 @@ Please also cite the original HEACalculator:
 
 ## License
 
-HEA Calculator is free software, distributed under the GNU General Public License version 3. See
-[`LICENSE.txt`](LICENSE.txt). It is provided without any warranty. Licence texts of third-party components are in
-[`License/`](License).
+HEA Calculator is distributed under version 3 of the GNU General Public License (GPL-3.0). The licence is provided
+in [`LICENSE.txt`](LICENSE.txt). The software is supplied without warranty. The licences of the third-party
+components are available in [`license/`](license).
