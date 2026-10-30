@@ -1,0 +1,24 @@
+[project]
+name = "hea-calculator"
+version = "1.0.0"         # keep in step with hea_calc.__version__
+description = "Desktop calculator for high-entropy alloy thermodynamic descriptors and phase-prediction models"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+# PySide6 6.7.3 publishes wheels for Python 3.9-3.12 only; 3.11 is the tested configuration (.python-version)
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "PySide6==6.7.3",
+    "openpyxl>=3.1",      # spreadsheet import
+    "XlsxWriter==3.2.0",  # spreadsheet export
+]
+
+[dependency-groups]
+# installed by default with `uv sync`
+dev = [
+    "pytest>=8",
+    "matplotlib>=3.9",    # only for tools/render_equations.py (generated equation SVGs are committed)
+]
+# optional Windows build: `uv sync --group build`
+build = [
+    "Nuitka==2.4.8",
+]

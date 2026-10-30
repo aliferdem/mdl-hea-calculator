@@ -215,17 +215,29 @@ the published values, together with their possible causes, are documented in Sec
 Windows 11 and Python 3.11 are required for the tested configuration. Windows 10 has not been tested. Batch
 calculations also require temporary disk space, which is estimated before the calculation begins.
 
+The project is managed with [uv](https://docs.astral.sh/uv/). `uv sync` installs Python 3.11 (pinned in
+`.python-version`) if needed and creates `.venv` with the exact dependency versions recorded in `uv.lock`.
+
 ```powershell
 git clone <repository-url> hea-calculator
 cd hea-calculator
+uv sync
+uv run main.py
+```
+
+Without uv, the same versions can be installed with pip:
+
+```powershell
 py -3.11 -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
 .venv\Scripts\python main.py
 ```
 
-The dependencies are listed in `requirements.txt`. PySide6 is pinned to version 6.7.3, while openpyxl and
-XlsxWriter are used for spreadsheet import and Excel export, respectively. The file also installs pytest,
-matplotlib and Nuitka as development tools, which are not required at runtime.
+The dependencies are declared in `pyproject.toml`. PySide6 is pinned to version 6.7.3, while openpyxl and
+XlsxWriter are used for spreadsheet import and Excel export, respectively. pytest and matplotlib are development
+tools, which are not required at runtime; `uv sync` installs them by default. Nuitka, used for the optional Windows
+build, is installed with `uv sync --group build`. After a dependency change in `pyproject.toml`, `uv lock` updates
+`uv.lock`, and `requirements.txt` is regenerated with the command recorded at the top of that file.
 
 ## Quick start
 
@@ -349,11 +361,12 @@ The tests can be executed from the project directory using the following command
 
 ```powershell
 $env:QT_QPA_PLATFORM = "offscreen"
-.venv\Scripts\python -m pytest -q
+uv run pytest -q
 ```
 
-The complete test suite contains approximately 740 tests and takes about 15–20 minutes. Tests involving native
-windows are optional and require a Windows desktop session. They can be enabled by setting `HEA_NATIVE_TESTS=1`.
+The complete test suite contains approximately 1,650 tests and takes about 3–4 minutes on a 16-core Linux
+machine. Tests involving native windows are optional and require a Windows desktop session. They can be enabled by
+setting `HEA_NATIVE_TESTS=1`.
 
 When changing an equation, constant, numerical boundary or dataset value, the corresponding publication should be
 checked. The change must also be documented in `CALCULATION_AUDIT.md` and supported by a regression test against
