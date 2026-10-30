@@ -1,4 +1,4 @@
-﻿# Created by https://www.toptal.com/developers/gitignore/api/python
+# Created by https://www.toptal.com/developers/gitignore/api/python
 # Edit at https://www.toptal.com/developers/gitignore?templates=python
 
 ### Python ###
@@ -188,3 +188,4 @@ design/screens/
 /UI_VISUAL_AUDIT.md
 .idea/
 /AGENTS.md
+.vscode/
