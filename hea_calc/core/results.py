@@ -22,11 +22,27 @@ class Column:
     default: bool = False
     group: str = "Descriptors"
     tooltip: str = ""
+    # 2026-10-28 (Table columns / Filter results): the model a descriptor belongs to exclusively (it is grouped under
+    # that model; shared descriptors have none), whether the chooser offers it, whether it sorts, and its chooser
+    # tooltip (definition, unit and caveats - no bibliographic reference, no repeated model name)
+    model: str | None = None
+    chooser: bool = True
+    sortable: bool = True
+    chooser_tip: str = ""
+    stored: bool = True                    # a column of the results table (False: derived when shown)
 
 
 COLUMNS: list[Column] = [
     Column("name", "Alloy", "Alloy", kind="text", default=True, group="Composition"),
-    Column("composition", "Composition (at.%)", "Composition (at.%)", kind="text", group="Composition"),
+    # kept for exports and stored layouts that ask for it; no longer offered in Table columns (2026-10-28)
+    Column("composition", "Composition (at.%)", "Composition (at.%)", kind="text", group="Composition", chooser=False),
+    Column("run", "Run", "Run", kind="num", decimals=0, group="Run", stored=False,
+           tooltip="The calculation run that produced the result",
+           chooser_tip="The calculation run that produced the result (Run 1, Run 2, …)."),
+    Column("variables", "Variables", "Variables", kind="text", group="Run", sortable=False, stored=False,
+           tooltip="Design values of the result: expression variables or composition-space grid values",
+           chooser_tip="The result's own design values: the expression's variables (x = 0.5) or the "
+                       "composition-space grid values. Empty for single compositions and imports."),
     Column("density", "ρ (g/cm³)", "ρ", "g cm⁻³", default=True, group="Physical",
            tooltip="Rule-of-mixtures density ΣcᵢMᵢ / ΣcᵢVᵢ"),
     Column("tm", "Tm (K)", "T<sub>m</sub>", "K", default=True, group="Thermodynamic",
@@ -38,7 +54,7 @@ COLUMNS: list[Column] = [
     Column("delta", "δ (%)", "δ", "%", default=True, group="Structural",
            tooltip="Atomic-size mismatch, Guo & Liu (2011) radii"),
     Column("delta_cn12", "δ CN12 (%)", "δ<sub>CN12</sub>", "%", group="Structural",
-           tooltip="Atomic-size mismatch, Kittel CN12 radii (Yang & Zhang, King)"),
+           tooltip="Atomic-size mismatch, Kittel CN12 radii (Yang & Zhang, M1)"),
     Column("vec", "VEC", "VEC", default=True, group="Structural", tooltip="Valence electron concentration"),
     Column("cstr", "Cryst. Str.", "Cryst. Str.", kind="text", default=True, group="Structural",
            tooltip="VEC rule (Guo et al. 2011): FCC ≥ 8.0, BCC < 6.87"),
@@ -69,7 +85,39 @@ COLUMNS: list[Column] = [
     Column(k, k, k, kind="model", default=True, group="Models", tooltip=MODELS[k].title + ". " + MODELS[k].criterion)
     for k in MODEL_KEYS
 ]
+MODEL_OWNERS = {'omega': 'M1', 'delta_cn12': 'M1', 'gamma': 'M3', 'lambda': 'M4', 'phi_ye': 'M5', 's_e': 'M5', 'hf_min': 'M6', 'hf_max': 'M6', 'hf_lower': 'M6', 'dhim': 'M7', 'k1': 'M7', 'k1cr': 'M7', 'phi_king': 'M8', 'dg_ss': 'M8', 'dg_max': 'M8'}
+CHOOSER_TIPS = {'density': 'Rule-of-mixtures density ΣcᵢMᵢ / ΣcᵢVᵢ (g cm⁻³).', 'tm': 'Rule-of-mixtures melting temperature (K).', 'dhmix': 'Regular-solution mixing enthalpy 4ΣcᵢcⱼΔHᵢⱼ (kJ mol⁻¹). N/A when a binary pair has no data.', 'dsmix': 'Ideal configurational entropy −RΣcᵢ ln cᵢ (J mol⁻¹ K⁻¹).', 'delta': 'Atomic-size mismatch with the Guo & Liu radii (%); supplementary radii are flagged.', 'delta_cn12': 'Atomic-size mismatch with the 12-coordination (CN12) radii (%).', 'vec': 'Valence electron concentration Σcᵢ VECᵢ.', 'cstr': 'Crystal structure from the VEC rule: FCC at VEC ≥ 8.0, BCC below 6.87, FCC + BCC between.', 'omega': 'Tm ΔSmix / |ΔHmix| (dimensionless). Undefined when ΔHmix = 0.', 'gamma': 'Solid-angle ratio of the smallest and largest atoms (dimensionless).', 'lambda': 'ΔSmix / δ² (J mol⁻¹ K⁻¹ %⁻²).', 'phi_ye': '(Sc − S_H) / |S_E| (dimensionless).', 's_e': 'Excess entropy, mean of the bcc and fcc packing (J mol⁻¹ K⁻¹).', 'hf_min': "Most negative binary formation enthalpy of the alloy's pairs (meV atom⁻¹).", 'hf_max': "Most positive binary formation enthalpy of the alloy's pairs (meV atom⁻¹).", 'hf_lower': 'Entropic lower bound −TΔSmix at the assessment temperature (meV atom⁻¹).', 't_assess': 'Assessment temperature of M6 and M7: the annealing temperature, or 0.55·Tm (K).', 'dhim': 'Intermetallic formation enthalpy Σ4cᵢcⱼΔHᵢⱼ^IM (kJ mol⁻¹).', 'k1': 'Enthalpy ratio ΔH_IM / ΔHmix (dimensionless).', 'k1cr': 'Critical ratio 1 + (1 − k₂) TΔSmix / |ΔHmix| with k₂ = 0.6 (dimensionless).', 'phi_king': 'ΔG_ss / −|ΔG_max| (dimensionless).', 'dg_ss': 'Solid-solution Gibbs energy at Tm (kJ mol⁻¹).', 'dg_max': 'Most stable competing intermetallic energy (kJ mol⁻¹).', 'mean_mass': 'Mean atomic mass Σcᵢ Mᵢ (g mol⁻¹).'}
+
+
+def _owned(c: Column) -> Column:
+    from dataclasses import replace
+    if c.kind == "model":
+        return replace(c, model=c.key, chooser_tip=MODELS[c.key].criterion)
+    return replace(c, model=MODEL_OWNERS.get(c.key), chooser_tip=c.chooser_tip or CHOOSER_TIPS.get(c.key, ""))
+
+
+COLUMNS = [_owned(c) for c in COLUMNS]
 COLUMN_BY_KEY = {c.key: c for c in COLUMNS}
+SHARED_GROUP = "General"
+
+
+def chooser_groups(keys=None) -> list[tuple[str, list[Column]]]:
+    """Table columns / Filter results groups: Composition, Run, the shared descriptors (General), then one group
+    per model holding its prediction and the descriptors only that model uses - each column exactly once."""
+    cols = [c for c in COLUMNS if c.chooser and (keys is None or c.key in keys)]
+    out: list[tuple[str, list[Column]]] = []
+    for title, pick in (("Composition", lambda c: c.group == "Composition"),
+                        ("Run", lambda c: c.group == "Run"),
+                        (SHARED_GROUP, lambda c: c.model is None and c.group not in ("Composition", "Run"))):
+        g = [c for c in cols if pick(c)]
+        if g:
+            out.append((title, g))
+    for k in MODEL_KEYS:
+        g = [c for c in cols if c.model == k]
+        g.sort(key=lambda c: c.kind != "model")              # the prediction first
+        if g:
+            out.append((f"{k} {MODELS[k].short}", g))
+    return out
 DEFAULT_COLUMNS = [c.key for c in COLUMNS if c.default]
 
 
@@ -85,6 +133,10 @@ class ResultRow:
 
     # Row protocol shared with store.StoredRow (formatting, filters, clipboard, export).
     def raw(self, key: str):
+        if key == "run":
+            return getattr(self, "run_id", None)
+        if key == "variables":
+            return variables_text(getattr(self, "variables", None) or {})
         if key == "name":
             return self.name
         if key == "composition":
@@ -136,9 +188,14 @@ def format_number(value, decimals: int = 2) -> str:
     return text
 
 
+def variables_text(values: dict) -> str:
+    """``x = 0.5, y = 1`` - a result's design values, in their stored order."""
+    return ", ".join(f"{k} = {v:.6g}" if isinstance(v, float) else f"{k} = {v}" for k, v in values.items())
+
+
 def format_cell(row: ResultRow, key: str) -> str:
     col = COLUMN_BY_KEY[key]
-    if not row.ok and key not in ("name", "composition"):
+    if not row.ok and key not in ("name", "composition", "run", "variables"):
         return "N/A"
     value = row.raw(key)
     if col.kind == "model":

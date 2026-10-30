@@ -14,7 +14,8 @@ Colours are the theme's own tokens: caption = ``background`` (#161616 dark / #f4
 (the window then simply keeps the system caption).  Only this process's top-level QWidget windows are touched
 - never native file dialogs, other applications or the global Windows theme.
 
-``TitleBarThemer`` themes a window when it is shown or its native handle is recreated (``WinIdChange``) - as an
+``TitleBarThemer`` themes a window when it is shown or its native handle is recreated (``WinIdChange`` with a new,
+non-zero handle; it never creates or re-creates a handle itself - see :func:`apply`) - as an
 event filter on the application's own top-level windows only (:func:`watch`: main window, Help, About, every
 ``Modal``), never on the whole application: an application-wide Python event filter is called for every Qt event
 and measurably stalled the GUI (≈ 0.5 s while Analysis rebuilt its widgets, release perf run 2026-10-16).  Windows
@@ -68,14 +69,22 @@ def caption_attributes(theme: str, tokens: dict, build: int) -> list[tuple[int, 
 
 
 def apply(widget: QWidget, theme: str, tokens: dict) -> bool:
-    """Theme ``widget``'s native caption; True if DWM accepted every attribute."""
+    """Theme ``widget``'s native caption; True if DWM accepted every attribute.
+
+    Only an existing handle is themed (``internalWinId``), never created (``winId``): Qt destroys a window's
+    native handle when it closes and announces it with ``WinIdChange`` (handle 0).  Re-creating it from that
+    event, inside ``QWidget::destroy``, left the main window's central widget with a native child window of its
+    own (``AppBodyWindow``) that Windows then destroyed behind Qt's back at exit ("External WM_DESTROY")."""
     build = windows_build()
     if not build or not widget.isWindow():
+        return False
+    handle = int(widget.internalWinId() or 0)
+    if not handle:                          # not created yet, or being destroyed: nothing to theme
         return False
     try:
         import ctypes
         from ctypes import wintypes
-        hwnd = wintypes.HWND(int(widget.winId()))
+        hwnd = wintypes.HWND(handle)
         dwm = ctypes.windll.dwmapi
         ok = True
         for attr, value in caption_attributes(theme, tokens, build):

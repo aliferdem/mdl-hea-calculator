@@ -38,7 +38,23 @@ class ExportCancelled(Exception):
 
 
 def export_keys() -> list[str]:
-    return [c.key for c in COLUMNS if c.key != "composition"]
+    """Every stored column, plus Run (the stored run id) and Variables (each result's design values, read in batches
+    per chunk of rows - ``Reader.design_values_batch``; 2026-10-29)."""
+    return [c.key for c in COLUMNS if c.key != "composition" and (c.stored or c.key in ("run", "variables"))]
+
+
+EXPORT_CHUNK = 2000                   # rows formatted together (one design query per run and chunk)
+
+
+def _chunks(records: Iterable, size: int = EXPORT_CHUNK):
+    batch: list = []
+    for r in records:
+        batch.append(r)
+        if len(batch) == size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
 
 
 def export_headers(elements: list[str]) -> list[str]:
@@ -72,12 +88,28 @@ class _StoredRowValues:
     protocol: no per-cell property calls, one cached lookup per distinct string / element order)."""
 
     def __init__(self, elements: list[str], keys: list[str]):
-        from .repository import COL
+        from .repository import _I_RUN, COL
         self.elements = elements
-        self.idx = [COL[k] for k in keys if k != "name"]
+        # "variables" (-1): the chunk's batched design values (``prepare``), not a stored column
+        self.idx = [_I_RUN if k == "run" else (-1 if k == "variables" else COL[k]) for k in keys if k != "name"]
+        self._design: dict[int, str] = {}
         self.notes = [COL["n_" + k] for k in MODEL_KEYS]
         self._strings: dict = {None: "", 0: ""}
         self._positions: dict = {}
+
+    def prepare(self, chunk) -> None:
+        """The chunk's Variables texts: one batched design query per run (no N+1)."""
+        from .results import variables_text
+        self._design = {}
+        if -1 not in self.idx:
+            return
+        by_reader: dict[int, tuple] = {}
+        for r in chunk:
+            if hasattr(r, "reader") and hasattr(r, "v"):
+                by_reader.setdefault(id(r.reader), (r.reader, []))[1].append(r)
+        for reader, recs in by_reader.values():
+            for rid, vals in reader.design_values_batch(recs).items():
+                self._design[rid] = variables_text(vals)
 
     def string(self, reader, code) -> str:
         s = self._strings.get(code)
@@ -105,6 +137,9 @@ class _StoredRowValues:
         else:
             out += [None] * len(where)
         for i in self.idx:
+            if i == -1:
+                out.append(self._design.get(rec.id, ""))
+                continue
             x = v[i]
             if isinstance(x, float) and (x == math.inf or x == -math.inf):
                 x = "inf" if x > 0 else "-inf"
@@ -122,7 +157,15 @@ def _values_fn(records, elements, keys):
 
     def values(r):
         return fast(r) if hasattr(r, "reader") and hasattr(r, "v") else generic(r)
+    values.prepare = fast.prepare
     return values
+
+
+def _prepared(records: Iterable, values):
+    """``records`` again, each chunk's batched lookups done before its rows are formatted."""
+    for chunk in _chunks(records):
+        values.prepare(chunk)
+        yield from chunk
 
 
 def write_records(records: Iterable, path: str | Path, elements: list[str], *, notes: dict | None = None,
@@ -145,7 +188,7 @@ def write_records(records: Iterable, path: str | Path, elements: list[str], *, n
         with path.open("w", newline="", encoding="utf-8-sig") as fh:
             w = csv.writer(fh)
             w.writerow(headers)
-            for r in records:
+            for r in _prepared(records, values):
                 w.writerow(["" if v is None else v for v in values(r)])
                 n += 1
                 tick()
@@ -159,7 +202,7 @@ def write_records(records: Iterable, path: str | Path, elements: list[str], *, n
     sheets = 0
     ws, i = None, 0
     try:
-        for r in records:
+        for r in _prepared(records, values):
             if ws is None or i > max_sheet_rows:
                 sheets += 1
                 ws = wb.add_worksheet("Results" if sheets == 1 else f"Results ({sheets})")

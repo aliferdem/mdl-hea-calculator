@@ -87,8 +87,10 @@ class SweepRecipe:
         return {el: 100.0 * v for el, v in x.items()}
 
     def name(self, comp: dict) -> str:
-        """Alloy name from the *atomic* composition (``atomic(grid)``)."""
-        return C.percent_name(comp) if self.unit in SUM_UNITS else C.alloy_name(comp)
+        """Alloy name from the *atomic* composition (``atomic(grid)``).  At.% / wt.% spaces name their compositions
+        by atomic percent - for a wt.% space too, so the label says "(at.%)": a wt.% space's name is never its
+        entered weight percentages read as stoichiometry (2026-10-28)."""
+        return C.percent_name(comp) + " (at.%)" if self.unit in SUM_UNITS else C.alloy_name(comp)
 
     @property
     def elements(self) -> list[str]:
@@ -100,8 +102,10 @@ class SweepRecipe:
                 "axes": [{"name": el, "col": f"c{i}", "kind": "element", "unit": unit}
                          for i, el in enumerate(self.elements)],
                 "source": {"unit": self.unit, "sizes": sorted(self.sizes) if self.sizes else None,
-                           "specs": [{"element": s.element, "min": s.minimum, "max": s.maximum, "step": s.step,
-                                      "required": s.required} for s in self.specs]}}
+                           "specs": [{"element": s.element, "min": s.minimum, "max": s.maximum,
+                                      "step": s.effective_step, "required": s.required,
+                                      **({"points": s.points} if s.points is not None else {})}
+                                     for s in self.specs]}}
 
     def design(self, grid, envs=None, results=None) -> array:
         """Sweep coordinates: the generating grid values in the entered basis (0 for an absent optional
@@ -156,7 +160,22 @@ class ExpressionRecipe:
     ranges: tuple[tuple[str, VariableRange], ...]
     text: str = ""
     block_ranges: tuple = ()          # one tuple of (name, VariableRange) per block (inline syntax)
+    # The generation facts of the editor's Parse count of *this* document - (valid, skipped, duplicates,
+    # combinations, ((block, duplicates), ...)) - or None.  With no duplicates the calculation needs no
+    # duplicate plan: every worker evaluates its own combination range (CalculationJob._run_expression_direct).
+    counts: tuple | None = None
     kind = "expression"
+
+    @property
+    def dedupe(self) -> bool:
+        """True when the calculation must run the duplicate plan (counts unknown, or duplicates found)."""
+        return self.counts is None or self.counts[2] != 0
+
+    def plan_counts(self) -> tuple | None:
+        if self.counts is None:
+            return None
+        valid, skipped, dups, combos, by_block = self.counts
+        return valid, skipped, dups, combos, dict(by_block)
 
     @property
     def spec(self):
@@ -187,7 +206,7 @@ class ExpressionRecipe:
         spec = self.spec
 
         def rng(v):
-            return [v.minimum, v.maximum, v.step] + ([v.points] if v.points else [])
+            return v.to_meta()          # min, max, step / points and the strict bounds (range_from_meta)
         blocks = []
         merged: dict = {}
         for i, ex in enumerate(self.expressions):
@@ -225,10 +244,9 @@ class ExpressionRecipe:
         nbytes = block // 8
         with open(path, "wb") as fh:
             bits = bytearray(nbytes)
-            for g in range(space.total):
+            for g, b, _env, positive in space.iterate():
                 if not g & 0x3FF and cancelled():
                     break
-                b, _env, positive = space.evaluate(g)
                 if positive is None:
                     skipped += 1
                 else:
@@ -247,15 +265,29 @@ class ExpressionRecipe:
                     bits = bytearray(nbytes)
         return valid, skipped, dups, space.total, by_block
 
-    def take(self, bits: bytes, k: int, block: int) -> tuple[list, list, list, list]:
+    def take_valid(self, k: int, block: int, space=None) -> tuple[list, list, list, list]:
+        """Compositions of combination range ``k`` without a plan: every valid combination (used only when the
+        document is known to produce no duplicates - then this is exactly what the plan would keep)."""
+        space = space or self.space
+        comps, names, envs, blocks = [], [], [], []
+        start = k * block
+        for _g, b, env, positive in space.iterate(start, start + block):
+            if positive is not None:
+                comps.append(positive)
+                names.append(space.name(b, env))
+                envs.append(env)
+                blocks.append(b)
+        return comps, names, envs, blocks
+
+    def take(self, bits: bytes, k: int, block: int, space=None) -> tuple[list, list, list, list]:
         """Compositions of combination range ``k`` (kept by the plan bits)."""
-        space = self.space
+        space = space or self.space
         comps, names, envs, blocks = [], [], [], []
         bits = bytes(bits).ljust(block // 8, bytes(1))
         start = k * block
-        for r in range(min(block, space.total - start)):
+        for g, b, env, positive in space.iterate(start, start + block):
+            r = g - start
             if bits[r >> 3] >> (r & 7) & 1:
-                b, env, positive = space.evaluate(start + r)
                 comps.append(positive)
                 names.append(space.name(b, env))
                 envs.append(env)

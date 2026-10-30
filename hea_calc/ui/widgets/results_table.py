@@ -41,9 +41,9 @@ from ...core import composition as C
 from ...core.repository import ResultRecord, ResultRepository, ResultView
 from ...core.results import COLUMN_BY_KEY, DEFAULT_COLUMNS, ResultRow, format_cell, full_precision, table_tsv
 from .. import crisp, icons
-from ..responsive import distribute
+from ..responsive import distribute, priority_widths
 from ..theme import BODY_COMPACT_01, HAIRLINE, HEADING_COMPACT_01, THEME, font, t
-from .common import Divider, IconButton, MenuButton, illustration, install_wheel_guard, paint_tag, set_prop
+from .common import Divider, IconButton, MenuButton, empty_top, illustration, install_wheel_guard, paint_tag, set_prop
 from .dropdown import Dropdown
 from .menu import CarbonMenu
 from .scroll import ThinScrollBar
@@ -77,7 +77,7 @@ class RowSequence(Sequence):
         return rec
 
     def __iter__(self):
-        return self.view.iterate(self.natural)
+        return self.view.iterate(True) if self.natural else self.view.iterate_table()
 
     def __eq__(self, other):
         return list(self) == list(other)
@@ -104,10 +104,14 @@ class ResultsModel(QAbstractTableModel):
         self.repo.set_notify(self._task_done.emit)
         self._task_done.connect(self._on_task)
         self.view = ResultView(self.repo)
+        self.view.newest_first = True       # without a column sort the newest result is the first row
         self.keys: list[str] = list(DEFAULT_COLUMNS)
         self.page = 0
+        self.user_paged = False              # the user changed page since the current run started
         self.page_size = 100
         self._page: list[ResultRecord] = []
+        # Formatted cells keyed by result_id, never by row index: rows move (newest-first insertion at the
+        # top), and a row-keyed cache then painted another result's values on the moved row.
         self._cells: dict[int, list[str]] = {}
         self.last_error: str | None = None
         self._user_request = False           # the pending build was asked for by the user (sort/filter)
@@ -197,17 +201,30 @@ class ResultsModel(QAbstractTableModel):
             return True
         return False
 
-    def remove_rows(self, rows):
-        self.view.remove([r for r in rows if isinstance(r, ResultRecord)])
+    def remove_rows(self, rows, op: int | None = None):
+        self.view.remove([r for r in rows if isinstance(r, ResultRecord)], op)
         ids = [int(r) for r in rows if isinstance(r, int)]
         if ids:
-            self.view.remove_ids(ids)
+            self.view.remove_ids(ids, op)
         self._refresh_page(force=True)
 
-    def clear(self):
-        """Delete every result of the table (in the background); filters and sort stay."""
-        self.view.clear()
+    def clear(self, op: int | None = None):
+        """Delete every result of the table (in the background); filters and sort stay.  ``op``: undoable."""
+        info = self.view.clear(op)
         self.page = 0
+        self._refresh_page(force=True)
+        self.state_changed.emit()
+        return info
+
+    def restore_rows(self, ids) -> None:
+        """Undo of a removal: the repository has the rows back; show them again."""
+        self.view.restore_ids(ids)
+        self._refresh_page(force=True)
+        self.state_changed.emit()
+
+    def restore_range(self, lo: int, removed) -> None:
+        """Undo of Clear table."""
+        self.view.restore_range(lo, removed)
         self._refresh_page(force=True)
         self.state_changed.emit()
 
@@ -231,7 +248,11 @@ class ResultsModel(QAbstractTableModel):
         self._user_request = True
         self._apply(self.view.request(filters=list(filters)))
 
-    def set_page(self, page: int):
+    def set_page(self, page: int, user: bool = False):
+        """Show ``page`` (0-based).  ``user``: the user paged (pagination controls) - a running calculation then
+        leaves the page alone when it completes (``user_paged``; MainWindow resets it when a run starts)."""
+        if user:
+            self.user_paged = True
         page = max(0, min(page, self.page_count() - 1))
         if page != self.page:
             self.page = page
@@ -244,6 +265,9 @@ class ResultsModel(QAbstractTableModel):
         self._refresh_page()
 
     def sort_by(self, key: str):
+        col = COLUMN_BY_KEY.get(key)
+        if col is not None and not col.sortable:
+            return                                       # Variables: per-run design values, not an SQL column
         if self.sort_key == key:
             if self.sort_desc:
                 key, desc = None, False                  # third click: original order (Carbon)
@@ -307,6 +331,13 @@ class ResultsModel(QAbstractTableModel):
                 first = len(old)
                 self.beginInsertRows(QModelIndex(), first, len(ids) - 1)
                 self._page = recs
+                self._prune_cells()
+                self.endInsertRows()
+            elif old and len(ids) > len(old) and ids[len(ids) - len(old):] == old:
+                # newest first: rows committed since the last refresh enter at the top of the page
+                self.beginInsertRows(QModelIndex(), 0, len(ids) - len(old) - 1)
+                self._page = recs
+                self._prune_cells()
                 self.endInsertRows()
             else:
                 self.beginResetModel()
@@ -317,6 +348,12 @@ class ResultsModel(QAbstractTableModel):
             self._page = recs                            # same rows: fresh records (positions)
         self.page_changed.emit()
 
+    def _prune_cells(self) -> None:
+        """Keep the cell cache to the rows of the page (it is keyed by result_id)."""
+        on_page = {r.id for r in self._page}
+        for rid in [k for k in self._cells if k not in on_page]:
+            del self._cells[rid]
+
     # ------------------------------------------------------------------ Qt model
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self._page)
@@ -325,10 +362,10 @@ class ResultsModel(QAbstractTableModel):
         return 0 if parent.isValid() else len(self.keys)
 
     def cell_text(self, r: int, c: int) -> str:
-        cells = self._cells.get(r)
+        row = self._page[r]
+        cells = self._cells.get(row.id)
         if cells is None:
-            row = self._page[r]
-            cells = self._cells[r] = [format_cell(row, k) for k in self.keys]
+            cells = self._cells[row.id] = [format_cell(row, k) for k in self.keys]
         return cells[c]
 
     def data(self, index: QModelIndex, role=Qt.ItemDataRole.DisplayRole):
@@ -653,6 +690,7 @@ class ResultsView(QTableView):
         self.m = model
         self.setModel(model)
         self.hover_row = -1
+        self.remove_handler = None           # set by the window: "Remove result" becomes an undoable command
         self.flash_row = -1                  # transient double-click acknowledgement (never a selection)
         self.flash_level = 0.0
         from PySide6.QtCore import QEasingCurve, QVariantAnimation
@@ -670,9 +708,13 @@ class ResultsView(QTableView):
         self.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         self.setCornerButtonEnabled(False)
         self.setShowGrid(False)
-        # Explicit product decision: no Qt cell/row selection, no current cell, no focus rectangle.
+        # Explicit product decision: no Qt cell/row selection, no current cell, no focus rectangle for the mouse.
+        # Keyboard users Tab into the table: a focus-framed row (``kb_row``) moves with the arrow keys, Enter
+        # analyses it (as a double click), Shift+F10 / the Menu key opens its row menu.
         self.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.setTabKeyNavigation(False)
+        self.kb_row = -1
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setItemDelegate(Delegate(self))
         self.setMouseTracking(True)
@@ -693,7 +735,18 @@ class ResultsView(QTableView):
         model.columns_changed.connect(self.apply_widths)
         model.modelReset.connect(self.selection.end)
         model.dataChanged.connect(lambda *_: self.selection.end())
+        model.rowsInserted.connect(self._rows_inserted)
+        model.page_changed.connect(self._content_changed)          # widths follow the visible content
         self.apply_widths()
+
+    def _rows_inserted(self, _parent, first: int, last: int) -> None:
+        """Rows entered at or above row-indexed state (newest first): keep that state on its own result."""
+        self.selection.end()                 # the overlay holds one cell's text at that cell's old position
+        n = last - first + 1
+        if self.kb_row >= first:
+            self.kb_row += n
+        if self.flash_row >= first:
+            self.flash_row += n
 
     # -------------------------------------------------------------- hover (full row, transient)
     def _row_rect(self, r: int) -> QRect:
@@ -770,6 +823,74 @@ class ResultsView(QTableView):
             self.flash_row = -1
         self.viewport().update()
 
+    # ---------------------------------------------------------------- keyboard row access
+    def focusInEvent(self, e):
+        super().focusInEvent(e)
+        n = self.m.rowCount()
+        if n and not 0 <= self.kb_row < n:
+            self.kb_row = 0
+        self.viewport().update()
+
+    def focusOutEvent(self, e):
+        super().focusOutEvent(e)
+        self.viewport().update()
+
+    def keyPressEvent(self, e):
+        n = self.m.rowCount()
+        k = e.key()
+        if not n:
+            super().keyPressEvent(e)
+            return
+        page = max(1, self.viewport().height() // ROW_HEIGHT - 1)
+        moves = {Qt.Key.Key_Up: -1, Qt.Key.Key_Down: 1, Qt.Key.Key_PageUp: -page, Qt.Key.Key_PageDown: page}
+        r = min(max(self.kb_row, 0), n - 1)
+        if k in moves:
+            self.kb_row = min(n - 1, max(0, r + moves[k]))
+        elif k == Qt.Key.Key_Home:
+            self.kb_row = 0
+        elif k == Qt.Key.Key_End:
+            self.kb_row = n - 1
+        elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            row = self.m.row_at(r)
+            if row is not None:
+                self.flash(r)
+                self.details_requested.emit(row)
+            return
+        elif k == Qt.Key.Key_Menu or (k == Qt.Key.Key_F10 and e.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            row = self.m.row_at(r)
+            if row is not None:
+                y = self.rowViewportPosition(r) + ROW_HEIGHT // 2
+                menu = self.row_menu(row, self.m.keys[0])
+                menu.exec_at(self.viewport().mapToGlobal(QPoint(24, y)))
+                menu.deleteLater()
+            return
+        else:
+            super().keyPressEvent(e)
+            return
+        self.viewport().update()
+        self._reveal_row(self.kb_row)
+
+    def _reveal_row(self, r: int) -> None:
+        """Keep the keyboard row on screen: the table never scrolls itself, the page's scroll area does."""
+        from PySide6.QtWidgets import QScrollArea
+        sa = self.parentWidget()
+        while sa is not None and not isinstance(sa, QScrollArea):
+            sa = sa.parentWidget()
+        if sa is None or sa.widget() is None:
+            return
+        y = self.rowViewportPosition(r)
+        pt = self.viewport().mapTo(sa.widget(), QPoint(0, y + ROW_HEIGHT // 2))
+        sa.ensureVisible(pt.x(), pt.y(), 0, ROW_HEIGHT * 2)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if self.hasFocus() and 0 <= self.kb_row < self.m.rowCount():
+            from ..theme import FOCUS_WIDTH
+            p = QPainter(self.viewport())
+            y = self.rowViewportPosition(self.kb_row)
+            crisp.frame(p, QRectF(0, y, self.viewport().width(), ROW_HEIGHT), FOCUS_WIDTH, t("focus"))
+            p.end()
+
     def mouseDoubleClickEvent(self, e):
         self.selection.end()
         self._press = None
@@ -816,6 +937,10 @@ class ResultsView(QTableView):
         return full_precision(row, key)
 
     def _remove(self, row: ResultRecord):
+        """Row menu "Remove result": an undoable window command when the window listens, else at once."""
+        if self.remove_handler is not None:
+            self.remove_handler([row])
+            return
         rid = row.id
         self.m.remove_rows([row])
         self.removed_ids.emit([rid])
@@ -844,32 +969,128 @@ class ResultsView(QTableView):
             maxs.append(int(ref * self.GROW_LIMIT))
         return refs, mins, maxs
 
+    # User widths: a header separator drag sets one column's width (Interactive sections, split cursor), kept per
+    # column *key* - not position - so it survives column-set changes, sorting and restarts (window preference).
+    # The other columns keep their weighted default; when the total exceeds the table the thin horizontal bar
+    # scrolls (the table still never scrolls vertically).  Double-click a separator: that column's default again.
     def apply_widths(self):
         h = self.header
-        h.setMinimumSectionSize(48)
+        h.setMinimumSectionSize(self.MODEL_MIN)
         for i in range(len(self.m.keys)):
-            h.setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
+            h.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+        if not getattr(self, "_resize_wired", False):
+            self._resize_wired = True
+            self.user_widths: dict[str, int] = getattr(self, "user_widths", {})
+            self._distributing = False
+            h.sectionResized.connect(self._section_resized)
+            h.sectionHandleDoubleClicked.connect(self.reset_width)
         self._distribute()
+
+    def _min_width(self, key: str) -> int:
+        if COLUMN_BY_KEY[key].kind == "model":
+            return self.MODEL_MIN
+        return self.MIN_WIDTH.get(key, self.FLEX_MIN)
+
+    def _section_resized(self, i: int, _old: int, new: int) -> None:
+        if self._distributing or not 0 <= i < len(self.m.keys):
+            return
+        key = self.m.keys[i]
+        w = max(self._min_width(key), int(new))          # never an accidental zero / unreadable column
+        if w != new:
+            self._distributing = True
+            self.header.resizeSection(i, w)
+            self._distributing = False
+        if self.user_widths.get(key) != w:
+            self.user_widths[key] = w
+            self.user_widths_changed.emit()
+        self.widths_changed.emit()
+
+    def set_user_widths(self, widths: dict) -> None:
+        self.user_widths = {k: max(self._min_width(k), int(v)) for k, v in dict(widths).items()
+                            if k in COLUMN_BY_KEY and isinstance(v, (int, float)) and v > 0}
+        self._distribute()
+
+    def reset_width(self, i: int | None = None) -> None:
+        """Default width for column ``i`` (separator double-click) or, with None, for every column."""
+        if i is None:
+            self.user_widths.clear()
+        elif 0 <= i < len(self.m.keys):
+            self.user_widths.pop(self.m.keys[i], None)
+        self.user_widths_changed.emit()
+        self._distribute()
+
+    # Content-aware allocation (2026-10-28): Alloy is the primary column.  Every column's natural width is what its
+    # header and the values of the CURRENT PAGE need (measured once per page / column change - a page is at most
+    # a few hundred rows, never the dataset); model columns fit the longest prediction tag.  The other columns grow
+    # only up to their design width (a number gains nothing from more room); the rest goes to Alloy.  Short of
+    # room, the numbers shrink first, Alloy last.  A user-dragged width always wins.
+    MODEL_TAGS = ("SS", "MP", "IM", "SS+IM", "MG", "N/A")
+    TAG_PAD = 10                                  # the delegate paints tags 10 px from the cell's left edge
+
+    def natural_widths(self) -> list[int]:
+        key = (tuple(self.m.keys), tuple(r.id for r in self.m.page_rows()), THEME.name)
+        cached = getattr(self, "_naturals", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        from .common import tag_width
+        base, sub = _fonts()
+        fm, fs = QFontMetricsF(base), QFontMetricsF(sub)
+        out = []
+        for c, k in enumerate(self.m.keys):
+            doc = self.header._doc(COLUMN_BY_KEY[k].html)
+            head = 16 + doc.idealWidth() + 8 + 16 + 8          # text, gap, sort arrow, right padding
+            if COLUMN_BY_KEY[k].kind == "model":
+                need = 2 * self.TAG_PAD + max(tag_width(t_) for t_ in self.MODEL_TAGS)
+            else:
+                need = 0.0
+                for r in range(self.m.rowCount()):
+                    text = self.m.cell_text(r, c)
+                    if k == "name":
+                        w = sum((fs if is_sub else fm).horizontalAdvance(seg) for seg, is_sub in C.name_segments(text))
+                    else:
+                        w = fm.horizontalAdvance(text)
+                    need = max(need, w)
+                need += TEXT_PAD_LEFT + TEXT_PAD_RIGHT + 2
+            out.append(int(max(head, need) + 0.999))
+        self._naturals = (key, out)
+        return out
 
     def _distribute(self):
         keys = self.m.keys
         if not keys:
             return
         refs, mins, maxs = self.column_specs()
-        widths = distribute(self.viewport().width(), refs, mins, maxs)
+        naturals = self.natural_widths()
+        mins = [max(mn, nat) if COLUMN_BY_KEY[k].kind == "model" else mn          # tags are never cut
+                for k, mn, nat in zip(keys, mins, naturals)]
+        primary = keys.index("name") if "name" in keys else -1
+        widths = priority_widths(self.viewport().width(), naturals, mins, refs, primary) if primary >= 0 else \
+            distribute(self.viewport().width(), refs, mins, maxs)
+        user = getattr(self, "user_widths", {})
+        widths = [user.get(k, w) for k, w in zip(keys, widths)]
         changed = False
-        for i, w in enumerate(widths):
-            if self.header.sectionSize(i) != w:
-                self.header.resizeSection(i, w)
-                changed = True
+        self._distributing = True
+        try:
+            for i, w in enumerate(widths):
+                if self.header.sectionSize(i) != w:
+                    self.header.resizeSection(i, w)
+                    changed = True
+        finally:
+            self._distributing = False
         if changed:
             self.selection.end()
         self.widths_changed.emit()
 
     widths_changed = Signal()
+    user_widths_changed = Signal()
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
+        self._distribute()
+
+    def _content_changed(self) -> None:
+        """A new page (new rows, a sort, a result added): the natural widths follow the visible content."""
+        self._naturals = None
         self._distribute()
 
     def natural_height(self) -> int:
@@ -911,6 +1132,10 @@ class StickyHeader(Header):
         self.setObjectName("StickyHeader")
         self.setModel(view.m)
         self.sectionClicked.connect(lambda i: view.m.sort_by(view.m.keys[i]))
+        self._syncing = False
+        # a separator drag on the pinned header resizes the table's column (one width, two headers)
+        self.sectionResized.connect(self._forward_resize)
+        self.sectionHandleDoubleClicked.connect(view.reset_width)
         src = view.header
         src.sectionResized.connect(lambda *_: self.sync())
         src.geometriesChanged.connect(self.sync)
@@ -920,17 +1145,26 @@ class StickyHeader(Header):
         view.horizontalScrollBar().valueChanged.connect(self.setOffset)
         self.hide()
 
+    def _forward_resize(self, i: int, _old: int, new: int) -> None:
+        if not self._syncing and i < self.view.header.count():
+            self.view.header.resizeSection(i, new)
+
     def sync(self):
         src = self.view.header
         n = self.count()
-        for i in range(n):
-            self.setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
-            if i < src.count():
-                hidden = src.isSectionHidden(i)
-                if self.isSectionHidden(i) != hidden:
-                    self.setSectionHidden(i, hidden)
-                if self.sectionSize(i) != src.sectionSize(i):
-                    self.resizeSection(i, src.sectionSize(i))
+        self._syncing = True
+        try:
+            self.setMinimumSectionSize(src.minimumSectionSize())
+            for i in range(n):
+                self.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+                if i < src.count():
+                    hidden = src.isSectionHidden(i)
+                    if self.isSectionHidden(i) != hidden:
+                        self.setSectionHidden(i, hidden)
+                    if self.sectionSize(i) != src.sectionSize(i):
+                        self.resizeSection(i, src.sectionSize(i))
+        finally:
+            self._syncing = False
         self.setOffset(self.view.horizontalScrollBar().value())
         self.viewport().update()
 
@@ -964,22 +1198,39 @@ class StickyHeader(Header):
 
 
 # ====================================================================== pagination
-class PageField(QLineEdit):
-    """Editable current-page number of the pagination bar (Carbon text input, sm, compact).
+# pagination bar (Carbon Pagination): 40 px with a 1 px top border
+CONTROL_H = 39          # every control fills the height below the border
+LABEL_GAP = 8           # "Items per page:" to its select (Carbon spacing-03)
+TEXT_X = 16             # the page select's value inset
 
-    Integers only (a digits validator); the value is committed on Enter and on focus-out; a value outside
-    1…last is corrected to the nearest valid page and the field flashes its invalid frame, so the correction
-    is visible; an empty field reverts.  The mouse wheel never changes it (wheel guard).  It never shows page
-    0: an empty table shows 1, disabled."""
+
+class PageField(QLineEdit):
+    """The pagination bar's page selector: one editable Carbon combo box (Carbon Pagination's "number of pages"
+    select, made editable as Carbon's Combo box - "select an option from a large list or type a value").
+
+    Type a page number and press Enter (integers only; committed on Enter and on focus-out; a value outside
+    1…last is corrected to the nearest valid page and the field flashes its invalid frame; an empty field
+    reverts), or open the list with the chevron, Down / Alt+Down or F4 and choose a page (the shared list popup:
+    current page marked and scrolled into view, scrolls when long, wheel scrolls the open list).  The mouse wheel
+    never changes the closed field.  Whatever the page count the control stays the same; past ``LIST_WINDOW``
+    pages the list holds the pages around the current one (typing reaches any page) - never tens of thousands
+    of rows.  It never shows page 0: an empty table shows 1, disabled."""
 
     committed = Signal(int)                 # 0-based page index
+    CHEVRON_W = 28                          # 16 px chevron + 8 / 4 px padding inside the 32 px field
+    LIST_WINDOW = 1000
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("PageField")
         self.setProperty("crisp", True)
-        self.setFixedSize(56, 32)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # the full height of the pagination bar's content (40 px less its 1 px top border), so the focus frame is
+        # never clipped; flush with the divider on its left, the value 16 px in (Figma)
+        self.setFixedSize(84, CONTROL_H)
+        self.setTextMargins(TEXT_X - 2, 0, self.CHEVRON_W - 4, 0)     # QLineEdit adds 2 px of its own
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.popup = None
+        self.setMouseTracking(True)
         self.setValidator(QRegularExpressionValidator(QRegularExpression(r"\d{0,9}"), self))
         self.setAccessibleName("Current page")
         self.last = 1
@@ -1028,13 +1279,71 @@ class PageField(QLineEdit):
             self.setText(str(self.current + 1))
             self.clearFocus()
             return
+        if e.key() in (Qt.Key.Key_Down, Qt.Key.Key_F4) or (
+                e.key() == Qt.Key.Key_Up and e.modifiers() & Qt.KeyboardModifier.AltModifier):
+            self.open_list()
+            return
         super().keyPressEvent(e)
+
+    # ---------------------------------------------------------------- the page list
+    def _chevron_rect(self) -> QRect:
+        return QRect(self.width() - self.CHEVRON_W, 0, self.CHEVRON_W, self.height())
+
+    def page_window(self) -> range:
+        """The pages the list offers (0-based): all of them, or ``LIST_WINDOW`` around the current page."""
+        if self.last <= self.LIST_WINDOW:
+            return range(self.last)
+        start = max(0, min(self.current - self.LIST_WINDOW // 2, self.last - self.LIST_WINDOW))
+        return range(start, start + self.LIST_WINDOW)
+
+    def open_list(self) -> None:
+        if not self.isEnabled() or self.popup is not None:
+            return
+        from .listbox import CHECK, CHECK_GAP, PAD_X, ListPopup, Option
+        pages = self.page_window()
+        options = [Option(i, f"{i + 1:,}") for i in pages]
+        digits = int(QFontMetricsF(self.font()).horizontalAdvance(f"{self.last:,}")) + 1
+        pop = ListPopup(self, options, value=self.current, max_rows=8,
+                        natural_width=PAD_X + digits + CHECK_GAP + CHECK + PAD_X)
+        pop.selected.connect(lambda v: self.committed.emit(int(v)) if int(v) != self.current else None)
+        pop.closed.connect(self._list_closed)
+        self.popup = pop
+        pop.show()
+        pop.setFocus()
+        self.update()
+
+    def _list_closed(self) -> None:
+        self.popup = None
+        self.update()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton and self._chevron_rect().contains(e.position().toPoint()):
+            self.open_list()
+            e.accept()
+            return
+        super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        over = self._chevron_rect().contains(e.position().toPoint())
+        self.setCursor(Qt.CursorShape.PointingHandCursor if over else Qt.CursorShape.IBeamCursor)
+        super().mouseMoveEvent(e)
 
     def paintEvent(self, e):
         super().paintEvent(e)
         from ..theme import FOCUS_WIDTH
         p = QPainter(self)
         r = self.rect()
+        cr = self._chevron_rect()
+        icon = QRectF(cr.left() + 4, (r.height() - 16) / 2, 16, 16)
+        if self.popup is not None:                 # chevron up while the list is open (Carbon combo box)
+            p.save()
+            p.translate(icon.center())
+            p.rotate(180)
+            p.translate(-icon.center())
+            icons.paint(p, "chevron_down", icon, "icon-primary" if self.isEnabled() else "icon-disabled")
+            p.restore()
+        else:
+            icons.paint(p, "chevron_down", icon, "icon-primary" if self.isEnabled() else "icon-disabled")
         if self._invalid:
             crisp.frame(p, r, FOCUS_WIDTH, t("support-error"))
         elif self.hasFocus():
@@ -1045,7 +1354,11 @@ class PageField(QLineEdit):
 
 
 class PaginationBar(QFrame):
-    """Carbon pagination (table bar): items per page, range text, page select, prev/next."""
+    """Carbon pagination (table bar): items per page, range text, page select, prev/next.
+
+    40 px tall with a 1 px top border: every control fills the 39 px below it (``CONTROL_H``), so focus frames are
+    whole.  The items-per-page select ends flush at its divider, 8 px after its label; the page select starts flush
+    at its divider (2026-10-28)."""
 
     def __init__(self, model: ResultsModel, parent=None):
         super().__init__(parent)
@@ -1056,10 +1369,14 @@ class PaginationBar(QFrame):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(16, 0, 0, 0)
         lay.setSpacing(0)
-        lay.addWidget(QLabel("Items per page:"))
+        self.size_lbl = QLabel("Items per page:")
+        lay.addWidget(self.size_lbl)
+        lay.addSpacing(LABEL_GAP)
         self.size_box = Dropdown([(n, str(n)) for n in PAGE_SIZES], model.page_size, inline=True,
                                  accessible="Items per page")
-        self.size_box.setFixedWidth(self.size_box.width_for_items())
+        self.size_box.setFixedHeight(CONTROL_H)
+        self.size_box.text_inset = 8
+        self.size_box.setFixedWidth(max(74, self.size_box.width_for_items() - 8))
         lay.addWidget(self.size_box)
         lay.addWidget(self._vdiv())
         self.range_lbl = QLabel("")
@@ -1067,7 +1384,6 @@ class PaginationBar(QFrame):
         self.range_lbl.setContentsMargins(16, 0, 0, 0)
         lay.addWidget(self.range_lbl, 1)
         lay.addWidget(self._vdiv())
-        lay.addSpacing(8)
         self.page_field = PageField()
         lay.addWidget(self.page_field)
         self.of_lbl = QLabel("")
@@ -1077,21 +1393,21 @@ class PaginationBar(QFrame):
         self.prev_btn = IconButton("caret_left", "Previous page")
         self.next_btn = IconButton("caret_right", "Next page")
         for b in (self.prev_btn, self.next_btn):
-            set_prop(b, "square", "40")
+            b.setFixedSize(40, CONTROL_H)
         lay.addWidget(self.prev_btn)
         lay.addWidget(self._vdiv())
         lay.addWidget(self.next_btn)
         self.size_box.currentIndexChanged.connect(lambda i: self.m.set_page_size(PAGE_SIZES[i]))
-        self.page_field.committed.connect(self.m.set_page)
-        self.prev_btn.clicked.connect(lambda: self.m.set_page(self.m.page - 1))
-        self.next_btn.clicked.connect(lambda: self.m.set_page(self.m.page + 1))
+        self.page_field.committed.connect(lambda p: self.m.set_page(p, user=True))
+        self.prev_btn.clicked.connect(lambda: self.m.set_page(self.m.page - 1, user=True))
+        self.next_btn.clicked.connect(lambda: self.m.set_page(self.m.page + 1, user=True))
         self.m.page_changed.connect(self.refresh)
         self._state = None
         self.refresh()
 
     def _vdiv(self):
         d = Divider(vertical=True)
-        d.setFixedHeight(40)
+        d.setFixedHeight(CONTROL_H)
         return d
 
     def refresh(self):
@@ -1131,6 +1447,14 @@ class TableEmptyState(QWidget):
         self.title, self.body = "", ""
         THEME.changed.connect(self._theme_changed)
 
+    @staticmethod
+    def group_height() -> int:
+        """Artwork, 24 px, title (28), 4 px, body (20): the painted group."""
+        return illustration("box")[0].height() + 56 + 20
+
+    def group_top(self) -> int:
+        return empty_top(self.height() - self.group_height(), self.TOP)
+
     def set_text(self, title: str, body: str):
         if (title, body) == (self.title, self.body) and self.isVisible() == bool(title):
             return
@@ -1143,9 +1467,10 @@ class TableEmptyState(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        # Figma 289:44643 - artwork at x = 64, its exported height, title 24 px below it.
-        x, y = 64, self.TOP
+        # Figma 289:44643 - artwork at x = 64, its exported height, title 24 px below it; the group (artwork,
+        # title, body) centred optically in the body below the header (at least ``TOP`` from it)
         size, pm = illustration("box")
+        x, y = 64, self.group_top()
         p.drawPixmap(QRect(x, y, size.width(), size.height()), pm, QRect(pm.rect()))
         f = font(BODY_COMPACT_01)
         f.setPixelSize(20)
@@ -1203,7 +1528,7 @@ class ResultsTable(QFrame):
         lay.setSpacing(0)
         bar = QWidget()
         bar.setObjectName("TableToolbar")
-        bar.setFixedHeight(32)
+        bar.setFixedHeight(self.TOOLBAR_HEIGHT)
         bl = QHBoxLayout(bar)
         bl.setContentsMargins(16, 0, 0, 0)
         bl.setSpacing(0)
@@ -1214,12 +1539,13 @@ class ResultsTable(QFrame):
         self.filter_btn = IconButton("filter", "Filter results")
         self.columns_btn = IconButton("settings", "Table columns")
         for b in (self.delete_btn, self.filter_btn, self.columns_btn):
+            set_prop(b, "square", "40")          # Figma Data table toolbar: 40 x 40 buttons, 16 px icons
             bl.addWidget(b)
         # CORRECT_MENU_BUTTON: Carbon MenuButton (secondary, sm): on-colour label and chevron, chevron up while
         # open, a sm menu right-aligned flush under the button
         self.export_btn = MenuButton("Export")
         self.export_btn.setProperty("kind", "secondary")
-        self.export_btn.setProperty("btnsize", "sm")
+        self.export_btn.setProperty("btnsize", "md")       # Figma: 123 x 40
         self.export_btn.setFixedWidth(123)
         menu = CarbonMenu(parent=self.export_btn, size="sm")
         build_export_menu(menu, self.export_requested.emit, self.copy_requested.emit, self.copy_page_requested.emit)
@@ -1241,6 +1567,9 @@ class ResultsTable(QFrame):
         self._natural = -1
         self.model.page_changed.connect(self.update_natural_height)
         self.view.horizontalScrollBar().rangeChanged.connect(lambda *_: self.update_natural_height())
+        # the bar's visibility is decided after its range changes (user-widened columns): re-measure on show / hide,
+        # so the table grows by the bar's height instead of scrolling its rows vertically
+        self.view.horizontalScrollBar().installEventFilter(self)
         self.update_natural_height()
         self.delete_btn.clicked.connect(self.delete_requested.emit)
         self.filter_btn.clicked.connect(self.filter_requested.emit)
@@ -1251,7 +1580,7 @@ class ResultsTable(QFrame):
         self.view.viewport().update()
         self.view.header.viewport().update()
 
-    TOOLBAR_HEIGHT = 32
+    TOOLBAR_HEIGHT = 40                  # Figma Data table toolbar (447:65142)
     PAGINATION_HEIGHT = 40
 
     def empty_body_height(self) -> int:
@@ -1293,7 +1622,16 @@ class ResultsTable(QFrame):
     def eventFilter(self, obj, ev):
         if obj is self.view.viewport() and ev.type() == QEvent.Type.Resize:
             self.empty.setGeometry(self.view.viewport().rect())
+        elif obj is self.view.horizontalScrollBar() and ev.type() in (QEvent.Type.Show, QEvent.Type.Hide):
+            self.update_natural_height()
         return False
+
+    def set_has_results(self, has: bool) -> None:
+        """An empty table offers no Clear table, Filter results or Export (Carbon disabled state; a disabled
+        MenuButton cannot open its menu) - never an enabled action that only reports "Nothing to export"."""
+        for b in (self.delete_btn, self.filter_btn, self.export_btn):
+            if b.isEnabled() != has:
+                b.setEnabled(has)
 
     def set_filter_active(self, active: bool):
         self.filter_btn.setProperty("active", active)

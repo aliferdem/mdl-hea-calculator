@@ -193,16 +193,16 @@ def representation_text(rep: str, *, shown: int = 0, population: int = 0, bins: 
                         ordered_by: str = "", cells: int = 0, group: str = "") -> str:
     """The representation tag text (design guide 5.7) - every non-RAW plot discloses itself."""
     if rep == RAW and ordered_by:
-        return f"All {shown:,} points · ordered by {ordered_by}"
+        return f"All {shown:,} points, ordered by {ordered_by}"
     if rep == RAW:
         return f"All {shown:,} points"
     if rep == SAMPLED:
-        return f"Sample · {shown:,} of {population:,} points"
+        return f"Sample: {shown:,} of {population:,} points"
     if rep == BINNED:
         bx, by = bins if bins and len(bins) == 2 else (bins[0] if bins else 0, 0)
         if by:
-            return f"Binned · {bx} × {by} cells · {population:,} results"
-        return f"Binned · {bx} bins · {population:,} results"
+            return f"Binned: {bx} × {by} cells, {population:,} results"
+        return f"Binned: {bx} bins, {population:,} results"
     if rep == "GRID":
         return f"All {cells:,} cells calculated"
     if rep == AGGREGATED:

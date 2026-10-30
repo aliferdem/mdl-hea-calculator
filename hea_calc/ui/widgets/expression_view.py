@@ -1,22 +1,32 @@
-"""Composition expression - one text area for expressions *and* their variable ranges (references
-``design/fix needed/COMPOSITION_EXPRESSION_{DRAFT,FIXED_PARSED,PARAMETRIC_PARSED,BATCH_PARSED,STALE,ERROR}.png``).
+"""Expression mode of Composition setup (Figma "Expression bases" 584:51933 - Empty, Draft, Error, Stale, Fixed /
+Parametric / Batch parsed - and Composition setup Mode=Expression 392:69514).
 
-The document syntax is :mod:`hea_calc.core.expression_doc`: blocks separated by blank lines, the first line of a
-block is the expression, the following lines declare its variables (``0 <= x <= 2, step=0.05`` / ``points=31``,
-optional ``p=`` preview value).  There are no Min / Max / Step fields outside the text area.
+One code editor (:class:`~.code_editor.CodeEditor`) holds the whole document - expressions *and* their range
+lines (syntax: :mod:`hea_calc.core.expression_doc`).  Below it, after a parse, the "Parsed expressions" list and,
+for one block, the composition preview (Element / At. ratio / at.% / wt.% / Mass).
 
-Parsing is explicit (the Parse icon in the field, or Ctrl+Enter) - never on every keystroke:
+Editor states (the header tag is the panel's :class:`~.status_tag.PanelStatus`, from :meth:`status`):
 
-* **Draft**     helper text; Calculate unavailable;
-* **Parsed**    green field + check, "Parsed successfully: …", the parsed block summary (one block: its composition
-  preview table at the preview values; several blocks: one compact line per block); Calculate available once the
-  background count has finished;
-* **Stale**     any edit after a parse: warning icon, "Expression changed. Parse again to update the result.", the
-  previous parse stays visible but Calculate is unavailable until Parse runs again;
-* **Error**     red field + error icon; every failing block listed with its number, first line and reason;
-  Calculate unavailable (valid blocks are never calculated on their own).
+* **empty**      no text; Parse expression unavailable;
+* **editing**    text that has not been parsed; problems that only mean "unfinished" on the caret's line are held
+  back while the user types there;
+* **ready**      no problem found (Figma Draft): Parse expression available;
+* **error**      lexical / syntax / semantic problems - wavy underlines + overview marks; the tag names the problem
+  ("Unknown element "Xx"") or says "Multiple errors"; its toggletip lists every problem by line; Parse unavailable;
+* **parsing**    Parse was chosen: the document is parsed and its compositions counted off the GUI thread
+  ("Parsing…" inline loading);
+* **parsed**     green "Parsed successfully"; Calculate (with Copy table) replaces Parse expression;
+* **warnings**   parsed, but combinations were skipped or duplicates removed: blue "Parsed with warnings" (toggletip);
+* **workload**   parsed, but the batch exceeds the combination limit (red "Workload too large") or is large (blue
+  "Large workload") - a workload is never reported as an invalid expression;
+* **stale**      text edited after a parse: blue "Expression changed"; the previous parse stays visible, Calculate is
+  unavailable until Parse runs again (the calculation never uses an outdated parse: :meth:`recipe` refuses it).
 
-Counting (valid / skipped / duplicates per block) runs off the GUI thread - in a worker process for large documents.
+Problems are found by one debounced validation pass (``VALIDATE_MS`` after the last keystroke) that also adds the
+automatic range declarations (:func:`hea_calc.core.expression_doc.plan_declarations`): a new variable gets
+``0 <= v <= 1, step=0.1`` as one undo step of its own; the caret, the selection and the user's undo history are
+kept.  Model support (which models cannot be evaluated for these elements) is the panel's coverage status, never a
+syntax error.
 """
 
 from __future__ import annotations
@@ -24,42 +34,47 @@ from __future__ import annotations
 import html
 import re
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtCore import QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QPainter, QTextCursor, QTextBlockUserData
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from ...core import composition as C
 from ...core.data import Datasets
 from ...core.expression import MAX_COMBINATIONS, ExpressionError, GenerationCancelled, evaluate_positive
-from ...core.expression_doc import Document, parse_document, summary
+from ...core.expression_doc import (Diagnostic, Document, LEXICAL, SEMANTIC, SYNTAX, parse_document,
+                                    plan_declarations, summary)
+from ...core.expression_lexer import ROLE_EXPRESSION, line_roles
 from ...core.generation import RangeError
 from ...core.limits import LARGE
 from ...core.recipes import ExpressionRecipe
-from .. import icons
-from ..theme import t
+from .. import crisp
+from ..theme import BODY_COMPACT_01, HEADING_COMPACT_01, LABEL_01, font, t
 from ..worker import BackgroundTask
-from .common import IconButton, InfoButton, refresh_style
+from .code_editor import CodeEditor, LINE_H
 from .composition_footer import Status
-from .menu import carbon_context_menu
-from .scroll import inner_scroll_area, own_wheel, thin_scrollbars
+from .scroll import inner_scroll_area
 
-HELPER_TEXT = "Enter one expression per block. Separate blocks with a blank line."
-STALE_TEXT = "Expression changed. Parse again to update the result."
 HEAVY_THRESHOLD = 5_000
+VALIDATE_MS = 450                   # validation / automatic declarations wait for a pause in typing
+EDITOR_TOP = 8                      # Figma: the editor starts 8 px under the 40 px header
 
 EXPRESSION_HELP = (
-    "<b>Composition expression</b><br>"
+    "<b>Expression syntax</b><br>"
     "First line of a block: the expression - elements, amounts, groups, lower-case variables "
-    "(<i>Al0.5CoCrFeNi</i>, <i>AlxCoCrFeNi</i>, <i>(FeCoNi)1-xAlx</i>, <i>B{a}</i>).<br>"
-    "Following lines: one range per variable - <i>0 &lt;= x &lt;= 2, step=0.05</i> or "
-    "<i>0 &lt;= x &lt;= 0.3, points=31</i> (both endpoints included).<br>"
-    "Separate blocks with a blank line. Select Parse (Ctrl+Enter) to check the document.<br>"
+    "(<i>Al0.5CoCrFeNi</i>, <i>CrMnFeCoNiyCux</i>, <i>(FeCoNi)1-x(AlTi)x</i>, <i>B{a}</i>).<br>"
+    "Following lines: one range per variable - <i>0 &lt;= x &lt;= 1, step=0.1</i>, <i>0 &lt;= x &lt;= 1, "
+    "points=11</i>; <i>&lt;</i> excludes an endpoint (<i>0 &lt; x &lt; 1, step=0.1</i>).  A new variable gets a "
+    "default range automatically.<br>"
+    "Separate blocks with a blank line. Parse expression (Ctrl+Enter) checks the document.<br>"
     "<a href='help://expression-syntax'>Expression syntax reference</a>"
 )
 
-EDIT_MIN_H = 142
-EDIT_MAX_H = 420
-EDIT_COMPACT_H = 48                 # one line after a parse: the Carbon lg field height
+STATE_TAGS = {
+    "parsed": ("Parsed successfully", "green"),
+    "warnings": ("Parsed with warnings", "blue"),
+    "stale": ("Expression changed", "blue"),
+}
+CATEGORY_NAMES = {LEXICAL: "Lexical", SYNTAX: "Syntax", SEMANTIC: "Range"}
 
 
 def formula_html(source: str) -> str:
@@ -106,64 +121,20 @@ def _fmt(v: float) -> str:
     return f"{v:g}"
 
 
-class _Editor(QPlainTextEdit):
-    """The expression text area: grows with its content (the panel scrolls), Parse + state icons inside."""
+class _Memory(QTextBlockUserData):
+    """Variables already declared or offered for the block whose expression line carries this (see
+    :func:`plan_declarations`).  Lives on the QTextBlock, so it follows the line through edits."""
 
-    parse_requested = Signal()
-
-    def __init__(self):
+    def __init__(self, names=()):
         super().__init__()
-        self.setObjectName("ExpressionEdit")
-        self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setPlaceholderText("e.g. (Fe1.6CoCr0.4Mn)0.9Al0.1")
-        self.setAccessibleName("Composition expression")
-        thin_scrollbars(self)
-        carbon_context_menu(self)
-        self.parse_btn = IconButton("search_locate", "Parse expression", self)
-        self.parse_btn.setFixedSize(32, 32)
-        self.parse_btn.clicked.connect(self.parse_requested.emit)
-        self.state_icon = QLabel(self)
-        self.state_icon.setFixedSize(16, 16)
-        self.state_icon.hide()
-        self.compact = False            # after a parse the field hugs its lines (COMPOSITION_EXPRESSION_*)
-        self.document().contentsChanged.connect(self.fit)
-        QShortcut(QKeySequence("Ctrl+Return"), self, activated=self.parse_requested.emit)
-        QShortcut(QKeySequence("Ctrl+Enter"), self, activated=self.parse_requested.emit)
-        self.fit()
-
-    def fit(self):
-        lines = max(1, self.document().blockCount())
-        if self.compact:
-            h = max(EDIT_COMPACT_H, int(lines * self.fontMetrics().lineSpacing() + 2 * 14))
-        else:
-            h = max(EDIT_MIN_H, int(lines * self.fontMetrics().lineSpacing() + 2 * 16 + 8))
-        self.setFixedHeight(min(EDIT_MAX_H, h))
-
-    def set_compact(self, on: bool):
-        if on != self.compact:
-            self.compact = on
-            self.fit()
-
-    def set_state_icon(self, name: str | None):
-        if name is None:
-            self.state_icon.hide()
-            return
-        self.state_icon.setPixmap(icons.pixmap(name, size=16))
-        self.state_icon.show()
-
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        self.parse_btn.move(self.width() - 72, 8)
-        self.state_icon.move(self.width() - 32, 16)
+        self.names = set(names)
 
 
 class ExpressionView(QWidget):
-    """See module docstring.  Public API used by the panel: ``text()``, ``parse()``, ``status()``,
-    ``can_calculate()``, ``recipe()``, ``compositions()``, ``preview_tsv()``, ``add_element()`` /
-    ``remove_element()``, ``clear()``, ``set_total_mass()``; ``expressions`` / ``detected`` describe the
-    current parse."""
+    """See module docstring.  Public API used by the panel: ``text()``, ``parse()``, ``state()``, ``status()``,
+    ``primary_action()``, ``can_calculate()``, ``recipe()``, ``compositions()``, ``preview_tsv()``,
+    ``add_element()`` / ``remove_element()``, ``clear()``, ``set_total_mass()``; ``expressions`` / ``detected``
+    describe the current parse."""
 
     changed = Signal()
     elements_parsed = Signal(list)
@@ -172,7 +143,7 @@ class ExpressionView(QWidget):
     def __init__(self, datasets: Datasets, parent=None):
         super().__init__(parent)
         self.data = datasets
-        self.doc: Document | None = None          # the last parse (the calculation source while not stale)
+        self.doc: Document | None = None          # the last *parse* (the calculation source while not stale)
         self.parsed_text = ""
         self.stale = False
         self.counting = False
@@ -181,80 +152,248 @@ class ExpressionView(QWidget):
         self.total_mass = 2.0
         self.expressions: list = []
         self.detected = (0, [], [])
+        self.live: list[Diagnostic] = []          # every problem of the current text (last validation)
+        self.shown: list[Diagnostic] = []         # the ones underlined now (unfinished caret-line ones held back)
+        self.validated_text: str | None = None
+        self.typing = False                       # an edit is waiting for the validation pause
+        self._auto_editing = False
+        self._undo_steps = 0
+        self._ready = False                       # the event filter waits for the widgets below
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        content = QWidget()
-        content.setObjectName("ExpressionContent")
-        root = QVBoxLayout(content)
-        root.setContentsMargins(20, 14, 20, 16)
+        self.content = QWidget()
+        self.content.setObjectName("ExpressionContent")
+        root = QVBoxLayout(self.content)
+        root.setContentsMargins(0, EDITOR_TOP, 0, 0)
         root.setSpacing(0)
-        lab_row = QHBoxLayout()
-        lab_row.setSpacing(8)
-        lab = QLabel("Composition expression")
-        lab.setObjectName("Label01")
-        lab_row.addWidget(lab)
-        lab_row.addWidget(InfoButton(EXPRESSION_HELP, title="Expression syntax"))
-        lab_row.addStretch(1)
-        root.addLayout(lab_row)
-        root.addSpacing(8)
-        self.edit = _Editor()
+        self.edit = CodeEditor(datasets)
         self.edit.textChanged.connect(self._edited)
         self.edit.parse_requested.connect(self.parse)
+        self.edit.cursorPositionChanged.connect(self._caret_moved)
+        self.edit.installEventFilter(self)
         root.addWidget(self.edit)
-        root.addSpacing(6)
-        self.feedback = QLabel(HELPER_TEXT)
-        self.feedback.setObjectName("Helper")
-        self.feedback.setWordWrap(True)
-        self.feedback.setTextFormat(Qt.TextFormat.RichText)
-        self.feedback.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self.feedback.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
-        root.addWidget(self.feedback)
-        root.addSpacing(16)
         self.section = QWidget()
         self.section_lay = QVBoxLayout(self.section)
-        self.section_lay.setContentsMargins(0, 0, 0, 0)
+        self.section_lay.setContentsMargins(16, 16, 16, 16)
         self.section_lay.setSpacing(0)
         self.section.hide()
         root.addWidget(self.section)
         root.addStretch(1)
-        self.scroll = inner_scroll_area(content)
-        own_wheel(self.scroll)
+        self.scroll = inner_scroll_area(self.content)
+        self.scroll.viewport().installEventFilter(self)
         outer.addWidget(self.scroll)
+        self._validate_timer = QTimer(self)
+        self._validate_timer.setSingleShot(True)
+        self._validate_timer.setInterval(VALIDATE_MS)
+        self._validate_timer.timeout.connect(self._validate)
         self._counter = BackgroundTask(self)
         self._counter.done.connect(self._counted)
         self._counter.failed.connect(self._count_failed)
+        self._ready = True
+        self._fit_editor()
 
-    # ------------------------------------------------------------------ state
+    # ------------------------------------------------------------------ text
     def text(self) -> str:
         return self.edit.toPlainText()
 
+    def set_text(self, text: str) -> None:
+        """Programmatic text (restore, import): no automatic declarations for what is already there."""
+        self.edit.setPlainText(text)
+        self._seed_memory()
+        self._validate()
+
     def set_total_mass(self, grams: float) -> None:
         self.total_mass = grams
-        if self.doc is not None and len(self.doc.blocks) == 1:
+        if self.doc is not None and self.doc.ok and len(self.doc.blocks) == 1:
             self._render_section()
 
+    def eventFilter(self, obj, ev):
+        if not self._ready:
+            return False
+        if obj is self.scroll.viewport() and ev.type() == ev.Type.Resize:
+            self._fit_editor()
+        elif obj is self.edit and ev.type() == ev.Type.FocusOut:
+            if self.typing:
+                self._validate_timer.stop()
+                self._validate()
+            else:
+                self._refresh_shown()
+        return False
+
+    # ------------------------------------------------------------------ editing
     def _edited(self):
-        if self.doc is not None and self.doc.ok and self.text() != self.parsed_text:
-            self.stale = True
-        elif self.doc is not None and self.doc.ok and self.text() == self.parsed_text:
-            self.stale = False
+        if self._auto_editing:
+            return
+        doc = self.edit.document()
+        steps = doc.availableUndoSteps()
+        undoing = steps < self._undo_steps            # an undo (any path: keys, menu, Edit > Undo)
+        self._undo_steps = steps
+        text = self.text()
+        if self.doc is not None and self.doc.ok:
+            self.stale = text != self.parsed_text
         elif self.doc is not None and not self.doc.ok:
-            self.doc = None                     # an edit after an error goes back to the draft
+            self.doc = None                           # an edit after a failed parse goes back to editing
             self.section.hide()
-        self._render_feedback()
+        self.typing = True
+        self.validated_text = None
+        if undoing:
+            self._seed_memory()                       # an undone automatic declaration is not added back
+        self._validate_timer.start()
+        self._fit_editor()
+        self._refresh_shown()
         self.changed.emit()
 
+    def _caret_moved(self):
+        self._refresh_shown()
+        self._ensure_caret_visible()
+
+    def _ensure_caret_visible(self):
+        r = self.edit.cursorRect()
+        top = self.edit.mapTo(self.content, r.topLeft())
+        self.scroll.ensureVisible(top.x(), top.y() + LINE_H // 2, 0, LINE_H)
+
+    def _expression_blocks(self):
+        """QTextBlocks of the expression line of every document block (in order)."""
+        doc = self.edit.document()
+        lines = self.text().split("\n")
+        roles = line_roles(lines)
+        return [doc.findBlockByNumber(i) for i, r in enumerate(roles) if r == ROLE_EXPRESSION]
+
+    def _memory(self) -> list[set[str]]:
+        out = []
+        for blk in self._expression_blocks():
+            m = blk.userData()
+            out.append(set(m.names) if isinstance(m, _Memory) else set())
+        return out
+
+    def _store_memory(self, memory: list[set[str]]) -> None:
+        for blk, names in zip(self._expression_blocks(), memory):
+            m = blk.userData()
+            if isinstance(m, _Memory):
+                m.names = set(names)
+            else:
+                blk.setUserData(_Memory(names))
+
+    def _seed_memory(self) -> None:
+        """Remember every current variable and declaration as known (nothing is generated for them)."""
+        from ...core.expression_doc import document_blocks
+        from ...core.expression_lexer import declared_variable, formula_variables
+        mem = []
+        for _first, lines in document_blocks(self.text()):
+            names = set(formula_variables(lines[0][1], self.data))
+            for _n, ln in lines[1:]:
+                dv = declared_variable(ln)
+                if dv:
+                    names.add(dv[0])
+            mem.append(names)
+        self._store_memory(mem)
+
+    def _declare(self) -> bool:
+        """Apply the automatic range declarations as one undo step; True when the text changed."""
+        edits, memory = plan_declarations(self.text(), self.data, self._memory())
+        if not edits:
+            self._store_memory(memory)
+            return False
+        ed = self.edit
+        doc = ed.document()
+        caret = ed.textCursor()
+        pos, anchor = caret.position(), caret.anchor()
+        self._auto_editing = True
+        c = QTextCursor(doc)
+        c.beginEditBlock()
+        try:
+            inserts: dict[int, list[str]] = {}
+            for e in edits:
+                if e.kind == "insert":
+                    inserts.setdefault(e.line, []).append(e.text)
+            # bottom-up: earlier line numbers stay valid
+            for line in sorted({e.line for e in edits}, reverse=True):
+                blk = doc.findBlockByNumber(line)
+                if line in inserts:
+                    c.setPosition(blk.position() + len(blk.text()))
+                    c.insertText("".join("\n" + x for x in inserts[line]))
+                for e in edits:
+                    if e.line != line or e.kind == "insert":
+                        continue
+                    if e.kind == "rename":
+                        c.setPosition(blk.position() + e.start)
+                        c.setPosition(blk.position() + e.end, QTextCursor.MoveMode.KeepAnchor)
+                        c.insertText(e.text)
+                    elif e.kind == "delete":
+                        c.setPosition(blk.position())
+                        nxt = blk.next()
+                        if nxt.isValid():
+                            c.setPosition(nxt.position(), QTextCursor.MoveMode.KeepAnchor)
+                        else:
+                            c.setPosition(max(0, blk.position() - 1))
+                            c.setPosition(blk.position() + len(blk.text()), QTextCursor.MoveMode.KeepAnchor)
+                        c.removeSelectedText()
+        finally:
+            c.endEditBlock()
+            self._auto_editing = False
+        # the user's caret and selection stay where they were (an insertion at the caret must not carry it along)
+        n = doc.characterCount() - 1
+        if caret.position() != pos or caret.anchor() != anchor:
+            keep = ed.textCursor()
+            keep.setPosition(min(anchor, n))
+            keep.setPosition(min(pos, n), QTextCursor.MoveMode.KeepAnchor)
+            ed.setTextCursor(keep)
+        self._undo_steps = doc.availableUndoSteps()
+        self._store_memory(memory)
+        return True
+
+    def _validate(self):
+        """The debounced pass: automatic declarations, then every problem of the text."""
+        self._validate_timer.stop()
+        self.typing = False
+        if self.text().strip():
+            changed = self._declare()
+            if changed and self.doc is not None and self.doc.ok:
+                self.stale = self.text() != self.parsed_text
+        text = self.text()
+        self.live = parse_document(text, self.data).diagnostics if text.strip() else []
+        self.validated_text = text
+        self._fit_editor()
+        self._refresh_shown()
+        self.changed.emit()
+
+    def _refresh_shown(self):
+        """Underline the problems, holding back the "unfinished" ones on the caret's line while the user types
+        there (and everything on that line during the typing pause)."""
+        if self.validated_text != self.text():
+            line = self.edit.textCursor().blockNumber()
+            shown = [d for d in self.live if d.line != line]
+        elif self.edit.hasFocus():
+            line = self.edit.textCursor().blockNumber()
+            shown = [d for d in self.live if not (d.incomplete and d.line == line)]
+        else:
+            shown = list(self.live)
+        if shown != self.shown:
+            self.shown = shown
+            self.edit.set_diagnostics(shown)
+            self.changed.emit()
+
+    # ------------------------------------------------------------------ state
     def state(self) -> str:
         if not self.text().strip():
             return "empty"
-        if self.doc is None:
-            return "draft"
-        if not self.doc.ok:
+        if self.shown:
             return "error"
+        if self.doc is not None and not self.doc.ok:
+            return "error"
+        if self.doc is None:
+            return "editing" if (self.typing or self.validated_text != self.text() or self.live) else "ready"
         if self.stale:
             return "stale"
+        if self.counting:
+            return "parsing"
         if self.count_error or self._zero_blocks():
-            return "error"
+            return "workload" if self.count_error else "error"
+        d = self.count_detail
+        if d is not None and d["valid"] >= LARGE:
+            return "workload"
+        if d is not None and (d["skipped"] or d["duplicates"]):
+            return "warnings"
         return "parsed"
 
     def _zero_blocks(self) -> list[int]:
@@ -263,26 +402,43 @@ class ExpressionView(QWidget):
             return []
         return [i for i, (valid, _s, _d) in enumerate(d["blocks"]) if valid == 0]
 
+    def problems(self) -> list[Diagnostic]:
+        """Problems of the state: the shown underlines, or those of a failed parse."""
+        if self.shown:
+            return list(self.shown)
+        if self.doc is not None and not self.doc.ok:
+            return self.doc.diagnostics
+        return []
+
     # ------------------------------------------------------------------ parse
     def parse(self) -> bool:
-        """Parse the document now (Parse icon / Ctrl+Enter).  True when every block is valid."""
+        """Parse the document now (Parse expression / Ctrl+Enter).  True when every block is valid."""
+        if self.typing:
+            self._validate()
         text = self.text()
         self._counter.cancel()
         self.count_detail = None
         self.count_error = None
+        self.counting = False
         if not text.strip():
             self.doc = None
             self.stale = False
             self.expressions = []
             self.detected = (0, [], [])
+            self.live, self.shown = [], []
+            self.edit.set_diagnostics([])
             self.section.hide()
-            self._render_feedback()
+            self._fit_editor()
             self.changed.emit()
             return False
         doc = parse_document(text, self.data)
         self.doc = doc
         self.parsed_text = text
         self.stale = False
+        self.live = doc.diagnostics
+        self.validated_text = text
+        self.shown = list(self.live)                  # an explicit parse shows every problem, unfinished included
+        self.edit.set_diagnostics(self.shown)
         if doc.ok:
             self.expressions = doc.expressions
             els = doc.elements()
@@ -293,8 +449,8 @@ class ExpressionView(QWidget):
             self.expressions = []
             self.detected = (0, [], [])
             self.section.hide()
-        self._render_feedback()
         self._render_section()
+        self._fit_editor()
         self.changed.emit()
         return doc.ok
 
@@ -317,7 +473,6 @@ class ExpressionView(QWidget):
     def _counted(self, detail):
         self.counting = False
         self.count_detail = detail
-        self._render_feedback()
         self._render_section()
         self.changed.emit()
 
@@ -326,62 +481,20 @@ class ExpressionView(QWidget):
             return
         self.counting = False
         self.count_error = str(exc)
-        self._render_feedback()
         self.changed.emit()
 
+    # ------------------------------------------------------------------ layout
+    def _fit_editor(self):
+        """Empty / editing / error: the editor fills the panel; parsed / stale: it hugs its lines and the parse
+        result follows (Figma Draft / Error vs Fixed parsed / Stale)."""
+        need = self.edit.content_height()
+        compact = self.doc is not None and self.doc.ok and not self.shown
+        avail = self.scroll.viewport().height() - EDITOR_TOP
+        h = need if compact else max(need, avail)
+        if self.edit.height() != h:
+            self.edit.setFixedHeight(max(LINE_H, h))
+
     # ------------------------------------------------------------------ rendering
-    def _set_field(self, state: str | None):
-        for prop, on in (("invalid", state == "invalid"), ("valid", state == "valid")):
-            if bool(self.edit.property(prop)) != on:
-                self.edit.setProperty(prop, on)
-                refresh_style(self.edit)
-
-    def _render_feedback(self):
-        st = self.state()
-        self.edit.set_compact(st not in ("empty", "draft"))
-        if st in ("empty", "draft"):
-            self._set_field(None)
-            self.edit.set_state_icon(None)
-            self.feedback.setText(f"<span style='color:{t('text-helper')}'>{HELPER_TEXT}</span>")
-            return
-        if st == "stale":
-            self._set_field(None)
-            self.edit.set_state_icon("status_warn")
-            self.feedback.setText(f"<span style='color:{t('text-primary')}'>{STALE_TEXT}</span>")
-            return
-        if st == "error":
-            self._set_field("invalid")
-            self.edit.set_state_icon("field_invalid")
-            self.feedback.setText(self._errors_html())
-            return
-        self._set_field("valid")
-        self.edit.set_state_icon("notify_success")
-        d = self.count_detail
-        if d is None:
-            text = summary(self.doc) if self.doc.blocks[0].kind == "fixed" and len(self.doc.blocks) == 1 else \
-                summary(self.doc) + " Counting compositions…"
-        else:
-            text = summary(self.doc, d["valid"], d["duplicates"])
-        self.feedback.setText(f"<span style='color:{t('support-success')}'>{html.escape(text)}</span>")
-
-    def _errors_html(self) -> str:
-        err = t("text-error")
-        rows = []
-        if self.doc is not None and not self.doc.ok:
-            items = self.doc.errors
-        else:
-            items = [(i + 1, self.doc.blocks[i].first_line, "No valid compositions: every combination is skipped "
-                                                            "(negative amounts or fewer than two elements).")
-                     for i in self._zero_blocks()]
-            if self.count_error:
-                items.append((0, "", self.count_error))
-        for n, first, msg in items:
-            lines = [html.escape(x) for x in msg.split("\n")]
-            head = f"{n}&nbsp;&nbsp;{html.escape(first)}" if n else ""
-            body = "<br>".join("&nbsp;&nbsp;&nbsp;&nbsp;" + x if n else x for x in lines)
-            rows.append(f"<p style='margin:0 0 10px 0; color:{err}'>{head}{'<br>' if head else ''}{body}</p>")
-        return "".join(rows)
-
     def _render_section(self):
         from .common import retire
         lay = self.section_lay
@@ -395,54 +508,60 @@ class ExpressionView(QWidget):
             self.section.hide()
             return
         n = len(doc.blocks)
-        head = QWidget()
-        hl = QHBoxLayout(head)
-        hl.setContentsMargins(0, 0, 0, 8)
-        title = QLabel("Parsed expression" if n == 1 else "Parsed expressions")
-        title.setObjectName("Heading")
-        hl.addWidget(title)
-        hl.addStretch(1)
-        hl.addWidget(_CountTag(n))
-        lay.addWidget(head)
-        lay.addWidget(_Rule())
         per = self.count_detail["blocks"] if self.count_detail else [None] * n
+        valid = self.count_detail["valid"] if self.count_detail else None
+        if n == 1:
+            count = "1" if doc.blocks[0].kind == "fixed" else \
+                (f"1 expression, {valid:,} composition{'s' if valid != 1 else ''}" if valid is not None else "1")
+        else:
+            count = f"{n} expressions" + (f", {valid:,} compositions" if valid is not None else "")
+        lay.addWidget(_ListTitle("Parsed expressions", count))
         for b, counts in zip(doc.blocks, per):
-            lay.addWidget(self._block_item(b, counts))
+            lay.addWidget(self._block_item(b, counts, n > 1))
             lay.addWidget(_Rule())
         if n == 1:
-            tbl = self._preview_table(doc.blocks[0])
-            if tbl is not None:
-                lay.addSpacing(16)
-                lay.addWidget(tbl)
+            rows = self.preview_rows()
+            if rows:
+                lay.addSpacing(12)
+                lay.addWidget(_PreviewTable(rows))
         self.section.show()
 
-    def _block_item(self, b, counts) -> QLabel:
+    def _block_item(self, b, counts, batch: bool) -> QLabel:
         ex = b.expression
-        sec = t("text-secondary")
+        helper = t("text-helper")
         n_el = len(_elements(ex))
         valid = counts[0] if counts else None
         comps = "…" if valid is None else f"{valid:,} composition{'s' if valid != 1 else ''}"
-        parts = [f"<div style='font-size:16px; color:{t('text-primary')}'>{formula_html(ex.source)}</div>"]
+        size = 16 if (b.kind == "parametric" and not batch) else 14
+        parts = [f"<div style='font-size:{size}px; color:{t('text-primary')}'>{formula_html(ex.source)}</div>"]
         if b.kind == "fixed":
-            parts.append(f"<div style='color:{sec}'>Fixed | {n_el} elements | {comps}</div>")
+            parts.append(f"<div style='color:{helper}'>Fixed | {n_el} elements | {comps}</div>")
+        elif batch:
+            ranges = []
+            for v in ex.variables:
+                r = b.ranges[v]
+                ranges.append(f"{html.escape(_range_span(r))} | "
+                              + (f"step {_fmt(r.step)}" if r.step is not None else f"{len(r.values())} points"))
+            parts.append(f"<div style='color:{helper}'>{' ; '.join(ranges)} | {comps}</div>")
         else:
             rows = []
             for v in ex.variables:
                 r = b.ranges[v]
                 vals = r.values()
                 sampling = f"Step {_fmt(r.step)}" if r.step is not None else f"{len(vals)} points"
-                prev = r.preview if r.preview is not None else r.minimum
-                rows.append(f"<tr><td style='padding-right:16px'>{html.escape(v)}</td>"
-                            f"<td style='padding-right:16px'>{_fmt(r.minimum)} → {_fmt(r.maximum)}</td>"
-                            f"<td style='padding-right:16px'>{sampling}</td>"
-                            f"<td style='padding-right:16px'>Preview {_fmt(prev)}</td>"
+                prev = r.preview if r.preview is not None else vals[0]
+                rows.append(f"<tr><td style='padding-right:20px'>{html.escape(v)}</td>"
+                            f"<td style='padding-right:20px'>{html.escape(_range_span(r, short=True))}</td>"
+                            f"<td style='padding-right:20px'>{sampling}</td>"
+                            f"<td style='padding-right:20px'>Preview {_fmt(prev)}</td>"
                             f"<td>{len(vals)} point{'s' if len(vals) != 1 else ''}</td></tr>")
-            parts.append(f"<table style='color:{sec}' cellspacing='0' cellpadding='0'>{''.join(rows)}</table>")
-            parts.append(f"<div style='color:{sec}'>{comps}</div>")
+            parts.append(f"<table style='color:{helper}' cellspacing='0' cellpadding='0'>{''.join(rows)}</table>")
+            parts.append(f"<div style='color:{helper}'>{comps}</div>")
         lab = QLabel("".join(parts))
         lab.setTextFormat(Qt.TextFormat.RichText)
         lab.setWordWrap(True)
-        lab.setContentsMargins(16, 8, 16, 8)
+        lab.setFont(font(BODY_COMPACT_01))
+        lab.setContentsMargins(16, 6, 16, 6)
         lab.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         return lab
 
@@ -462,52 +581,86 @@ class ExpressionView(QWidget):
         reps = C.all_representations(dict(comp), "ratio", total_mass=self.total_mass, datasets=self.data)
         return [(el, {k: reps[k][el] for k in ("ratio", "at", "wt", "mass")}) for el in comp]
 
-    def _preview_table(self, b):
-        rows = self.preview_rows()
-        if not rows:
-            return None
-        from ..analysis.widgets import Cell, DataTable, ROW_SM
-        cols = [("Element", None), ("At. ratio", None, "right"), ("at.%", None, "right"), ("wt.%", None, "right"),
-                (f"Mass ({self.total_mass:g} g)", None, "right")]
-        data = [[el, Cell(f"{v['ratio']:.4f}", align="right"), Cell(f"{v['at']:.4f}", align="right"),
-                 Cell(f"{v['wt']:.4f}", align="right"), Cell(f"{v['mass']:.4f}", align="right")] for el, v in rows]
-        return DataTable(cols, data, ROW_SM)
-
     def preview_tsv(self) -> str:
         lines = ["Element\tAt. ratio\tat.%\twt.%\tMass (g)"]
         for el, v in self.preview_rows():
             lines.append(f"{el}\t{v['ratio']:.4f}\t{v['at']:.4f}\t{v['wt']:.4f}\t{v['mass']:.5f}")
         return "\n".join(lines) + "\n"
 
-    # ------------------------------------------------------------------ footer contract
+    # ------------------------------------------------------------------ header status / footer contract
+    def _problems_html(self, items: list[Diagnostic]) -> str:
+        rows = []
+        for d in items:
+            msg = "<br>".join(html.escape(x) for x in d.message.split("\n"))
+            rows.append(f"<p style='margin:0 0 8px 0'><b>Line {d.line + 1}</b> ({CATEGORY_NAMES.get(d.category, '')})"
+                        f"<br>{msg}</p>")
+        return "".join(rows)
+
     def status(self) -> Status | None:
         st = self.state()
-        if st in ("empty", "draft", "stale", "error"):
-            return None                          # the field and its message say it (references show no footer)
-        if self.counting:
-            return Status("loading", "Updating…")
-        d = self.count_detail
-        if d is not None:
-            if d["valid"] >= LARGE:
-                from .composition_panel import size_note
-                svc = getattr(self.window(), "jobs", None)
-                _tier, tip = size_note(d["valid"], getattr(svc, "workers", 1))
-                return Status("info", "Large workload", [tip, "<a href='help://workload'>About workload "
-                                                              "estimates</a>"], "Large workload")
+        if st in ("empty", "editing", "ready"):
+            return None
+        if st == "error":
+            items = self.problems()
+            if items:
+                title = "Multiple errors" if len(items) > 1 else items[0].title.rstrip(".")
+                return Status("error", title, self._problems_html(items), "Expression problems")
+            zero = self._zero_blocks()
+            return Status("error", "No valid compositions",
+                          "Every combination of block " + ", ".join(str(i + 1) for i in zero) +
+                          " is skipped (negative amounts or fewer than two elements).", "No valid compositions")
+        if st == "parsing":
+            return Status("loading", "Parsing…")
+        if st == "workload":
+            if self.count_error:
+                return Status("error", "Workload too large", self.count_error, "Workload too large")
+            from .composition_panel import size_note
+            svc = getattr(self.window(), "jobs", None)
+            _tier, tip = size_note(self.count_detail["valid"], getattr(svc, "workers", 1))
+            return Status("info", "Large workload", [tip, "<a href='help://workload'>About workload estimates</a>"],
+                          "Large workload")
+        if st == "warnings":
+            d = self.count_detail
+            notes = []
             if d["skipped"]:
                 k = d["skipped"]
-                return Status("info", f"{k:,} combination{'s' if k != 1 else ''} skipped",
-                              "Skipped: variable values giving negative amounts or fewer than two elements.")
-        return None
+                notes.append(f"{k:,} combination{'s' if k != 1 else ''} skipped: variable values giving negative "
+                             "amounts or fewer than two elements.")
+            if d["duplicates"]:
+                k = d["duplicates"]
+                notes.append(f"{k:,} duplicate composition{'s' if k != 1 else ''} removed (kept once, in the first "
+                             "block that produces it).")
+            return Status("info", "Parsed with warnings", "<br>".join(html.escape(x) for x in notes),
+                          "Parsed with warnings", "blue")
+        text, colour = STATE_TAGS[st]
+        info = None
+        if st == "stale":
+            info = "The expression changed after the last parse. Parse expression again to update the result."
+        return Status("success" if st == "parsed" else "info", text, info, text, colour)
+
+    def primary_action(self) -> tuple[str, bool, bool]:
+        """(``"parse"`` or ``"calculate"``, enabled, split) of the footer's primary button (Figma: Parse expression
+        until the document is parsed; Stale adds the chevron)."""
+        st = self.state()
+        if st in ("parsed", "warnings", "workload") or (st == "error" and self.doc is not None and self.doc.ok
+                                                       and not self.shown):
+            return "calculate", self.can_calculate(), True
+        if st == "parsing":
+            return "parse", False, False
+        if st == "stale":
+            return "parse", True, True
+        return "parse", st in ("ready", "editing"), False
 
     def can_calculate(self) -> bool:
-        return self.state() == "parsed" and not self.counting and self.count_detail is not None \
-            and self.count_detail["valid"] > 0
+        return self.state() in ("parsed", "warnings", "workload") and not self.counting \
+            and self.count_detail is not None and self.count_detail["valid"] > 0 and not self.count_error
 
     def recipe(self) -> ExpressionRecipe:
-        """The parsed document as a calculation recipe (generation happens in the calculation job)."""
-        if self.state() != "parsed":
-            raise ExpressionError("Parse the expression first." if self.state() in ("draft", "stale")
+        """The parsed document as a calculation recipe (generation happens in the calculation job).  Refuses a
+        document that changed after its parse: the calculation never uses an outdated parse."""
+        st = self.state()
+        if st not in ("parsed", "warnings", "workload") or self.text() != self.parsed_text:
+            raise ExpressionError("Parse the expression first." if st in ("editing", "ready", "stale")
                                   else "The expression has errors.")
         doc = self.doc
         n = doc.combinations
@@ -517,8 +670,15 @@ class ExpressionView(QWidget):
         for r in doc.block_ranges:
             for k, v in r.items():
                 merged.setdefault(k, v)
+        d = self.count_detail
+        counts = None
+        if d is not None and self.text() == self.parsed_text:
+            # the Parse count of this very document: lets the calculation skip its duplicate plan when there are
+            # none (core.jobs.CalculationJob._run_expression_direct)
+            counts = (d["valid"], d["skipped"], d["duplicates"], d["combinations"],
+                      tuple((i, b[2]) for i, b in enumerate(d["blocks"]) if b[2]))
         return ExpressionRecipe(tuple(doc.expressions), tuple(merged.items()), doc.text,
-                                tuple(tuple(r.items()) for r in doc.block_ranges))
+                                tuple(tuple(r.items()) for r in doc.block_ranges), counts)
 
     def compositions(self):
         return self.recipe()()[1:]
@@ -526,65 +686,125 @@ class ExpressionView(QWidget):
     # ------------------------------------------------------------------ periodic table
     def _expression_lines(self) -> list[int]:
         """Line numbers of the expression (first) line of every block."""
-        out, prev_blank = [], True
-        for i, line in enumerate(self.text().split("\n")):
-            if line.strip() and prev_blank:
-                out.append(i)
-            prev_blank = not line.strip()
-        return out
+        return [i for i, r in enumerate(line_roles(self.text().split("\n"))) if r == ROLE_EXPRESSION]
+
+    def _replace_line(self, i: int, new: str) -> None:
+        """Replace document line ``i`` as one undo step, keeping the rest of the text (and the memory)."""
+        blk = self.edit.document().findBlockByNumber(i)
+        c = QTextCursor(blk)
+        c.beginEditBlock()
+        c.setPosition(blk.position())
+        c.setPosition(blk.position() + len(blk.text()), QTextCursor.MoveMode.KeepAnchor)
+        c.insertText(new)
+        c.endEditBlock()
 
     def add_element(self, el: str):
         """Append an element to the expression line of the last block (never to a range line)."""
-        lines = self.text().split("\n")
         exprs = self._expression_lines()
         if not exprs:
             self.edit.setPlainText(el)
+            self._seed_memory()
             return
         i = exprs[-1]
-        if re.search(rf"{el}(?![a-z])", lines[i]):
+        line = self.text().split("\n")[i]
+        if re.search(rf"{el}(?![a-z])", line):
             return
-        lines[i] = lines[i].rstrip() + el
-        self.edit.setPlainText("\n".join(lines))
+        self._replace_line(i, line.rstrip() + el)
 
     def remove_element(self, el: str):
         lines = self.text().split("\n")
         for i in self._expression_lines():
             new = re.sub(rf"{el}(?![a-z])(\{{[^}}]*\}}|_\([^)]*\)|_\{{[^}}]*\}}|[0-9.]*[a-z0-9_+\-*/.]*)?", "",
                          lines[i])
-            lines[i] = new.replace("()", "")
-        self.edit.setPlainText("\n".join(lines))
+            new = new.replace("()", "")
+            if new != lines[i]:
+                self._replace_line(i, new)
 
     def clear(self):
         self.edit.clear()
         self.parse()
 
 
-class _CountTag(QWidget):
-    """Carbon gray tag (sm, 20 px pill) holding the number of parsed blocks."""
+class _ListTitle(QWidget):
+    """Carbon contained-list title row (32 px): "Parsed expressions" (heading-compact-01) and a gray 18 px count
+    tag on the right; a 1 px ``list-divider`` under it."""
 
-    def __init__(self, n: int):
+    def __init__(self, title: str, count: str):
         super().__init__()
-        self.text = str(n)
-        from ..theme import LABEL_01, font
-        self.setFont(font(LABEL_01))
-        self.setFixedSize(max(24, self.fontMetrics().horizontalAdvance(self.text) + 16), 20)
+        self.title, self.count = title, count
+        self.setFixedHeight(32)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setAccessibleName(f"{title}: {count}")
 
     def paintEvent(self, _e):
-        from PySide6.QtGui import QColor, QPainter
-        from .. import crisp
+        from PySide6.QtGui import QFontMetrics
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        crisp.fill_pill(p, self.rect(), t("layer-selected-01"))
+        p.setFont(font(HEADING_COMPACT_01))
         p.setPen(QColor(t("text-primary")))
-        p.drawText(self.rect(), int(Qt.AlignmentFlag.AlignCenter), self.text)
+        p.drawText(QRectF(16, 0, self.width() - 32, 32), int(Qt.AlignmentFlag.AlignVCenter), self.title)
+        f = font(LABEL_01)
+        w = QFontMetrics(f).horizontalAdvance(self.count) + 16
+        r = QRectF(self.width() - 16 - w, 7, w, 18)
+        crisp.fill_pill(p, r, t("tag-gray-bg"))
+        p.setFont(f)
+        p.setPen(QColor(t("tag-gray-fg")))
+        p.drawText(r, int(Qt.AlignmentFlag.AlignCenter), self.count)
+        crisp.hline(p, 0, self.width(), self.height() - 1, t("list-divider"), 1)
         p.end()
 
 
-class _Rule(QFrame):
+class _Rule(QWidget):
     def __init__(self):
         super().__init__()
         self.setFixedHeight(1)
-        self.setObjectName("ParsedRule")
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        crisp.hline(p, 0, self.width(), 0, t("list-divider"), 1)
+        p.end()
+
+
+class _PreviewTable(QWidget):
+    """Carbon structured list (Figma Parametric parsed: 34 px header row, 36 px rows, five equal columns, text at
+    14 px into each column, 1 px ``list-row-border`` under every row)."""
+
+    HEADERS = ("Element", "At. ratio", "at.%", "wt.%", "Mass")
+    HEAD_H, ROW_H = 34, 36
+
+    def __init__(self, rows: list[tuple[str, dict]]):
+        super().__init__()
+        self.rows = [(el, f"{v['ratio']:.4f}", f"{v['at']:.4f}", f"{v['wt']:.4f}", f"{v['mass']:.4f}")
+                     for el, v in rows]
+        self.setFixedHeight(self.HEAD_H + self.ROW_H * len(self.rows))
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setAccessibleName("Composition preview")
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        n = len(self.HEADERS)
+        cw = self.width() / n
+        p.setFont(font(HEADING_COMPACT_01))
+        p.setPen(QColor(t("text-primary")))
+        for i, h in enumerate(self.HEADERS):
+            p.drawText(QRectF(i * cw + 14, 0, cw - 14, self.HEAD_H), int(Qt.AlignmentFlag.AlignVCenter), h)
+        crisp.hline(p, 0, self.width(), self.HEAD_H - 1, t("list-row-border"), 1)
+        p.setFont(font(BODY_COMPACT_01))
+        for r, row in enumerate(self.rows):
+            y = self.HEAD_H + r * self.ROW_H
+            p.setPen(QColor(t("text-secondary")))
+            for i, v in enumerate(row):
+                p.drawText(QRectF(i * cw + 14, y, cw - 14, self.ROW_H), int(Qt.AlignmentFlag.AlignVCenter), v)
+            crisp.hline(p, 0, self.width(), y + self.ROW_H - 1, t("list-row-border"), 1)
+        p.end()
+
+
+def _range_span(r, short: bool = False) -> str:
+    """``0 → 0.2`` for an inclusive range (Figma), the declaration's comparisons for a strict one."""
+    if r.min_inclusive and r.max_inclusive:
+        return f"{_fmt(r.minimum)} → {_fmt(r.maximum)}"
+    return r.bounds_text()
 
 
 def _elements(ex) -> list[str]:
@@ -599,4 +819,3 @@ def _elements(ex) -> list[str]:
                 walk(it.items)
     walk(ex.items)
     return out
-

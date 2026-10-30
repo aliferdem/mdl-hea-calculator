@@ -21,6 +21,7 @@ compositions are passed to :class:`hea_calc.core.engine.Engine`.
 
 from __future__ import annotations
 
+import bisect
 import itertools
 import math
 import re
@@ -36,7 +37,14 @@ MAX_COMBINATIONS = 5_000_000
 
 
 class ExpressionError(ValueError):
-    pass
+    """A formula the parser cannot read.  ``pos`` is the 0-based index of the problem in the expression with its
+    spaces removed (the parser reads it that way) and ``length`` the number of characters concerned (0 = the
+    problem is *after* the text, e.g. a missing ``)``); both are ``None`` for errors raised elsewhere."""
+
+    def __init__(self, msg: str = "", pos: int | None = None, length: int | None = None):
+        super().__init__(msg)
+        self.pos = pos
+        self.length = length
 
 
 # ---------------------------------------------------------------------- arithmetic AST
@@ -132,6 +140,12 @@ class Expression:
     items: list
     variables: list[str] = field(default_factory=list)
 
+    def __getstate__(self):
+        # the compiled evaluator (expression_compile.positive_function) is a cache: rebuilt where it is used
+        state = dict(self.__dict__)
+        state.pop("_positive_fn", None)
+        return state
+
     def evaluate(self, env: dict[str, float]) -> dict[str, float]:
         """Return element amounts for the given variable values (zero amounts kept)."""
         out: dict[str, float] = {}
@@ -199,8 +213,11 @@ class _Parser:
     def peek(self) -> str:
         return self.s[self.i] if self.i < len(self.s) else ""
 
-    def error(self, msg: str):
-        raise ExpressionError(f"{msg} (at position {self.i + 1})")
+    def error(self, msg: str, pos: int | None = None, length: int = 1):
+        i = self.i if pos is None else pos
+        if i >= len(self.s):
+            length = 0                      # the problem is past the end: something is missing
+        raise ExpressionError(f"{msg} (at position {i + 1})", i, length)
 
     def element(self) -> str | None:
         s, i = self.s, self.i
@@ -212,7 +229,8 @@ class _Parser:
             if self.data.is_element(s[i]):
                 self.i += 1
                 return s[i]
-            self.error(f"Unknown element '{two if len(two) == 2 and two[1].islower() else s[i]}'")
+            cand = two if len(two) == 2 and two[1].islower() else s[i]
+            self.error(f"Unknown element '{cand}'", i, len(cand))
         return None
 
     # -- formula level
@@ -227,7 +245,7 @@ class _Parser:
                     self.error("Missing ')'")
                 self.i += 1
                 if not inner:
-                    self.error("Empty group")
+                    self.error("Empty group", self.i - 2, 2)
                 items.append(GroupItem(inner, self.amount()))
             elif ch in (")", "]"):
                 if depth == 0:
@@ -405,15 +423,24 @@ def parse_expression(text: str, datasets: Datasets | None = None) -> Expression:
 class VariableRange:
     """Values of one variable: ``minimum`` to ``maximum`` either in steps of ``step`` or as ``points`` evenly
     spaced values that include both endpoints (the inline syntax ``0 <= x <= 1, step=0.1`` / ``points=11``).
-    ``preview`` is the value used for a single-block composition preview (default: ``minimum``)."""
+    ``preview`` is the value used for a single-block composition preview (default: ``minimum``).
+
+    Bounds: ``min_inclusive`` / ``max_inclusive`` are ``False`` for a strict comparison (``0 < x < 1``).  The
+    discretisation is always defined on the closed interval - ``step`` from ``minimum``, or ``points`` evenly
+    spaced values including both ends - and a strict bound then removes that endpoint from the grid, so
+    ``0 < x < 1, step=0.1`` is 0.1 … 0.9 (9 values) and ``0 < x <= 1, points=11`` is 0.1 … 1 (10 values).  An
+    endpoint is removed when the grid value equals the bound within 1e-12 (the grid itself is exact decimal)."""
     name: str
     minimum: float
     maximum: float
     step: float | None = None
     points: int | None = None
     preview: float | None = None
+    min_inclusive: bool = True
+    max_inclusive: bool = True
 
-    def values(self) -> list[float]:
+    def grid(self) -> list[float]:
+        """The closed-interval grid (both endpoints as discretised), before the strict bounds apply."""
         for label, v in (("Min", self.minimum), ("Max", self.maximum)):
             if v is None or not math.isfinite(v):
                 raise RangeError(f"{self.name}: {label} is missing or invalid.")
@@ -441,6 +468,44 @@ class VariableRange:
         if st <= 0:
             raise RangeError(f"{self.name}: Step is too small.")
         return [v / scale for v in range(lo, hi + 1, st)]
+
+    def values(self) -> list[float]:
+        vals = self.grid()
+        if self.min_inclusive and self.max_inclusive:
+            return vals
+
+        def at(v: float, bound: float) -> bool:
+            return abs(v - bound) <= 1e-12 * max(1.0, abs(bound))
+        return [v for v in vals if not ((not self.min_inclusive and at(v, self.minimum))
+                                        or (not self.max_inclusive and at(v, self.maximum)))]
+
+    def contains(self, v: float) -> bool:
+        """``v`` satisfies both comparisons of the declaration."""
+        lo_ok = v >= self.minimum if self.min_inclusive else v > self.minimum
+        hi_ok = v <= self.maximum if self.max_inclusive else v < self.maximum
+        return lo_ok and hi_ok
+
+    def bounds_text(self) -> str:
+        """``0 ≤ x < 1`` - the declaration's comparisons as written (inclusive ≤, strict <)."""
+        lo = "≤" if self.min_inclusive else "<"
+        hi = "≤" if self.max_inclusive else "<"
+        return f"{self.minimum:g} {lo} {self.name} {hi} {self.maximum:g}"
+
+    def to_meta(self) -> dict:
+        """JSON-safe description kept with a run (``range_from_meta`` reads it back)."""
+        return {"min": self.minimum, "max": self.maximum, "step": self.step, "points": self.points,
+                "min_inclusive": self.min_inclusive, "max_inclusive": self.max_inclusive}
+
+
+def range_from_meta(name: str, meta) -> VariableRange:
+    """A :class:`VariableRange` from run metadata: the current dict form, or the earlier list form
+    ``[min, max, step]`` / ``[min, max, step, points]`` of stored runs (always inclusive)."""
+    if isinstance(meta, dict):
+        return VariableRange(name, float(meta["min"]), float(meta["max"]), meta.get("step"), meta.get("points"),
+                             None, bool(meta.get("min_inclusive", True)), bool(meta.get("max_inclusive", True)))
+    lo, hi, step = meta[0], meta[1], meta[2] if len(meta) > 2 else None
+    points = meta[3] if len(meta) > 3 else None
+    return VariableRange(name, float(lo), float(hi), step, points)
 
 
 @dataclass
@@ -648,7 +713,39 @@ class ExpressionSpace:
 
     def evaluate(self, g: int) -> tuple[int, dict[str, float], dict[str, float] | None]:
         b, env = self.locate(g)
-        return b, env, evaluate_positive(self.expressions[b], env)
+        return b, env, self.positive[b](env)
+
+    @property
+    def positive(self):
+        """The compiled evaluator of every block (bit-identical to :func:`evaluate_positive`)."""
+        fns = self.__dict__.get("_positive")
+        if fns is None:
+            from .expression_compile import positive_function
+            fns = self.__dict__["_positive"] = [positive_function(ex) for ex in self.expressions]
+        return fns
+
+    def iterate(self, start: int = 0, stop: int | None = None):
+        """``(g, block, env, positive)`` for combinations ``start .. stop-1`` in index order - the order
+        :meth:`locate` defines, walked with ``itertools.product`` instead of one ``divmod`` chain per index."""
+        stop = self.total if stop is None else min(stop, self.total)
+        if start >= stop:
+            return
+        b = bisect.bisect_right(self.offsets, start) - 1
+        g = start
+        while g < stop and b < len(self.expressions):
+            vl = self.value_lists[b]
+            names = self.expressions[b].variables
+            fn = self.positive[b]
+            first = g - self.offsets[b]
+            n = min(self.sizes[b], stop - self.offsets[b])
+            combos = itertools.product(*vl) if vl else iter([()])
+            if first:
+                combos = itertools.islice(combos, first, None)
+            for _i in range(first, n):
+                env = dict(zip(names, next(combos)))
+                yield g, b, env, fn(env)
+                g += 1
+            b += 1
 
     def name(self, block: int, env: dict[str, float]) -> str:
         return self.expressions[block].name(env)
@@ -664,10 +761,9 @@ def count_blocks(expressions: list[Expression], ranges,
     space = ExpressionSpace(expressions, ranges)
     seen: set[bytes] = set()
     valid = skipped = dups = 0
-    for g in range(space.total):
+    for g, _b, _env, positive in space.iterate():
         if cancelled is not None and not g & 0x3FF and cancelled():
             raise GenerationCancelled()
-        _b, _env, positive = space.evaluate(g)
         if positive is None:
             skipped += 1
             continue
@@ -688,10 +784,9 @@ def count_blocks_detail(expressions: list[Expression], ranges, cancelled=None) -
     space = ExpressionSpace(expressions, ranges)
     seen: set[bytes] = set()
     per = [[0, 0, 0] for _ in space.expressions]
-    for g in range(space.total):
+    for g, b, _env, positive in space.iterate():
         if cancelled is not None and not g & 0x3FF and cancelled():
             raise GenerationCancelled()
-        b, _env, positive = space.evaluate(g)
         if positive is None:
             per[b][1] += 1
             continue

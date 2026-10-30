@@ -108,7 +108,8 @@ DESCRIPTORS_LIST: list[Descriptor] = [
        "δ<sub>CN12</sub> (Kittel radii, used by M1).",
        "δ = 100 √(Σ c<sub>i</sub> (1 − r<sub>i</sub>/r̄)²)", DATA_GUO_LIU, source_note="Guo & Liu radii"),
     _D("delta_cn12", "Size mismatch — Kittel CN12 radii", "δ<sub>CN12</sub>", "δCN12", "%", G_SIZE, 2,
-       "Atomic-size mismatch with Kittel's 12-coordination radii. Used by M1 (and King's δ screen). Not the "
+       "Atomic-size mismatch with Kittel's 12-coordination radii. Used by M1. (King et al. used a δ ≤ 6.6 % screen only to "
+       "generate candidate alloys; it is not part of M8, which uses no radius.) Not the "
        "same quantity as δ (Guo & Liu radii, used by M2, M4, M5).",
        "δ<sub>CN12</sub> = 100 √(Σ c<sub>i</sub> (1 − r<sub>i</sub>/r̄)²)", DATA_KITTEL, source_note="Kittel CN12 radii"),
     _D("gamma", "Solid-angle ratio", "γ", "γ", "", G_SIZE, 4,

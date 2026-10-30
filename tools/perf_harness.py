@@ -233,7 +233,7 @@ def set_sweep(win, app, elements, lo, hi, step):
     for el in elements:
         win.elements.table.tiles[el].click()
     win.composition.set_mode(1)
-    win.composition.unit_box.setCurrentIndex(1)       # at.%
+    win.composition.set_basis("at")       # at.%
     sw = win.composition.sweep
     for row in sw.rows.values():
         row.min.setText(str(lo))
@@ -369,12 +369,9 @@ def after_metrics(app, win, export: bool = True) -> dict:
     out["detailsShowsRow"] = win.details.row is not None and win.details.row.row_id == m.id_at(0)
 
     def window():
-        from hea_calc.ui.widgets.dialogs import AlloyDetailsDialog
-        d = AlloyDetailsDialog(m.row_at(0).materialize(), win)
-        d.show()
+        w = win.open_analysis_window(m.row_at(0))          # the separate Analysis window (shared state)
         app.processEvents()
-        d.close()
-        d.deleteLater()
+        w.close()
     out["detailsWindowMs"] = timed(window)
 
     def menu():

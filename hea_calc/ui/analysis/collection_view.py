@@ -25,7 +25,7 @@ from ...core.analysis.plotting import (AUTO, BAR_GROUPED, BAR_STACKED, BINNED, B
                                        default_config, representation_text, validate)
 from ...core.analysis.queries import (DIM_BLOCK, DIM_CSTR, DIM_FAMILY, DIM_NONE, DIM_SIZE, RAW_POINT_LIMIT,
                                       dim_label, dim_value_text, is_dimension, run_metrics)
-from ...core.analysis.scope import BASE_LABELS, FILTERED, FULL, filter_text
+from ...core.analysis.scope import BASE_LABELS, COMBINED_RUN_ID, FILTERED, FULL, filter_text
 from ...core.engine import MODEL_KEYS, NA, NA_ERROR, NA_MISSING_DATA, NA_UNDEFINED, MODELS
 from .. import crisp, icons
 from ..theme import LABEL_01, PANEL_PADDING_X, font, t
@@ -52,10 +52,16 @@ ANA_SAMPLED = ("{N} points are too many to draw individually. A uniform random s
 
 # ====================================================================== helpers
 def run_label(info, count: int | None = None, short: bool = False) -> str:
-    base = f"Run {info.run_id} · {mode_name(info.mode)}"
+    if info.run_id == COMBINED_RUN_ID:
+        from ...core.analysis.combine import combined_label
+        base = combined_label((info.source or {}).get("combined", ()))
+        if short or count is None:
+            return base
+        return f"{base}, {count:,} result{'s' if count != 1 else ''}"
+    base = f"Run {info.run_id} ({mode_name(info.mode)})"
     if short or count is None:
         return base
-    return f"{base} · {count:,} result{'s' if count != 1 else ''}"
+    return f"{base}, {count:,} result{'s' if count != 1 else ''}"
 
 
 def metric_items(info, include_design: bool = True, numeric_only: bool = True):
@@ -129,7 +135,13 @@ class _CountLabel(QWidget):
 def run_items(c):
     out = [(info.run_id, run_label(info, c.run_count(info.run_id)), True, "", run_label(info, short=True))
            for info in c.runs()]
-    out.append(("combine", "Combine runs…", False, "Combined collections are not available in this version"))
+    if c.combined_runs:
+        ci = c.run_info(COMBINED_RUN_ID)
+        if ci is not None:
+            out.append((COMBINED_RUN_ID, run_label(ci, c.run_count(COMBINED_RUN_ID)), True, "",
+                        run_label(ci, short=True)))
+    many = len(out) - (1 if c.combined_runs else 0) >= 2
+    out.append(("combine", "Combine runs…", many, "" if many else "Combining needs at least two calculation runs"))
     return out
 
 
@@ -139,8 +151,15 @@ def pop_items(c):
             (FILTERED, "Filtered result set", filt, "" if filt else "No filter is set in the results table")]
 
 
-def run_changed(c, run_id) -> None:
-    if run_id == "combine" or run_id is None:
+def run_changed(c, run_id, parent=None) -> None:
+    if run_id is None:
+        return
+    if run_id == "combine":
+        from .combine_dialog import CombineRunsDialog
+        dlg = CombineRunsDialog(c, parent)
+        if dlg.exec() and dlg.chosen:
+            c.combine(dlg.chosen)
+        dlg.deleteLater()
         return
     c.scope_for(int(run_id), FULL)
 
@@ -163,7 +182,7 @@ def restriction_controls(c):
     blocks = None
     if info is not None and info.mode == "expression":
         exprs = {b["index"]: b["expression"] for b in (info.source or {}).get("blocks", [])}
-        blocks = MultiSelect("blocks", [(k, f"Block {k + 1} · {exprs.get(k, '')} ({n:,})")
+        blocks = MultiSelect("blocks", [(k, f"Block {k + 1}: {exprs.get(k, '')} ({n:,})")
                                         for k, n in opts.get("blocks", {}).items()], sc.blocks or (),
                              accessible="Expression block")
     return fam, size, blocks
@@ -179,7 +198,10 @@ class ScopeBar(QWidget):
         self.size_class = "M"
         self.stack = QStackedWidget(self)
         outer = QHBoxLayout(self)
-        outer.setContentsMargins(PANEL_PADDING_X, 0, PANEL_PADDING_X, 8)
+        # The panel's Content switcher hangs 4 px into the top of this 40 px bar (Figma 494:69395: y = 12 .. 44,
+        # the context bar's empty top 4 px).  The controls therefore start 4 px down - at the bar's top they ran
+        # under the switcher wherever it is above them (Restrict, at docked widths).  Bar height unchanged.
+        outer.setContentsMargins(PANEL_PADDING_X, 4, PANEL_PADDING_X, 4)
         outer.addWidget(self.stack)
         # ---- inline (M / L)
         inline = QWidget()
@@ -255,9 +277,9 @@ class ScopeBar(QWidget):
             w.setEnabled(enabled)
         if sc is not None:
             info = self.c.run_info(sc.run_id)
-            text = f"Run {sc.run_id} · {BASE_LABELS[sc.base]}" + (f" · {n_now:,} results" if n_now is not None else "")
+            text = f"Run {sc.run_id}, {BASE_LABELS[sc.base]}" + (f", {n_now:,} results" if n_now is not None else "")
             if sc.restricted:
-                text += f" · Restricted ({sc.restricted})"
+                text += f", restricted ({sc.restricted})"
             if st.stale:
                 text = "⚠ " + text
             self.summary_btn.items = [("s", text)]
@@ -271,7 +293,8 @@ class ScopeBar(QWidget):
 
     # -------------------------------------------------------------- actions
     def _run_changed(self, run_id):
-        run_changed(self.c, run_id)
+        run_changed(self.c, run_id, self.window())
+        self.refresh()                       # a cancelled Combine runs dialog leaves the scope as it was
 
     def _pop_changed(self, base):
         pop_changed(self.c, base)
@@ -346,6 +369,12 @@ class ScopeBar(QWidget):
         if pop is None:
             return
 
+        def run_chosen(v):
+            if v == "combine":                       # Combine runs… opens its own dialog at once
+                pop.close()
+                run_changed(self.c, "combine", self.window())
+        run.changed.connect(run_chosen)
+
         def do_apply():
             rid = run.value if isinstance(run.value, int) else (sc.run_id if sc else None)
             if rid is None:
@@ -386,6 +415,10 @@ class CollectionContent(QWidget):
         self._built: dict[int, tuple] = {}
         self.plot: PlotWidget | None = None
         self._pending_build = False
+        # suspended: nobody is looking at this view (the other Analysis view is in use) - no builds, fills or
+        # plot renders; what was skipped is caught up once, on resume
+        self.suspended = False
+        self._dirty = False
         controller.state_changed.connect(self._state_changed)
         controller.data_ready.connect(self._data_ready)
         controller.loading.connect(self._loading)
@@ -413,6 +446,22 @@ class CollectionContent(QWidget):
     def _schedule(self):
         self._rebuild_timer.start()
 
+    def set_suspended(self, on: bool) -> None:
+        on = bool(on)
+        if on == self.suspended:
+            return
+        self.suspended = on
+        if not on and self._dirty:
+            self._dirty = False
+            self._built.clear()                  # the visible page is rebuilt once from the (cached) answers
+            self._schedule()
+
+    def _skip(self) -> bool:
+        if self.suspended:
+            self._dirty = True
+            return True
+        return False
+
     def showEvent(self, e):
         super().showEvent(e)
         self._schedule()
@@ -424,7 +473,8 @@ class CollectionContent(QWidget):
         st = self.c.state
         sc = st.scope
         base = (self.size_class, sc.key() if sc else None, st.scope_gone, st.stale, self.has_results,
-                st.data_version)
+                st.data_version, st.newer_results,
+                self.c.data.get("dups") if sc is not None and sc.combined else None)   # the combined notice's count
         if i == 1:
             return base + (st.plot,)
         if i == 2:
@@ -434,6 +484,8 @@ class CollectionContent(QWidget):
         return base
 
     def _rebuild_now(self) -> None:
+        if self._skip():
+            return
         if not self.isVisible() and self._built:
             return
         i = self._visible_page()
@@ -456,8 +508,10 @@ class CollectionContent(QWidget):
         self._request(i)
 
     def _state_changed(self, old, new):
+        if self._skip():
+            return
         if old.coll_tab != new.coll_tab or old.scope != new.scope or old.stale != new.stale or \
-                old.data_version != new.data_version or old.scope_gone != new.scope_gone or \
+                old.data_version != new.data_version or old.scope_gone != new.scope_gone or                 old.newer_results != new.newer_results or \
                 (new.coll_tab == "plots" and old.plot != new.plot) or \
                 (new.coll_tab == "statistics" and
                  (old.stats_metrics, old.stats_group, old.stats_all, old.stats_focus, old.stats_view)
@@ -483,6 +537,8 @@ class CollectionContent(QWidget):
 
     # -------------------------------------------------------------- data requests
     def _request_visible(self):
+        if self._skip():
+            return
         if self.isVisible():
             self._request(self._visible_page())
 
@@ -493,7 +549,9 @@ class CollectionContent(QWidget):
             return
         info = self.c.run_info(sc.run_id)
         unrestricted = sc.without_restrictions()
-        self.c.run_query("options", lambda sq: sq.population(), scope=unrestricted)
+        # the unrestricted population (scope options) is the same query as the population of an unrestricted
+        # scope: one shared answer (share="population")
+        self.c.run_query("options", lambda sq: sq.population(), scope=unrestricted, share="population")
         if i == 0:
             self.c.run_query("population", lambda sq: sq.population())
             self.c.run_query("dist", lambda sq: sq.distribution())
@@ -503,10 +561,11 @@ class CollectionContent(QWidget):
         elif i == 2:
             metrics = tuple(st.stats_metrics)
             group = st.stats_group
-            self.c.run_query("stats", lambda sq: sq.statistics(list(metrics)), params=metrics)
+            self.c.request_statistics(metrics)      # one query per metric, rows fill in as they finish
             if self.size_class == "W" and st.stats_focus:
                 focus = st.stats_focus              # the user's selected metric (none -> nothing to query)
-                self.c.run_query("outliers", lambda sq: sq.outliers(focus), params=(focus,))
+                known = self.c.statistics_cached(focus)
+                self.c.run_query("outliers", lambda sq: sq.outliers(focus, known), params=(focus,))
                 if st.stats_view == "groups":       # only the visualization that is shown is queried
                     g = group if group != "none" else DIM_FAMILY
                     self.c.run_query("box", lambda sq: sq.statistics([focus], group=g), params=(focus, g))
@@ -556,7 +615,7 @@ class CollectionContent(QWidget):
             self.c.run_query("plot", lambda sq: sq.distribution(g), params=("distg", cfg))
 
     def _data_ready(self, slot: str) -> None:
-        if not self.isVisible():
+        if self._skip() or not self.isVisible():
             return
         i = self._visible_page()
         if slot in ("population", "options"):
@@ -571,8 +630,12 @@ class CollectionContent(QWidget):
                 self._fill_models()
             elif i == 0:
                 self._fill_overview()
+        elif slot == "dups":
+            self._schedule()                     # the combined-collection notice states the duplicate count
 
     def _loading(self, slot: str, busy: bool) -> None:
+        if self.suspended:
+            return
         if slot == "plot" and self.plot is not None and self._visible_page() == 1:
             self._set_plot_loading(busy)
         if slot == "stats" and self._visible_page() == 2 and hasattr(self, "stats_loading"):
@@ -582,6 +645,8 @@ class CollectionContent(QWidget):
                 pass
 
     def _failed(self, slot: str, msg: str) -> None:
+        if self._skip():
+            return
         if slot == "plot" and self._visible_page() == 1 and hasattr(self, "plot_note"):
             try:
                 self.plot_note.show_message("error", "The plot could not be loaded", _html.escape(msg), "Retry")
@@ -624,12 +689,32 @@ class CollectionContent(QWidget):
                                   f"{d:,} compositions generated by the selected block(s) were first generated by an "
                                   "earlier block and are counted there.")
                 lay.addWidget(note)
+        if sc is not None and sc.combined:
+            parts = ", ".join(f"Run {r} ({self.c.run_count(r):,})" for r in sc.run_ids)
+            dups = self.c.data.get("dups") if self.c.data_keys.get("dups", (None, None))[1] == sc.key() else None
+            dup_text = (f" {dups:,} composition{'s occur' if dups != 1 else ' occurs'} in more than one run; each "
+                        "result counts once." if dups else " Each result counts once; nothing is merged.")
+            note = ActionableNotification()
+            note.show_message("info", "Combined collection",
+                              f"{parts}. Counts, statistics and distributions use all of them together.{dup_text} "
+                              "Design variables and expression blocks belong to single runs and are not offered "
+                              "here.")
+            lay.addWidget(note)
+        loaded = f" loaded at {st.resolved.resolved_at}" if st.resolved is not None else ""
         if info is not None and info.status == "running":
+            # one notice while the run streams (never one per commit): the collection keeps its snapshot
             note = ActionableNotification()
             note.show_message("info", "Calculation in progress",
-                              f"{self.c.run_count(sc.run_id):,} of {info.expected or 0:,} results stored. Values refer "
-                              "to stored results and refresh when the run completes.", "Refresh now")
-            note.action.connect(self.c._partial_refresh)
+                              f"{self.c.run_count(sc.run_id):,} of {info.expected or 0:,} results stored. This "
+                              f"collection shows the results{loaded}; refresh to include newer ones.", "Refresh")
+            note.action.connect(self.c.refresh_collection)
+            lay.addWidget(note)
+        elif st.newer_results:
+            note = ActionableNotification()
+            note.show_message("info", "Newer results available",
+                              f"Run {sc.run_id} has stored results since this collection was{loaded or ' loaded'}. "
+                              "Refresh to include them.", "Refresh")
+            note.action.connect(self.c.refresh_collection)
             lay.addWidget(note)
         elif info is not None and info.status in ("cancelled", "failed", "interrupted"):
             note = ActionableNotification()
@@ -770,7 +855,7 @@ class CollectionContent(QWidget):
         if len(full) == 8:
             return f"All 8 models evaluated for {pop['n']:,} of {pop['n']:,} results."
         parts = [f"{k} {models[k]['evaluated']:,}" for k in MODEL_KEYS]
-        return "Evaluated results per model: " + " · ".join(parts) + f" (of {pop['n']:,})."
+        return "Evaluated results per model: " + ", ".join(parts) + f" (of {pop['n']:,})."
 
     def _current(self, slot: str):
         """The slot's last answer if it belongs to the current scope and data version."""
@@ -817,10 +902,12 @@ class CollectionContent(QWidget):
         a.add(label(source_text(info, pop), "body", wrap=True))
         specs = (info.source or {}).get("specs") if info else None
         if specs:
-            a.add(DataTable([("Element", 100), ("Min", 90, "right"), ("Max", 90, "right"), ("Step", 90, "right"),
-                             ("Lock", None)],
+            pts = any("points" in s_ for s_ in specs)
+            a.add(DataTable([("Element", 100), ("Min", 90, "right"), ("Max", 90, "right"),
+                             ("Points" if pts else "Step", 90, "right"), ("Lock", None)],
                             [[s_["element"], Cell(f"{s_['min']:g}", align="right"), Cell(f"{s_['max']:g}", align="right"),
-                              Cell(f"{s_['step']:g}", align="right"), "On (required)" if s_["required"] else "Off (optional)"]
+                              Cell(f"{s_['points']}" if "points" in s_ else f"{s_['step']:g}", align="right"),
+                              "On (required)" if s_["required"] else "Off (optional)"]
                              for s_ in specs], ROW_XS))
         a.lay.addStretch(1)
         # how it is made up: sizes, families, which models could evaluate it (counts only - no filler medians)
@@ -920,7 +1007,7 @@ class CollectionContent(QWidget):
             for m in run_metrics(info):
                 if m.kind == "variable" and m.id not in used:
                     r = (info.source or {}).get("ranges", {}).get(m.plain)
-                    vals = _range_values(r) if r else []
+                    vals = _range_values(r, m.plain) if r else []
                     dd = Dropdown([(v, f"{v:g}") for v in vals], cfg.fixed_dict.get(m.id),
                                   prefix=f"Fix {m.plain} at" if inline else "", accessible=f"Fix {m.plain} at",
                                   placeholder="Choose", width=176 if inline else None)
@@ -1143,9 +1230,9 @@ class CollectionContent(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
         lay.addWidget(label(CMP.name_html(rec.name), "heading02", wrap=True))
-        lay.addWidget(label(f"{rec.family or '—'} · {rec.n_elements or 0} elements", "label"))
+        lay.addWidget(label(f"{rec.family or '—'}, {rec.n_elements or 0} elements", "label"))
         comp = rec.composition
-        lay.addWidget(label(" · ".join(f"{el} {100 * x:.2f}" for el, x in comp.items()) + " at.%", "label", wrap=True))
+        lay.addWidget(label(", ".join(f"{el} {100 * x:.2f}" for el, x in comp.items()) + " at.%", "label", wrap=True))
         cfg = self.c.state.plot
         plotted = []
         for mid in (cfg.x, cfg.y):
@@ -1302,7 +1389,7 @@ class CollectionContent(QWidget):
             sc = self.c.state.scope
             n_missing = data.get("n_missing", 0) if isinstance(data, dict) else 0
             unit = "composition" if spec.kind in ("scatter", "line") else "result"
-            self.ws_caption.setText(f"Each point is one {unit} · {n_missing:,} results omitted (no value) · Run {sc.run_id}"
+            self.ws_caption.setText(f"Each point is one {unit}. {n_missing:,} results omitted (no value). Run {sc.run_id}."
                                     if spec.kind in ("scatter", "line") else f"Run {sc.run_id}")
         except RuntimeError:
             pass
@@ -1412,9 +1499,15 @@ class CollectionContent(QWidget):
         def f(k, v):
             return format_value(k, v) if v is not None else "—"
         rows = []
+        pending = stats.get("pending", ())
+        ncols = 10 if all_measures else (4 if self.size_class == "S" else 5)
         for k in metrics:
             m = stats["metrics"].get(k)
             if m is None:
+                if k in pending:                    # still being calculated: Carbon skeleton cells
+                    dd = DESCRIPTORS[k]
+                    rows.append([f"{dd.symbol} ({dd.unit or '–'})"] +
+                                [Cell(align="right", skeleton=True) for _ in range(ncols - 1)])
                 continue
             dd = DESCRIPTORS[k]
             name = f"{dd.symbol} ({dd.unit or '–'})"
@@ -1429,8 +1522,8 @@ class CollectionContent(QWidget):
                 rows.append([name, Cell(f"{m['n_valid']:,}", align="right", tip=_missing_tip(m)),
                              Cell(f(k, m["median"]), align="right"),
                              Cell(f"{f(k, m['q1'])} … {f(k, m['q3'])}", align="right",
-                                  tip=f"Min {f(k, m['min'])} · Max {f(k, m['max'])} · Mean {f(k, m['mean'])} · "
-                                      f"SD {f(k, m['sd'])} · N missing {m['n_missing']:,}")])
+                                  tip=f"Min {f(k, m['min'])}, max {f(k, m['max'])}, mean {f(k, m['mean'])}, "
+                                      f"SD {f(k, m['sd'])}, N missing {m['n_missing']:,}")])
             else:
                 rows.append([name, Cell(f"{m['n_valid']:,}", align="right", tip=_missing_tip(m)),
                              Cell(f(k, m["median"]), align="right"),
@@ -1487,7 +1580,7 @@ class CollectionContent(QWidget):
             table = self._stats_table(stats, st.stats_all and wide, metrics)
             table.activatable = True
             table.setFocusPolicy(Qt.FocusPolicy.TabFocus)
-            keys = [k for k in metrics if k in stats["metrics"]]
+            keys = [k for k in metrics if k in stats["metrics"] or k in stats.get("pending", ())]
             table.selected = keys.index(st.stats_focus) if st.stats_focus in keys else -1
             table.row_tips = [f"Plot the distribution of {plain_text(DESCRIPTORS[k].symbol)} "
                               f"({plain_text(DESCRIPTORS[k].name)})" for k in keys]
@@ -1495,8 +1588,8 @@ class CollectionContent(QWidget):
             lay.addWidget(table)
         cap = QHBoxLayout()
         exact = "exact" if stats["exact"] else "Approximate (binned)"
-        cap.addWidget(label(f"N = {stats['n']:,} results in scope · N/A excluded and counted as missing · quartiles "
-                            f"by linear interpolation · {exact}", "label", wrap=True), 1)
+        cap.addWidget(label(f"N = {stats['n']:,} results in scope. N/A values are excluded and counted as missing. "
+                            f"Quartiles by linear interpolation. {exact}", "label", wrap=True), 1)
         cap.addWidget(InfoButton(ANA_STATS.format(n=f"{stats['n']:,}"), title="Statistics conventions"))
         lay.addLayout(cap)
 
@@ -1516,6 +1609,9 @@ class CollectionContent(QWidget):
         dd.setMinimumWidth(360)
         dd.changed.connect(lambda k: self.c.apply(S.update, stats_focus=k))
         return dd
+
+    STATS_VIZ_MIN = 340          # expanded Statistics visualization (region incl. its heading row)
+    STATS_VIZ_MAX = 400
 
     def _build_statistics_ws(self, info) -> QWidget:
         st = self.c.state
@@ -1567,9 +1663,13 @@ class CollectionContent(QWidget):
             lambda i: self.c.apply(S.update, stats_view="groups" if i == 1 else "histogram"))
         dist.addWidget(self.stats_view_sw)
         right.addLayout(dist)
+        # Statistics leads with its table; the chart is supporting evidence: a bounded height (heading + a readable
+        # histogram / box plot with its axes), not the rest of the page - the Plots tab is the chart-centric view
         self.ws_viz = _Region()
-        self.ws_viz.setMinimumHeight(420)              # a readable plot even in a small window (§20)
-        right.addWidget(self.ws_viz, 1)
+        self.ws_viz.setMinimumHeight(self.STATS_VIZ_MIN)
+        self.ws_viz.setMaximumHeight(self.STATS_VIZ_MAX)
+        right.addWidget(self.ws_viz)
+        right.addStretch(1)
         row.addLayout(right, 1)
         self._fill_statistics_ws()
         return host
@@ -1596,13 +1696,13 @@ class CollectionContent(QWidget):
         if stats is not None:
             table = self._stats_table(stats, True, st.stats_metrics)
             table.columns.insert(1, ("Unit", 120))
-            for r, k in zip(table.rows, [m for m in st.stats_metrics if m in stats["metrics"]]):
+            for r, k in zip(table.rows, [m for m in st.stats_metrics if m in stats["metrics"] or m in stats.get("pending", ())]):
                 r.insert(1, Cell(DESCRIPTORS[k].unit or "–", color="text-secondary"))
             table.columns[0] = ("Metric", 180)
-            for r, k in zip(table.rows, [m for m in st.stats_metrics if m in stats["metrics"]]):
+            for r, k in zip(table.rows, [m for m in st.stats_metrics if m in stats["metrics"] or m in stats.get("pending", ())]):
                 r[0] = Cell(DESCRIPTORS[k].symbol)
             table.activatable = True
-            shown = [m for m in st.stats_metrics if m in stats["metrics"]]
+            shown = [m for m in st.stats_metrics if m in stats["metrics"] or m in stats.get("pending", ())]
             table.selected = shown.index(st.stats_focus) if st.stats_focus in shown else -1
             table.row_tips = [f"Show the distribution of {plain_text(DESCRIPTORS[k].symbol)} "
                               f"({plain_text(DESCRIPTORS[k].name)})" for k in shown]
@@ -1611,8 +1711,8 @@ class CollectionContent(QWidget):
             self.ws_stats.add(hstrip(table))
             cap = QHBoxLayout()
             exact = "exact" if stats["exact"] else "Approximate (binned)"
-            cap.addWidget(label(f"N = {stats['n']:,} results in scope · N/A excluded and counted as missing · "
-                                f"quartiles by linear interpolation · {exact}", "label"), 1)
+            cap.addWidget(label(f"N = {stats['n']:,} results in scope. N/A values are excluded and counted as missing. "
+                                f"Quartiles by linear interpolation. {exact}", "label"), 1)
             cap.addWidget(InfoButton(ANA_STATS.format(n=f"{stats['n']:,}"), title="Statistics conventions"))
             self.ws_stats.lay.addLayout(cap)
         else:
@@ -1646,7 +1746,7 @@ class CollectionContent(QWidget):
             hist = self._current("hist")
             if hist is not None and hist.get("n_valid"):
                 w = hist.get("width") or 0
-                head.addWidget(label(f"{dd.symbol} ({dd.unit or '–'}) · histogram · bins {format_value(focus, w)} "
+                head.addWidget(label(f"{dd.symbol} ({dd.unit or '–'}) histogram, bins {format_value(focus, w)} "
                                      f"{dd.unit}".strip(), "heading"))
                 pw = PlotWidget()
                 pw.set_spec(PlotSpec("histogram", hist, x=descriptor_metric(focus),
@@ -1756,7 +1856,7 @@ class CollectionContent(QWidget):
                     sl.setContentsMargins(0, 0, 0, 0)
                     for g, models in list(gd["groups"].items())[:12]:
                         n = models["M1"]["population"]
-                        sl.addWidget(label(f"{dim_value_text(group, g)} · N = {n:,}", "heading"))
+                        sl.addWidget(label(f"{dim_value_text(group, g)} (N = {n:,})", "heading"))
                         pw = PlotWidget()
                         pw.setMinimumHeight(36 + 8 * 26)
                         pw.set_spec(PlotSpec("bars_stacked", bars_data(models, st.denominator, st.split_status, 26,
@@ -1807,7 +1907,7 @@ class CollectionContent(QWidget):
             gd = self._current("dist_group")
             if gd is not None:
                 for g, ms in list(gd["groups"].items())[:12]:
-                    lay.addWidget(label(f"{dim_value_text(st.dist_group, g)} · N = {ms['M1']['population']:,}",
+                    lay.addWidget(label(f"{dim_value_text(st.dist_group, g)} (N = {ms['M1']['population']:,})",
                                         "heading"))
                     p2 = PlotWidget()
                     p2.setFixedHeight(8 * 24 + 8)
@@ -1913,18 +2013,28 @@ def _clear_layout(lay) -> None:
 def _missing_tip(m: dict) -> str:
     if not m.get("n_missing"):
         return ""
-    return (f"N missing {m['n_missing']:,}: missing data {m['missing_data']:,} · undefined {m['undefined']:,} · "
+    return (f"N missing {m['n_missing']:,}: missing data {m['missing_data']:,}, undefined {m['undefined']:,}, "
             f"not evaluable {m['error']:,}")
 
 
-def _range_values(r) -> list[float]:
-    lo, hi, step = r
-    out, v, i = [], lo, 0
-    while v <= hi + step * 1e-9 and i < 10_000:
-        out.append(round(v, 10))
-        i += 1
-        v = lo + i * step
-    return out
+def _range_values(r, name: str = "") -> list[float]:
+    """The values of a stored variable range (the engine's grid, strict bounds applied; at most 10 000)."""
+    from ...core.expression import range_from_meta
+    try:
+        return range_from_meta(name, r).values()[:10_000]
+    except (ValueError, TypeError, KeyError, IndexError):
+        return []
+
+
+def _range_text(name: str, r) -> str:
+    """``0 ≤ x < 1, step 0.1`` / ``…, 11 points`` for a stored range (either metadata form)."""
+    from ...core.expression import range_from_meta
+    try:
+        v = range_from_meta(name, r)
+    except (ValueError, TypeError, KeyError, IndexError):
+        return name
+    sampling = f"step {v.step:g}" if v.step is not None else f"{v.points} points" if v.points else ""
+    return f"{v.bounds_text()}{', ' + sampling if sampling else ''}"
 
 
 def _same_plot_layout(a, b) -> bool:
@@ -1941,10 +2051,12 @@ def source_text(info, pop) -> str:
         unit = {"at": "at.%", "wt": "wt.%", "mass": "mass (g)"}.get(src.get("unit"), "at. ratio")
         req = [s for s in src.get("specs", []) if s.get("required")]
         opt = [s for s in src.get("specs", []) if not s.get("required")]
-        parts = [f"Composition space · {unit}"]
+        parts = [f"Composition space ({unit})"]
 
         def rng(s):
-            return f"{s['min']:g}" if s["min"] == s["max"] else f"{s['min']:g}–{s['max']:g}, step {s['step']:g}"
+            if s["min"] == s["max"]:
+                return f"{s['min']:g}"
+            return f"{s['min']:g}–{s['max']:g}, " + (f"{s['points']} points" if "points" in s else f"step {s['step']:g}")
         if req:
             same = len({(s['min'], s['max']) for s in req}) == 1
             if same:
@@ -1952,18 +2064,18 @@ def source_text(info, pop) -> str:
             else:
                 parts += [f"{s['element']} required {rng(s)}" for s in req]
         parts += [f"{s['element']} optional {rng(s)}" for s in opt]
-        parts.append(f"{len(pop.get('families', []))} systems · {pop.get('n', 0):,} valid compositions")
-        return " · ".join(parts)
+        parts.append(f"{len(pop.get('families', []))} systems, {pop.get('n', 0):,} valid compositions")
+        return "; ".join(parts)
     if info.mode == "expression":
         blocks = src.get("blocks", [])
         ranges = src.get("ranges", {})
         parts = ["Expression"] + [f"Block {b['index'] + 1}: {_html.escape(b['expression'])}" for b in blocks]
-        parts += [f"{k} {v[0]:g}–{v[1]:g}, step {v[2]:g}" for k, v in ranges.items()]
+        parts += [_range_text(k, v) for k, v in ranges.items()]
         parts.append(f"{pop.get('n', 0):,} compositions")
-        return " · ".join(parts)
+        return "; ".join(parts)
     if info.mode == "import":
-        return f"Imported from {_html.escape(str(src.get('file', 'a spreadsheet')))} · {pop.get('n', 0):,} compositions"
-    return f"{mode_name(info.mode)} · {pop.get('n', 0):,} composition{'s' if pop.get('n', 0) != 1 else ''}"
+        return f"Imported from {_html.escape(str(src.get('file', 'a spreadsheet')))}, {pop.get('n', 0):,} compositions"
+    return f"{mode_name(info.mode)}, {pop.get('n', 0):,} composition{'s' if pop.get('n', 0) != 1 else ''}"
 
 
 def plot_summary(cfg, info) -> str:
@@ -1976,7 +2088,7 @@ def plot_summary(cfg, info) -> str:
     parts = [TYPE_SHORT.get(cfg.type, cfg.type), f"{x} × {y}" if y else x]
     if cfg.type == SCATTER and cfg.color not in ("none", ""):
         parts.append(cfg.color[6:] if cfg.color.startswith("model:") else dim_label(cfg.color))
-    return " · ".join(parts)
+    return ", ".join(parts)
 
 
 def bar_color(cls) -> str:
@@ -2000,12 +2112,12 @@ def bars_data(models: dict, denominator: str, split: bool, row_h: int, label_w: 
             flagged = m["class_status"].get((cls, "data_suspect"), 0) + m["class_status"].get((cls, "extrapolated"), 0)
             segs.append((cls, n, bar_color(cls), flagged if split else 0))
             parts = [f"{s_.replace('_', ' ')} {c:,}" for (c_, s_), c in m["class_status"].items() if c_ == cls]
-            status_text[cls] = " · ".join(parts)
+            status_text[cls] = ", ".join(parts)
         if denominator == "population" and m["na"]:
             segs.append((NA, m["na"], bar_color(NA), 0))
         right = f"{m['evaluated']:,} of {m['population']:,}"
         if m["na"]:
-            right += f" · N/A {m['na']:,}"
+            right += f", N/A {m['na']:,}"
         rows.append({"label": MD.title(k, short=label_w < 200), "denominator": den, "segments": segs,
                      "right": right, "status_text": status_text})
     data = {"rows": rows, "label_w": label_w, "right_w": right_w, "row_h": row_h}
@@ -2049,12 +2161,14 @@ def build_spec(cfg, data, info, size_class: str) -> tuple[PlotSpec | None, tuple
                 return None, (f"{plain_text(y.symbol)} or {plain_text(x.symbol)} is not available for this collection",
                               "No result has both values. Choose other metrics.")
             tag = representation_text(BINNED, bins=data["bins"], population=data["n_valid"])
-            title = f"{y.symbol} versus {x.symbol} · binned"
+            title = f"{y.symbol} versus {x.symbol}, binned"
             info = (f"{data['n_valid']:,} results are counted in {data['bins'][0]} × {data['bins'][1]} cells; each cell "
                     "shows how many results fall into it (or their majority class / mean value). No result is "
                     "drawn individually and none is left out.")
+            legend_title = MD.title(model, short=size_class != "W") if model else (
+                dim_label(cfg.color) if not cm and cfg.color not in ("none", "") else "")
             return PlotSpec("binned", data, x=x, y=y, color=cfg.color, color_metric=cm, title=title, tag=tag,
-                            caption=f"{data['n_missing']:,} omitted (no value)", model=model,
+                            caption=f"{data['n_missing']:,} omitted (no value)", legend_title=legend_title, model=model,
                             thresholds=cfg.thresholds, extra={"tag_info": info}), None
         if not data["n_valid"]:
             return None, (f"{plain_text(y.symbol)} or {plain_text(x.symbol)} is not available for this collection",
@@ -2064,12 +2178,12 @@ def build_spec(cfg, data, info, size_class: str) -> tuple[PlotSpec | None, tuple
         info = ANA_SAMPLED.format(N=f"{data['n_valid']:,}", n=f"{data['n_shown']:,}") if rep == SAMPLED else ""
         title = f"{y.symbol} versus {x.symbol}"
         if cfg.color not in ("none", ""):
-            title += " · coloured by " + (MD.title(model) if model else
+            title += ", coloured by " + (MD.title(model) if model else
                                           (cm.symbol if cm else dim_label(cfg.color).lower()))
         legend_title = MD.title(model, short=size_class != "W") if model else (dim_label(cfg.color) if not cm else "")
         return PlotSpec("scatter", data, x=x, y=y, color=cfg.color, color_metric=cm, title=title, tag=tag,
                         caption=f"{data['n_missing']:,} omitted (no value)", legend_title=legend_title, model=model,
-                        thresholds=cfg.thresholds, log_x=cfg.log_x, log_y=cfg.log_y, hollow=rep == SAMPLED,
+                        thresholds=cfg.thresholds, log_x=cfg.log_x, log_y=cfg.log_y,
                         extra={"tag_info": info}), None
     if cfg.type == LINE:
         x, y = metric_by_id(info, cfg.x), metric_by_id(info, cfg.y)
@@ -2084,8 +2198,8 @@ def build_spec(cfg, data, info, size_class: str) -> tuple[PlotSpec | None, tuple
         x = metric_by_id(info, cfg.x)
         if not data.get("n_valid"):
             return None, (f"{plain_text(x.symbol)} is not available for this collection", "Choose another metric.")
-        tag = f"Binned · {len(data['counts'])} bins · {data['n_valid']:,} results"
-        return PlotSpec("histogram", data, x=x, title=f"{x.symbol} · histogram", tag=tag,
+        tag = f"Binned: {len(data['counts'])} bins, {data['n_valid']:,} results"
+        return PlotSpec("histogram", data, x=x, title=f"{x.symbol} histogram", tag=tag,
                         caption=f"{data['n'] - data['n_valid']:,} omitted (no value)"), None
     if cfg.type == BOX:
         x = metric_by_id(info, cfg.x)
@@ -2123,7 +2237,7 @@ def build_spec(cfg, data, info, size_class: str) -> tuple[PlotSpec | None, tuple
             m = models[k]
             segs = [(c, m["classes"].get(c, 0), bar_color(c), 0) for c in MD.CLASSES[k]]
             rows.append({"label": dim_value_text(cfg.group, g), "denominator": m["evaluated"], "segments": segs,
-                         "right": f"{m['evaluated']:,} evaluated" + (f" · N/A {m['na']:,}" if m["na"] else "")})
+                         "right": f"{m['evaluated']:,} evaluated" + (f", N/A {m['na']:,}" if m["na"] else "")})
         d = {"rows": rows[:40], "label_w": 200, "right_w": 160, "row_h": 28,
              "legend": [(c, bar_color(c)) for c in MD.CLASSES[k]]}
         return PlotSpec("bars_grouped", d, title=f"{MD.title(k)} by {dim_label(cfg.group).lower()}",
@@ -2155,7 +2269,7 @@ class ModelStripPlot(QWidget):
         if lim is None:
             p.end()
             return
-        fx, _fy, _inv = self.plot._to_screen(rect, self.plot.window or lim)
+        fx, _fy, _inv = self.plot._to_screen(rect, self.plot.view_window or lim)
         p.setFont(font(LABEL_01))
         p.setPen(QColor(t("text-primary")))
         x_name = s.x.plain if s.x is not None else "x"

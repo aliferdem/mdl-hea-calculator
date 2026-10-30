@@ -215,7 +215,7 @@ def test_model_exposes_only_the_page_and_no_qt_items(win, app, engine):
     t = time.perf_counter()
     m.set_page(5000)
     app.processEvents()
-    assert time.perf_counter() - t < 0.5 and m.id_at(0) == m.view.lo + 50_000
+    assert time.perf_counter() - t < 0.5 and m.id_at(0) == m.view.hi - 50_000      # newest first
     field = win.table.pagination.page_field
     assert field.text() == "5001"
     field.setText("5004")
@@ -230,7 +230,9 @@ def test_table_has_no_selection_and_no_body_tooltips(win):
     add_rows(win, 3)
     v, m = win.table.view, win.table.model
     assert v.selectionMode() == QAbstractItemView.SelectionMode.NoSelection
-    assert v.focusPolicy() == Qt.FocusPolicy.NoFocus
+    # keyboard access only (Tab in, Enter analyses a row): a mouse click never focuses the table, so mouse
+    # users still get no current cell and no focus rectangle
+    assert v.focusPolicy() == Qt.FocusPolicy.TabFocus
     idx = m.index(0, 0)
     assert not (m.flags(idx) & Qt.ItemFlag.ItemIsSelectable)
     assert m.data(idx, Qt.ItemDataRole.ToolTipRole) is None
@@ -270,9 +272,6 @@ def test_double_click_after_sorting_opens_the_right_alloy(win, app):
 def test_row_menu_opens_details_in_a_new_window(win, app, monkeypatch):
     add_rows(win, 4)
     v, m = win.table.view, win.table.model
-    opened = []
-    from hea_calc.ui.widgets import dialogs
-    monkeypatch.setattr(dialogs.AlloyDetailsDialog, "exec", lambda self: opened.append(self.windowTitle()) or 0)
     menu = v.row_menu(m.row_at(1), m.keys[0])
     from hea_calc.ui.widgets.menu import CarbonMenu
     assert isinstance(menu, CarbonMenu)
@@ -282,8 +281,12 @@ def test_row_menu_opens_details_in_a_new_window(win, app, monkeypatch):
     win.show_details(None)
     next(a for a in menu.actions() if a.text() == "Open details in new window").trigger()
     app.processEvents()
-    assert len(opened) == 1
-    assert win.details.row is None, "the menu opens a window, not the embedded panel"
+    aw = win.analysis_window(create=False)
+    assert aw is not None and aw.isVisible() and not aw.isModal(), "a separate, non-modal Analysis window"
+    # one shared Analysis state: the window and the embedded panel show the same composition (no copy)
+    assert aw.panel.row is not None and aw.panel.row.name == m.row_at(1).name
+    assert win.details.row is not None and win.details.row.name == m.row_at(1).name
+    aw.close()
 
 
 def test_drag_selects_cell_text_and_ctrl_c_copies_it(win, app):
@@ -317,7 +320,7 @@ def test_sweep_calculation_runs_as_a_process_job_with_throttled_progress(win, ap
     for el in FIVE[:4]:
         win.elements.table.tiles[el].click()
     win.composition.set_mode(1)
-    win.composition.unit_box.setCurrentIndex(1)
+    win.composition.set_basis("at")
     for r in win.composition.sweep.rows.values():
         r.min.setText("5"), r.max.setText("50"), r.step.setText("5")
     # Calculate is enabled once the (debounced, background) pre-flight count has run ("Updating…" -> "Ready")
@@ -361,7 +364,8 @@ def test_details_move_below_when_the_three_panels_do_not_fit(app):
         w.resize(1440, 900)                                     # 150 % on the target display: stacked
         app.processEvents()
         assert top.stacked
-        e, c, d = w.elements.geometry(), w.composition.geometry(), w.details.geometry()
+        # the Analysis slot is the dock holding the panel (C4, 2026-10-28)
+        e, c, d = w.elements.geometry(), w.composition.geometry(), w.analysis_dock.geometry()
         assert e.top() == c.top() == 0 and d.top() == e.bottom() + 1 + PANEL_GAP
         assert d.width() == top.width() and d.left() == 0, "Analysis spans the full width"
         # 8.png / brief §18: Elements and Composition keep their fixed sizes, left-aligned - never stretched
@@ -377,7 +381,7 @@ def test_details_move_below_when_the_three_panels_do_not_fit(app):
         assert top.stacked
         w.resize(boundary, 900)
         app.processEvents()
-        assert not top.stacked and boundary == 1920
+        assert not top.stacked and boundary == 1545             # Analysis' minimum, not its 829 px preference
         assert w.composition.width() == COMPOSITION_PANEL_WIDTH and w.details.width() >= ANALYSIS_WIDE_MIN
         assert ids == (id(w.elements), id(w.composition), id(w.details)), "panels repositioned, not rebuilt"
     finally:
@@ -385,6 +389,11 @@ def test_details_move_below_when_the_three_panels_do_not_fit(app):
 
 
 def test_model_support_shows_pending_in_the_empty_state(win, app):
+    from PySide6.QtTest import QTest
+    # the synthetic cursor of an earlier test may rest over a tile of this new window: park it on the title bar
+    QTest.mouseMove(win.header, QPoint(win.header.width() // 2, 16))
+    app.processEvents()
+    win.elements.leave_preview()
     sup = win.elements.support
     assert all(ic.status == "pending" for ic in sup.icons.values())
     assert all("Pending" in ic.accessibleName() and ic.toolTip() for ic in sup.icons.values())
@@ -465,9 +474,10 @@ def test_every_application_menu_is_a_carbon_menu(win):
     from hea_calc.ui.widgets.menu import CarbonMenu
     assert isinstance(win.file_menu, CarbonMenu) and isinstance(win.theme_menu, CarbonMenu)
     assert isinstance(win.table.export_btn.menu(), CarbonMenu)
-    # CORRECT_FILE_BUTTON: File is a flat lg menu (no submenus, no shortcut column)
+    # File is a flat menu (no submenus, no shortcut column); the title bar menus use 32 px items - the height of
+    # the 32 px title bar they open from (the 48 px items matched the former 48 px header)
     assert not [a for a in win.file_menu.actions() if a.menu() is not None]
-    assert win.file_menu.item_height == 48 and win.theme_menu.item_height == 48
+    assert win.file_menu.item_height == 32 and win.theme_menu.item_height == 32 and win.help_menu.item_height == 32
 
 
 _ = (array, QSize)

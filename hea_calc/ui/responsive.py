@@ -73,3 +73,48 @@ def distribute(avail: int, refs: Sequence[int], mins: Sequence[int],
     if free:
         out[free[-1]] += rest
     return out
+
+
+def priority_widths(avail: int, naturals: Sequence[int], mins: Sequence[int], caps: Sequence[int],
+                    primary: int, primary_share: float = 0.4) -> list[int]:
+    """Column widths with one *primary* column (the results table's Alloy), content first.
+
+    * ``naturals``: what each column needs to show its header and its visible values; ``mins``: never narrower;
+      ``caps``: how wide a non-primary column may grow (its design width) - extra space is no use to a number.
+    * The primary column needs ``naturals[primary]``, bounded to ``primary_share`` of the table (at least its
+      minimum) so one very long name cannot crush every other column.
+    * Room for everything: every column at its natural width; the surplus grows the other columns towards their
+      caps (proportionally), and what is left goes to the primary column.
+    * Too little room: the other columns shrink towards their minimums first (proportionally to their natural
+      widths); only then the primary column, down to its minimum; below that the widths are the minimums and the
+      caller scrolls.
+
+    Widths sum to ``avail`` whenever ``avail >= sum(mins)``.
+    """
+    n = len(naturals)
+    if n == 0:
+        return []
+    if not 0 <= primary < n:
+        return distribute(avail, naturals, mins, caps)
+    mins = [int(m) for m in mins]
+    nat = [max(int(a), m) for a, m in zip(naturals, mins)]
+    p_need = max(mins[primary], min(nat[primary], int(avail * primary_share)))
+    others = [i for i in range(n) if i != primary]
+    o_nat = [nat[i] for i in others]
+    o_min = [mins[i] for i in others]
+    out = [0] * n
+    rest = avail - p_need
+    if rest >= sum(o_nat):
+        grown = distribute(rest, o_nat, o_nat, [max(int(caps[i]), nat[i]) for i in others])
+        for i, w in zip(others, grown):
+            out[i] = w
+        out[primary] = avail - sum(grown)                      # what the others do not use
+    elif rest >= sum(o_min):
+        for i, w in zip(others, distribute(rest, o_nat, o_min)):
+            out[i] = w
+        out[primary] = p_need
+    else:
+        for i in others:
+            out[i] = mins[i]
+        out[primary] = max(mins[primary], avail - sum(o_min))
+    return out

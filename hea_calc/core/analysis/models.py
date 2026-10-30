@@ -37,8 +37,8 @@ CLASS_NAMES = {"SS": "solid solution", "MP": "multiple phases", "IM": "intermeta
 
 
 def title(key: str, short: bool = False) -> str:
-    """"M1 · Yang & Zhang (2012)" (or "M1 · Yang & Zhang")."""
-    base = f"{key} · {MODELS[key].short}"
+    """"M1: Yang & Zhang (2012)" (or "M1: Yang & Zhang")."""
+    base = f"{key}: {MODELS[key].short}"
     return base if short else f"{base} ({YEARS[key]})"
 
 
@@ -192,7 +192,7 @@ def summary_line(labels: Mapping[str, str]) -> tuple[int, str]:
     for lab in evaluated:
         counts[lab] = counts.get(lab, 0) + 1
     parts = [f"{counts[c]} {c}" for c in ALL_CLASSES if c in counts]
-    return len(evaluated), " · ".join(parts)
+    return len(evaluated), ", ".join(parts)
 
 
 _ = (MODEL_KEYS,)

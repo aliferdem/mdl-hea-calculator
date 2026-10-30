@@ -453,10 +453,11 @@ class ScopeQuery:
         return {"group": group, "exact": True, "metrics": out}
 
     # -------------------------------------------------------------- statistical outliers
-    def outliers(self, mid: str) -> dict:
+    def outliers(self, mid: str, stats: dict | None = None) -> dict:
         """Tukey fences of one metric and the number of values outside them (``stats.tukey_fences``).
-        ``fences`` is None where the method is not meaningful - then no outlier warning is shown."""
-        st = self.statistics([mid])
+        ``fences`` is None where the method is not meaningful - then no outlier warning is shown.
+        ``stats``: this scope's ``statistics([mid])`` when it is already known (not recalculated)."""
+        st = stats if stats is not None and mid in stats.get("metrics", {}) else self.statistics([mid])
         s = st["metrics"][mid]
         out = {"metric": mid, "n_valid": s["n_valid"], "fences": None, "n_low": 0, "n_high": 0, "exact": st["exact"]}
         f = tukey_fences(s["q1"], s["q3"], s["n_valid"])
@@ -618,16 +619,23 @@ class ScopeQuery:
             sql = (f"SELECT bx, by, SUM(c) OVER (PARTITION BY bx, by), v, c FROM (SELECT {bx} AS bx, {by} AS by, "
                    f"{v} AS v, COUNT(*) AS c FROM {frm} WHERE {where} GROUP BY 1, 2, 3)")
             best: dict = {}
+            totals: dict = {}
             for cx, cy, total, val, c in self._fetchall(self._exec(sql, bp + self.params)):
+                totals[val] = totals.get(val, 0) + c         # results of each category in the plotted cells
                 cur = best.get((cx, cy))
                 if cur is None or c > cur[2] or (c == cur[2] and str(val) < str(cur[1])):
                     best[(cx, cy)] = (total, val, c)
             cells = [(cx, cy, t, (val, c)) for (cx, cy), (t, val, c) in best.items()]
+            # the legend: every category with its number of binned results (a cell shows its majority category)
+            category_counts = {k: totals[k] for k in dim_order(value, totals.keys())}
         else:
             cells = self._fetchall(self._exec(f"SELECT {bx}, {by}, COUNT(*), NULL FROM {frm} WHERE {where} GROUP BY 1, 2",
                                               bp + self.params))
-        return {"representation": "BINNED", "n": n, "n_valid": valid, "n_missing": n - valid, "bins": bins,
-                "x": (x0, x1), "y": (y0, y1), "cells": cells, "value": value}
+        out = {"representation": "BINNED", "n": n, "n_valid": valid, "n_missing": n - valid, "bins": bins,
+               "x": (x0, x1), "y": (y0, y1), "cells": cells, "value": value}
+        if vm is None and value not in (DIM_NONE, ""):
+            out["category_counts"] = category_counts
+        return out
 
     # -------------------------------------------------------------- ordered series / grids
     def series(self, x: str, ys, fixed: dict | None = None, tol: float = 1e-9, models: bool = True) -> dict:
@@ -682,6 +690,11 @@ class ScopeQuery:
                 "missing_cells": len(xs) * len(ys) - len(cells), "value": value, "categorical": cat,
                 "n": len(rows)}
 
+    def cross_run_duplicates(self) -> int:
+        """Combined scope: compositions that occur in more than one of its runs (each stays its own result)."""
+        from .combine import duplicate_compositions
+        return duplicate_compositions(self.con, self.scope.run_ids, self.lo) if self.scope.combined else 0
+
     def run_counts(self, run_ids) -> dict[int, int]:
         """Alive results per run in the table's workspace (the Run selector's counts)."""
         return {rid: self._exec("SELECT COUNT(*) FROM results WHERE run_id=? AND result_id >= ?",
@@ -696,6 +709,19 @@ class ScopeQuery:
 
 
 # ====================================================================== helpers
+def merge_statistics(parts: list[dict], pending=()) -> dict:
+    """One Statistics answer from per-metric answers of the same scope (``statistics([m])`` each).
+
+    Every per-metric number is computed by exactly the SQL a multi-metric call runs for that metric (its
+    own column aggregates, in the same row order), so the merge equals ``statistics(metrics)``; ``pending``
+    lists the metrics still being calculated."""
+    out = {"n": parts[0]["n"], "n_error": parts[0]["n_error"], "exact": all(p["exact"] for p in parts),
+           "metrics": {}, "pending": tuple(pending)}
+    for p in parts:
+        out["metrics"].update(p["metrics"])
+    return out
+
+
 def keys_size(key: str | None) -> int | None:
     return None if not key else key.count("-") + 1
 

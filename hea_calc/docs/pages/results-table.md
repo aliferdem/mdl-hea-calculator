@@ -7,8 +7,19 @@ sorting, filtering and export always apply to all results, not only to the visib
 
 ## Columns
 
-**Alloy** names the composition: for example CoCrFeMnNi for a single composition, (FeCoNi)0.9Al0.1 for an expression
-with its variable values substituted, or the name from an imported file. Hover a column heading to see the unit and
+**Alloy** names the composition: for example CoCrFeMnNi for a single composition entered in atomic ratios,
+Cr12Mn20Co3Ni15Cu20Zn20Si10 (at.%) or Fe70Cr18Ni12 (wt.%) for one entered in percent (the basis is part of the name),
+Al10Co30Fe30Ni30 (at.%) for a percent composition space, (FeCoNi)0.9Al0.1 for an expression with its variable values
+substituted, or the name from an imported file. Results calculated before names carried a basis keep their names.
+
+**Run** is the calculation run of the result, and **Variables** its design values: the expression's variables
+(x = 0.5) or the composition-space grid values. Variables is empty for single compositions and imports, cannot be
+sorted, and is not part of the Excel / CSV dataset export (Run is). Add either with **Table columns**, where the
+descriptors that belong to one model are listed under that model and the shared ones under General.
+
+**Filter results** builds filters one at a time: **Add filter**, choose a parameter, then its condition: between,
+at least or at most for a number, or "is one of" the classes a model can produce. A result is shown only when it
+matches every filter. Remove a single filter with its **×**, or all of them with **Clear all**. Hover a column heading to see the unit and
 definition.
 
 | Heading | Quantity | Unit |
@@ -34,8 +45,8 @@ The prediction tags (SS, MP, IM, SS+IM, MG, N/A) are explained in [Prediction Re
 
 | Action | How |
 |---|---|
-| Analyse a result | Double-click the row, or right-click › **Analyse composition**. |
-| Open in a separate window | Right-click › **Open details in new window**. |
+| Analyse a result | Double-click the row, or right-click › **Analyse composition**. With the top panels hidden or the Analysis panel collapsed, this opens the Analysis window (an open one is reused); the collapsed panel stays collapsed. From the keyboard: Tab into the table, choose the row with the arrow keys and press Enter (Shift+F10 opens the row menu). |
+| Open in a separate window | Right-click › **Open details in new window** (the Analysis window). |
 | Copy | Drag across the text of a cell and press Ctrl+C; or right-click › **Copy value** (full precision) or **Copy row**. |
 | Remove one result | Right-click › **Remove result**. |
 | Clear the table | **Clear table** (trash icon) removes every result at once. There is no undo. |

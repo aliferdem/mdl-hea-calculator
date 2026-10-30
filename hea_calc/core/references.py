@@ -90,6 +90,9 @@ DATA_REFERENCES: tuple[Reference, ...] = (
               note="12-coordination radii (Ch. 3, Table 9)"),
     Reference("guo-vec", "S. Guo et al.", "", "J. Appl. Phys.", "109", "2011", "103505",
               note="VEC rule for FCC and BCC phases"),
+    Reference("de-boer", "F.R. de Boer, R. Boom, W.C.M. Mattens, A.R. Miedema, A.K. Niessen",
+              "Cohesion in Metals: Transition Metal Alloys", "North-Holland, Amsterdam", year="1988", book=True,
+              note="Miedema pair classification for Ca, Sr and Ba (Eq. 2.33, Fig. 2.28)"),
 )
 
 REFERENCES: tuple[Reference, ...] = MODEL_REFERENCES + DATA_REFERENCES
@@ -128,3 +131,11 @@ def markdown(refs: tuple[Reference, ...] = REFERENCES, start: int = 1) -> str:
             line += f" {r.note}."
         out.append(line)
     return "\n\n".join(out) + "\n"
+
+
+# ---------------------------------------------------------------------- application identity (About, 2026-10-28)
+CONTACT_EMAIL = "erdem.alifethi@gmail.com"
+# The canonical public repository of MDL HEA Calculator.  Not set: the project documents no public URL (README shows
+# a placeholder) and the working copy has no Git remote, so no link is shown rather than a guessed one.  Set it to
+# the verified URL to show "Source code" in About.
+REPOSITORY_URL: str | None = None

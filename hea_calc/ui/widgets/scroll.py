@@ -15,7 +15,7 @@ from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QFrame, QScrollArea, QScrollBar
 
 from .. import crisp
-from ..theme import SCROLLBAR_HIT, SCROLLBAR_MIN_THUMB, SCROLLBAR_VISIBLE, THEME, t
+from ..theme import CONTENT_MARGIN_X, SCROLLBAR_HIT, SCROLLBAR_MIN_THUMB, SCROLLBAR_VISIBLE, THEME, t
 
 
 class ThinScrollBar(QScrollBar):
@@ -253,7 +253,10 @@ class MainScrollArea(QScrollArea):
     the window is narrower than the content's minimum width.
     """
 
-    OVERLAY_RIGHT = 4       # hit target 12 px wide, 4 px from the edge: visible bar centred 10 px in
+    # the visible 4 px bar is centred in the 16 px outer gutter (CONTENT_MARGIN_X): its 12 px hit target sits
+    # 2 px from the edge, leaving 6 px between the bar and the content and 6 px between it and the window edge
+    # (2026-10-28; formerly 4 px from the content, 8 px from the edge)
+    OVERLAY_RIGHT = (CONTENT_MARGIN_X - SCROLLBAR_HIT) // 2
 
     def __init__(self, parent=None):
         super().__init__(parent)

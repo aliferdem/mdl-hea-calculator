@@ -33,7 +33,12 @@ through the ratio of their solid angles.
 * **Criterion.** SS if γ < 1.175 (strict), otherwise MP; γ = ω<sub>S</sub>/ω<sub>L</sub>, ω = 1 − √[((r + r̄)² −
   r̄²)/(r + r̄)²] for the smallest (S) and largest (L) atom.
 * **Calculator convention.** The publication does not name its radius set; the calculator uses the Guo & Liu (2011)
-  radii of the same research group. With Kittel radii, γ and occasionally the verdict differ.
+  radii of the same research group. This choice is supported by reproduction rather than by a statement of the
+  authors: for 10 of the 11 superalloys of the paper's Table 1 whose compositions could be reconstructed from data
+  sheets, Guo & Liu radii reproduce the printed γ to within 5 × 10⁻⁴ (the eleventh, one of two Inconel 690 rows, is
+  reproduced by no radius set), and with the Guo et al. (2013) alloys they give exactly the six
+  solid solutions with δ > 0.06 that the paper mentions; Kittel 12-coordination radii reproduce none of the printed γ
+  values. With Kittel radii, γ and occasionally the verdict differ.
 * **Limitation.** A necessary geometric condition, not a complete phase-selection rule.
 
 ## M4 — Singh et al. (2014): Λ criterion
@@ -51,8 +56,16 @@ through the ratio of their solid angles.
   and the excess entropy S<sub>E</sub> of a hard-sphere mixture averaged over the bcc (0.68) and fcc (0.74) packing
   fractions. SS if φ ≥ 20 (the authors' critical value φ<sub>c</sub> ≈ 20; the calculator treats the boundary as
   inclusive), otherwise MP.
-* **Limitation.** For nearly equal atomic sizes |S<sub>E</sub>| approaches zero and φ becomes very large and sensitive
-  to small radius differences; the verdict is then robust, the numerical value is not.
+* **Limitation: nearly equal atomic sizes.** For distinct but nearly equal radii S<sub>E</sub> is small without being
+  zero (to leading order it is proportional to δ²), so φ remains evaluable. |φ| can then become very large and is
+  sensitive to small radius differences; its sign is that of S<sub>c</sub> − S<sub>H</sub>. Far from φ<sub>c</sub> the
+  verdict is then robust while the numerical value is not; a composition whose φ lies near φ<sub>c</sub> ≈ 20 can
+  change class with small radius differences. Such compositions lie far outside the alloys on which φ<sub>c</sub> was
+  calibrated.
+* **Undefined φ: identical atomic sizes.** If r<sub>1</sub> = r<sub>2</sub> = … = r<sub>n</sub>, the mixture behaves
+  as a single hard-sphere fluid and S<sub>E</sub> = 0 exactly at both packing fractions (0.68 and 0.74). The denominator
+  |S<sub>E</sub>| of φ then vanishes, so φ is undefined and M5 returns N/A (undefined), not a solid-solution
+  prediction.
 
 ## M6 — Troparevsky et al. (2015): binary formation-enthalpy window
 

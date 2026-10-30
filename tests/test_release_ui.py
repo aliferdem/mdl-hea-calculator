@@ -141,8 +141,9 @@ def test_composition_setup_titles_follow_the_mode_and_geometry_is_fixed(win, app
         app.processEvents()
         titles.append(comp.title.text())
         assert comp.geometry() == geo, "the title never moves the panel"
-    assert titles == ["Single composition", "Composition space", "Composition expression"]
-    assert comp.width() == 457 and comp.footer.height() == 32
+    # the title is the heading dropdown (Figma 392:69348): the mode, and Composition space's range basis
+    assert titles == ["Single composition", "Composition space (At. ratio)", "Expression"]
+    assert comp.width() == 457 and comp.footer.height() == 41          # 40 px buttons under a 1 px rule
 
 
 def test_errors_are_explained_in_the_footer(win, app):
@@ -165,10 +166,11 @@ def test_space_supports_wt_and_mass_bases_and_editable_symbols(win, app):
     comp = win.composition
     click_elements(win, "Fe", "Ni", "Cr")
     comp.set_mode(1)
-    assert [v for v, _t in comp.unit_box.items] == ["ratio", "at", "wt", "mass"]
+    sweep_node = next(n for n in comp.heading.tree if n.value == "sweep")
+    assert [n.value for n in sweep_node.children] == ["ratio", "at", "wt", "mass"]
     sw = comp.sweep
     for unit in ("wt", "mass"):
-        comp.unit_box.set_value(unit, emit=True)
+        comp._heading_chosen(("sweep", unit))
         assert sw.unit == unit
         settle_composition(win, app)
         assert sw.summary_data is not None and sw.summary_data.compositions > 0, unit
@@ -385,8 +387,8 @@ def test_theme_preference_system_light_dark(app, settings):
     assert system_theme.resolve("light", "dark") == "light" and system_theme.resolve("dark", "light") == "dark"
     w = MainWindow(settings=settings)
     try:
-        labels = [a.text() for a in w.theme_menu.actions() if not a.isSeparator()]
-        assert labels == ["Light", "Dark", "System default"]          # CORRECT_THEME_BUTTON order
+        labels = [a.text() for a in w.theme_actions.actions()]
+        assert labels == ["Light", "Dark", "System default"]          # View > Theme, CORRECT_THEME_BUTTON order
         w.set_theme("system")
         assert w.prefs.theme == "system"
         w._os_scheme_changed("light")
@@ -422,7 +424,8 @@ def test_native_titlebar_attributes_follow_the_tokens():
 
 def test_header_progress_keeps_the_header_geometry(win, app):
     hdr = win.header
-    geo = (hdr.height(), hdr.progress.geometry(), hdr.help_btn.geometry(), hdr.theme_btn.geometry())
+    pump(app)                       # the status column settles under the Composition title once laid out
+    geo = (hdr.height(), hdr.progress.geometry(), hdr.panels_btn.geometry(), hdr.close_btn.geometry())
     hdr.progress.set_progress("Calculating", 0, 0, None)
     hdr.progress.show()
     pump(app)
@@ -430,12 +433,14 @@ def test_header_progress_keeps_the_header_geometry(win, app):
     pump(app)
     assert hdr.progress.label.text() == "Calculating…25%"
     assert hdr.progress.detail.text() == "(24,990/99,961) 2 minutes remaining"
-    assert (hdr.height(), hdr.progress.geometry(), hdr.help_btn.geometry(), hdr.theme_btn.geometry()) == geo
+    assert (hdr.height(), hdr.progress.geometry(), hdr.panels_btn.geometry(), hdr.close_btn.geometry()) == geo
     hdr.progress.hide()
     pump(app)
     assert (hdr.height(), hdr.progress.geometry()) == geo[:2]
-    assert hdr.help_btn.toolTip() and hdr.theme_btn.toolTip() and not hdr.help_btn.text()
-    assert hdr.help_btn.x() > hdr.width() - 2 * 48 - 1, "Help and Theme are the far-right header actions"
+    # 2026-10-27: the caption buttons have accessible names but no tooltip (B1); the top-panels action keeps its tooltip
+    assert hdr.panels_btn.toolTip() and hdr.close_btn.accessibleName() == "Close" and not hdr.close_btn.toolTip()
+    # Figma Title bar 572:52827: the 32 px top-panels action, then the three 46 px caption buttons at the right edge
+    assert hdr.panels_btn.x() + 32 + 3 * 46 == hdr.width()
 
 
 def test_scrollbar_thumbs_are_pills():

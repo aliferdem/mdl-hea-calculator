@@ -31,7 +31,7 @@ The temperature for M6 and M7 is set in [Calculation Settings](help://calculatio
 | M2, M5 | the 73 elements of the Takeuchi & Inoue table: H Li Be B C N Na Mg Al Si P K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Th U Pu — of which H, As, Sb, Hg, Bi and Pu use a supplementary radius | 73 |
 | M3, M4 | 73 elements with a Guo & Liu radius (Li Be B C N O Na Mg Al Si P S K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge Se Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Te Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Tl Pb Po Th Pa U) plus 35 with a supplementary radius (H He F Ne Cl Ar As Br Kr Sb I Xe Hg Bi Fr Ra Ac Np Pu Am and the superheavy elements Rf–Og) | 108 |
 | M6, M7 | Mg Al Sc Ti V Cr Mn Fe Co Ni Cu Zn Y Zr Nb Mo Ru Rh Pd Ag Cd La Hf Ta W Re Os Ir Pt Au | 30 |
-| M8 | Li Be B C Na Mg Al Si P K Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Rb Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Cs La Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Th U Pu; Ca, Sr and Ba only without transition metals | 54 + 3 |
+| M8 | the 57 elements with Miedema parameters (Bakker 1998): Li Be B C Na Mg Al Si P K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Cs Ba La Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Th U Pu | 57 |
 
 A supplementary radius is not from Guo & Liu (2011) and its origin is not documented; results that use one carry a
 caution. Predictions for noble gases, halogens and superheavy elements are formal evaluations without physical
@@ -48,7 +48,12 @@ meaning for alloys.
 | M5 | a pair lacks a Takeuchi & Inoue value, an element lacks a radius, or S<sub>E</sub> cannot be evaluated |
 | M6 | any element is outside the 30-element Troparevsky set |
 | M7 | any element is outside the Troparevsky set, or ΔH<sub>mix</sub> is missing |
-| M8 | an element has no Miedema parameters, or Ca, Sr or Ba is combined with a transition metal (no Miedema hybridisation factor tabulated) |
+| M8 | an element has no Miedema parameters (for example most lanthanides, the noble gases and the halogens) |
+
+Ca, Sr and Ba are evaluated with every Miedema partner. De Boer et al. [14] place these divalent metals with the
+transition metals for the hybridisation term (factor 0.4) and give them the volume coefficient of divalent metals;
+the resulting pair enthalpies with transition metals reproduce Bakker's tables. No published M8 result for a Ca-, Sr-
+or Ba-containing alloy exists to compare with, so availability does not imply that these predictions are validated.
 
 See also [Model Support and Availability](help://model-availability) for how the calculator reports coverage before
 and after calculating.

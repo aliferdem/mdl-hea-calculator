@@ -162,7 +162,8 @@ def test_recipe_with_per_block_ranges_counts_and_names():
     r = ExpressionRecipe(tuple(d.expressions), (), d.text, tuple(tuple(br.items()) for br in d.block_ranges))
     assert r.estimate() == 6
     meta = r.run_meta()
-    assert meta["source"]["blocks"][1]["ranges"]["x"] == [0, 0.2, None, 3]
+    assert meta["source"]["blocks"][1]["ranges"]["x"] == {"min": 0, "max": 0.2, "step": None, "points": 3,
+                                                          "min_inclusive": True, "max_inclusive": True}
     kind, names, comps, envs = r()
     assert kind == "expression" and len(names) == len(comps) == 6 and envs[3] == {"x": 0.0}
 
@@ -206,32 +207,35 @@ def settle(e, app):
 def test_editor_states_draft_parsed_stale_reparse_error(win, app):
     comp = win.composition
     e = comp.expr
-    e.edit.setPlainText("(Fe1.6CoCr0.4Mn)0.9Al0.1")
+    e.set_text("(Fe1.6CoCr0.4Mn)0.9Al0.1")
     app.processEvents()
-    assert e.state() == "draft" and not comp.calc_btn.isEnabled(), "no live parsing"
-    assert "Separate blocks with a blank line" in e.feedback.text()
+    assert e.state() == "ready" and comp.calc_btn.text() == "Parse expression", "parsing is explicit"
+    assert comp.header_status.status is None                 # Figma Draft: no tag
     assert e.parse()
     settle(e, app)
-    assert e.state() == "parsed" and comp.calc_btn.isEnabled()
-    assert e.edit.property("valid") and "Parsed successfully: Single composition, 5 elements." in e.feedback.text()
+    assert e.state() == "parsed" and comp.calc_btn.isEnabled() and comp.calc_btn.text() == "Calculate"
+    assert comp.header_status.status.text == "Parsed successfully"
     assert e.section.isVisible() and e.preview_rows() and len(e.preview_rows()) == 5
     # stale: any edit after a parse
-    e.edit.setPlainText("(Fe1.6CoCr0.4Mn)0.9Al0.2")
+    e.set_text("(Fe1.6CoCr0.4Mn)0.9Al0.2")
     app.processEvents()
-    assert e.state() == "stale" and not comp.calc_btn.isEnabled()
-    assert "Expression changed. Parse again to update the result." in e.feedback.text()
+    assert e.state() == "stale" and comp.calc_btn.text() == "Parse expression"
+    assert comp.header_status.status.text == "Expression changed"
     assert e.section.isVisible(), "the previous parse stays visible"
     with pytest.raises(Exception):
         e.recipe()
     assert e.parse()
     settle(e, app)
     assert e.state() == "parsed" and comp.calc_btn.isEnabled()
-    # error: every failing block listed; Calculate stays unavailable
-    e.edit.setPlainText("FeCoXxNi\n\n(FeCoNi\n\n(Co30Fe45Ni25)1-x(Al40Si60)x\n0 <= x <= 1, step=0.05, points=21")
+    # error: every problem underlined; Parse stays unavailable
+    e.set_text("FeCoXxNi\n\n(FeCoNi\n\n(Co30Fe45Ni25)1-x(Al40Si60)x\n0 <= x <= 1, step=0.05, points=21")
     assert not e.parse()
-    assert e.state() == "error" and not comp.calc_btn.isEnabled() and e.edit.property("invalid")
-    txt = e.feedback.text()
-    assert 'Unknown element &quot;Xx&quot;' in txt and "Unmatched parenthesis" in txt and "not both" in txt
+    assert e.state() == "error" and not comp.calc_btn.isEnabled()
+    st = comp.header_status.status
+    assert st.kind == "error" and st.text == "Multiple errors"
+    msgs = " ".join(d.message for d in e.edit.diagnostics)
+    assert 'Unknown element "Xx"' in msgs and "Unmatched parenthesis" in msgs and "not both" in msgs
+    assert sorted({d.line for d in e.edit.diagnostics}) == [0, 2, 5]
     assert not e.section.isVisible()
 
 
@@ -240,11 +244,12 @@ def test_editor_has_no_external_range_fields_and_calculates_a_batch(win, app):
     comp = win.composition
     e = comp.expr
     assert not [f for f in e.findChildren(QLineEdit) if f.isVisible()], "ranges live in the text area only"
-    e.edit.setPlainText("CoCrFeNi\n\nAlxCoCrFeNi\n0.5 <= x <= 1, step=0.5\n\n(FeCoNi)1-yAly\n0 <= y <= 0.2, points=3")
+    e.set_text("CoCrFeNi\n\nAlxCoCrFeNi\n0.5 <= x <= 1, step=0.5\n\n(FeCoNi)1-yAly\n0 <= y <= 0.2, points=3")
     assert e.parse()
     settle(e, app)
     assert e.count_detail["blocks"] == [(1, 0, 0), (2, 0, 0), (3, 0, 0)], e.count_detail
-    assert "Parsed successfully: 3 expressions, 1 fixed, 2 parametric, 6 compositions." in e.feedback.text()
+    assert comp.header_status.status.text == "Parsed successfully"
+    assert summary(e.doc, 6) == "Parsed successfully: 3 expressions, 1 fixed, 2 parametric, 6 compositions."
     comp.calc_btn.click()
     t0 = time.perf_counter()
     while (win.runner.running or win.table.model.total_count() < 6) and time.perf_counter() - t0 < 60:
@@ -252,13 +257,13 @@ def test_editor_has_no_external_range_fields_and_calculates_a_batch(win, app):
         time.sleep(0.01)
     names = sorted(r.name for r in win.table.model.rows)
     assert len(names) == 6 and "CoCrFeNi" in names and "FeCoNi" in names
-    # Calculation succeeded is the header's state, never a table notification
-    assert not win.notification.isVisible()
+    # Calculation completed is the header's state, never a table notification
+    assert win.progress.message is None
 
 
 def test_periodic_table_edits_the_expression_line_not_the_ranges(win, app):
     e = win.composition.expr
-    e.edit.setPlainText("CoCrFe\n\nAlxCoCrFeNi\n0 <= x <= 1, step=0.5")
+    e.set_text("CoCrFe\n\nAlxCoCrFeNi\n0 <= x <= 1, step=0.5")
     e.add_element("Mo")
     lines = e.text().split("\n")
     assert lines[2] == "AlxCoCrFeNiMo" and lines[3] == "0 <= x <= 1, step=0.5"
@@ -268,8 +273,8 @@ def test_periodic_table_edits_the_expression_line_not_the_ranges(win, app):
 
 def test_zero_valid_block_is_an_error_after_counting(win, app):
     e = win.composition.expr
-    e.edit.setPlainText("CoCrFeNi\n\n(FeCoNi)1-xAlx\n1 <= x <= 1, points=1")
+    e.set_text("CoCrFeNi\n\n(FeCoNi)1-xAlx\n1 <= x <= 1, points=1")
     assert e.parse()
     settle(e, app)
     assert e.state() == "error" and not win.composition.calc_btn.isEnabled()
-    assert "No valid compositions" in e.feedback.text()
+    assert win.composition.header_status.status.text == "No valid compositions"

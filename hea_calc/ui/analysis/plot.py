@@ -30,6 +30,7 @@ from ...core.results import format_number
 from .. import crisp
 from ..theme import BODY_COMPACT_01, HEADING_COMPACT_01, LABEL_01, THEME, font, t
 from .widgets import paint_html, plain_text
+from ..surface import ctx
 
 # ---------------------------------------------------------------------- colours
 CLASS_MARK_DARK = {"SS": "#a7f0ba", "MP": "#ffd6e8", "IM": "#ffd7d9", "SS+IM": "#d0e2ff", "MG": "#e8daff",
@@ -85,11 +86,47 @@ def categorical(i: int) -> str:
     return pal[i % len(pal)]
 
 
+def _ramp(stops: list[str], f: float) -> str:
+    """Linear RGB interpolation along ``stops`` for f in 0..1."""
+    f = 0.0 if f != f else max(0.0, min(1.0, f))
+    pos = f * (len(stops) - 1)
+    i = min(len(stops) - 2, int(pos))
+    a, b = QColor(stops[i]), QColor(stops[i + 1])
+    u = pos - i
+    return QColor(round(a.red() + (b.red() - a.red()) * u), round(a.green() + (b.green() - a.green()) * u),
+                  round(a.blue() + (b.blue() - a.blue()) * u)).name()
+
+
+# The Carbon blue sequential palette runs from the background colour of one theme to that of the other: its
+# end steps (Blue 10-20 on White, Blue 80-100 on the Gray 90 panel) cannot be told from the panel - a low value
+# read as an empty cell.  Cells (heatmap, binned) keep the steps with >= 1.5:1 against the panel (Blue 30-100
+# light, Blue 70-10 dark); point marks keep only the steps with >= 3:1 (WCAG 1.4.11 graphical objects):
+# Blue 50-100 in the light theme, Blue 50-10 in the dark theme.
 def sequential(f: float) -> str:
-    """Colour for f in 0..1 (high values light in the dark theme)."""
-    pal = SEQUENTIAL if THEME.name == "light" else list(reversed(SEQUENTIAL))
+    """Cell colour for f in 0..1 (heatmaps, binned scatter; high values light in the dark theme)."""
+    pal = SEQUENTIAL[2:] if THEME.name == "light" else list(reversed(SEQUENTIAL[:7]))
     f = 0.0 if f != f else max(0.0, min(1.0, f))
     return pal[min(len(pal) - 1, int(f * len(pal)))]
+
+
+def sequential_mark(f: float) -> str:
+    """Point colour for f in 0..1 (scatter coloured by a numeric metric): continuous, always visible."""
+    return _ramp(SEQUENTIAL[4:] if THEME.name == "light" else list(reversed(SEQUENTIAL[:5])), f)
+
+
+def category_colors(dim: str, values) -> dict:
+    """The one colour assignment of a categorical dimension (model classes by their tag colours, other
+    dimensions by dimension order) - the same in every plot type and its legend."""
+    from ...core.analysis.queries import dim_order
+    vals = list(dict.fromkeys(values))
+    if dim.startswith("model:") or dim == "cstr":
+        return {v: class_color(v if v is not None else NA) for v in vals}
+    if dim.startswith("status:"):
+        return {v: STATUS_COLORS.get(v, "#8d8d8d") for v in vals}
+    ordered = dim_order(dim, vals)
+    many = len(ordered) > MAX_CATEGORIES
+    return {v: categorical(i if not many or i < MAX_CATEGORIES - 1 else MAX_CATEGORIES - 1)
+            for i, v in enumerate(ordered)}
 
 
 # ---------------------------------------------------------------------- ticks
@@ -123,7 +160,7 @@ class PlotSpec:
 
     def __init__(self, kind: str, data: dict, *, x=None, y=None, color: str = "none", color_metric=None,
                  title: str = "", tag: str = "", caption: str = "", legend_title: str = "", model: str | None = None,
-                 thresholds: bool = True, log_x: bool = False, log_y: bool = False, hollow: bool = False,
+                 thresholds: bool = True, log_x: bool = False, log_y: bool = False,
                  extra: dict | None = None):
         self.kind, self.data = kind, data
         self.x, self.y = x, y
@@ -132,7 +169,6 @@ class PlotSpec:
         self.model = model
         self.thresholds = thresholds
         self.log_x, self.log_y = log_x, log_y
-        self.hollow = hollow
         self.extra = extra or {}
 
 
@@ -150,7 +186,7 @@ class PlotWidget(QWidget):
         self.compact = compact
         self.legend_mode = "overlay"        # overlay | column | row
         self.ctrl_zoom = False
-        self.window: tuple | None = None    # zoom window (data coords) or None = data limits
+        self.view_window: tuple | None = None    # zoom window (data coords) or None = data limits
         self.hidden: set = set()            # categories hidden from the drawing (legend toggle)
         self.selection: set = set()
         self.active_id: int | None = None     # the active composition, ringed when it is in the plot
@@ -176,19 +212,19 @@ class PlotWidget(QWidget):
         self.spec = spec
         self._place_tag_info()
         if not keep_view:
-            self.window = None
+            self.view_window = None
         self.hidden = set()
         self.focus_index = -1
         self._invalidate()
         if spec is not None:
-            self.setAccessibleName(plain_text(spec.title or "Plot") + (f" · {spec.tag}" if spec.tag else ""))
+            self.setAccessibleName(plain_text(spec.title or "Plot") + (f", {spec.tag}" if spec.tag else ""))
 
     def set_selection(self, ids) -> None:
         self.selection = set(ids or ())
         self.update()
 
     def reset_view(self) -> None:
-        self.window = None
+        self.view_window = None
         self._invalidate()
         self.view_changed.emit(None)
 
@@ -196,13 +232,13 @@ class PlotWidget(QWidget):
         lim = self._limits()
         if lim is None:
             return
-        x0, x1, y0, y1 = self.window or lim
+        x0, x1, y0, y1 = self.view_window or lim
         cx = (x0 + x1) / 2 if center is None else center.x()
         cy = (y0 + y1) / 2 if center is None else center.y()
-        self.window = (cx - (cx - x0) * factor, cx + (x1 - cx) * factor, cy - (cy - y0) * factor,
+        self.view_window = (cx - (cx - x0) * factor, cx + (x1 - cx) * factor, cy - (cy - y0) * factor,
                        cy + (y1 - cy) * factor)
         self._invalidate()
-        self.view_changed.emit(self.window)
+        self.view_changed.emit(self.view_window)
 
     def _invalidate(self, *_):
         self._cache = None
@@ -285,6 +321,12 @@ class PlotWidget(QWidget):
         self.render_to(p, self.width(), self.height(), interactive=True)
         p.end()
 
+    _exporting = False
+
+    def _c(self, token: str) -> str:
+        """A surface-relative colour: the host's layering on screen (ui/surface.py), plain tokens when exporting."""
+        return t(token) if self._exporting else ctx(self, token)
+
     def render_to(self, p: QPainter, w: float, h: float, interactive: bool = False) -> None:
         """Draw the whole plot (also used for SVG / PNG export and report images)."""
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -351,7 +393,7 @@ class PlotWidget(QWidget):
     def _paint_axes(self, p, rect: QRectF, win, fx, fy, x_title: str, y_title: str):
         x0, x1, y0, y1 = win
         p.setFont(font(LABEL_01))
-        grid = QColor(t("border-subtle-01"))
+        grid = QColor(self._c("border-subtle-01"))
         txt = QColor(t("text-secondary"))
         xt = nice_ticks(x0, x1, max(4, int(rect.width() / 70))) if not self.spec.log_x else _log_ticks(x0, x1)
         yt = nice_ticks(y0, y1, max(3, int(rect.height() / 36))) if not self.spec.log_y else _log_ticks(y0, y1)
@@ -428,7 +470,7 @@ class PlotWidget(QWidget):
         rect = self._frame_rect(w, h)
         if lim is None:
             return
-        win = self.window or lim
+        win = self.view_window or lim
         fx, fy, _inv = self._to_screen(rect, win)
         xt = s.x.axis_title() if s.x is not None else ""
         yt = s.y.axis_title() if s.y is not None else "Results"
@@ -468,15 +510,14 @@ class PlotWidget(QWidget):
     def _color_map(self) -> dict:
         s = self.spec
         cats = self._categories()
-        if s.color.startswith("model:") or s.color == "cstr":
-            return {k: class_color(k if k is not None else NA) for k, _n in cats}
-        if s.color.startswith("status:"):
-            return {k: STATUS_COLORS.get(k, "#8d8d8d") for k, _n in cats}
-        out = {}
-        ordered = sorted(cats, key=lambda kv: -kv[1]) if s.color == "family" else cats
-        for i, (k, _n) in enumerate(ordered):
-            out[k] = categorical(i if i < MAX_CATEGORIES - 1 or len(ordered) <= MAX_CATEGORIES else MAX_CATEGORIES - 1)
-        return out
+        if s.color == "family":                   # families: the largest first (top 9 + "Other families")
+            out = {}
+            ordered = sorted(cats, key=lambda kv: -kv[1])
+            for i, (k, _n) in enumerate(ordered):
+                out[k] = categorical(i if i < MAX_CATEGORIES - 1 or len(ordered) <= MAX_CATEGORIES
+                                     else MAX_CATEGORIES - 1)
+            return out
+        return category_colors(s.color, [k for k, _n in cats])
 
     def _paint_points(self, p, rect, win, fx, fy, interactive, w, h):
         s = self.spec
@@ -498,7 +539,7 @@ class PlotWidget(QWidget):
             cont = s.color_metric is not None
             cvals = [v for v in d.get("c", []) if isinstance(v, (int, float))] if cont else []
             c0, c1 = (min(cvals), max(cvals)) if cvals else (0.0, 1.0)
-            outline = QColor(t("layer-01"))
+            outline = QColor(self._c("layer-01"))
             r = 2.5 if len(d["x"]) > 5000 else 3.0
             xs, ys, cs = d["x"], d["y"], d.get("c", [])
             x0, x1, y0, y1 = win
@@ -507,7 +548,7 @@ class PlotWidget(QWidget):
             # comprehension per axis, and the hit-test grid is built only when the pointer first needs it.
             n = len(xs)
             cs = list(cs) + [None] * (n - len(cs)) if len(cs) < n else cs
-            keep = [i for i in range(n) if x0 <= xs[i] <= x1 and y0 <= ys[i] <= y1 and cs[i] not in self.hidden]                 if (self.window is not None or self.hidden) else range(n)
+            keep = [i for i in range(n) if x0 <= xs[i] <= x1 and y0 <= ys[i] <= y1 and cs[i] not in self.hidden]                 if (self.view_window is not None or self.hidden) else range(n)
             sxs = [fx(xs[i]) for i in keep]
             sys_ = [fy(ys[i]) for i in keep]
             default = t("border-interactive")
@@ -515,7 +556,8 @@ class PlotWidget(QWidget):
             for k, i in enumerate(keep):
                 c = cs[i]
                 if cont:
-                    col = sequential((c - c0) / ((c1 - c0) or 1)) if isinstance(c, (int, float)) else "#525252"
+                    col = sequential_mark((c - c0) / ((c1 - c0) or 1)) if isinstance(c, (int, float)) else \
+                        class_color(NA)
                 elif cmap:
                     col = cmap.get(c) or categorical(MAX_CATEGORIES - 1)
                 else:
@@ -531,12 +573,12 @@ class PlotWidget(QWidget):
                     jobs.append((col, pts[k:k + self.CHUNK]))
             if interactive and sum(len(pts) for _c, pts in jobs) > self.CHUNK:
                 # progressive: one chunk per event-loop turn, starting right after this paint (no long paint)
-                self._jobs = (jobs, s.hollow, r, outline)
+                self._jobs = (jobs, r, outline)
                 from PySide6.QtCore import QTimer
                 QTimer.singleShot(0, self._next_chunk)
             else:
                 for job in jobs:
-                    self._draw_chunk(q, job, s.hollow, r, outline)
+                    self._draw_chunk(q, job, r, outline)
             if interactive:
                 q.end()
                 self._cache = img
@@ -546,33 +588,30 @@ class PlotWidget(QWidget):
     CHUNK = 2500
 
     @staticmethod
-    def _draw_chunk(q: QPainter, job, hollow: bool, r: float, outline: QColor) -> None:
+    def _draw_chunk(q: QPainter, job, r: float, outline: QColor) -> None:
+        """Filled discs with a 1 px panel-coloured outline - for RAW and SAMPLED alike.  A sample is identified by
+        its representation tag ("Sample: n of N points"), its Toggletip and the legend's "(sample n)" counts, never
+        by hollow markers (rings read as a different category and lose the colour at small radii)."""
         col, pts = job
         poly = QPolygonF(pts)
-        if hollow:                      # sampled: rings (colour disc, panel-coloured centre)
-            q.setPen(QPen(QColor(col), 2 * r + 0.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            q.drawPoints(poly)
-            q.setPen(QPen(outline, 2 * r - 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            q.drawPoints(poly)
-        else:                           # raw: filled discs with a 1 px panel-coloured outline
-            q.setPen(QPen(outline, 2 * r + 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            q.drawPoints(poly)
-            q.setPen(QPen(QColor(col), 2 * r, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            q.drawPoints(poly)
+        q.setPen(QPen(outline, 2 * r + 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        q.drawPoints(poly)
+        q.setPen(QPen(QColor(col), 2 * r, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        q.drawPoints(poly)
 
     def _next_chunk(self) -> None:
         state = getattr(self, "_jobs", None)
         img = self._cache
         if not state or img is None:
             return
-        jobs, hollow, r, outline = state
+        jobs, r, outline = state
         if not jobs:
             self._jobs = None
             return
         q = QPainter(img)
         q.setRenderHint(QPainter.RenderHint.Antialiasing)
         q.setClipRect(self._frame_rect(self.width(), self.height()).adjusted(-6, -6, 6, 6))
-        self._draw_chunk(q, jobs.pop(0), hollow, r, outline)
+        self._draw_chunk(q, jobs.pop(0), r, outline)
         q.end()
         self.update()
         if jobs:
@@ -593,9 +632,14 @@ class PlotWidget(QWidget):
         vals = [c[3] for c in cells if isinstance(c[3], (int, float))] if s.color_metric is not None else []
         v0, v1 = (min(vals), max(vals)) if vals else (0, 1)
         p.setPen(Qt.PenStyle.NoPen)
+        cmap = self._color_map() if cat else {}
+        if cat and not cmap:
+            cmap = category_colors(str(d.get("value", "")), [v[0] for *_r, v in cells if isinstance(v, tuple)])
         for bx, by, n, v in cells:
+            if cat and isinstance(v, tuple) and v[0] in self.hidden:
+                continue                          # category switched off in the legend (as for points)
             if cat and isinstance(v, tuple):
-                col = class_color(v[0]) if str(d.get("value", "")).startswith("model:") else categorical(hash(v[0]) % 9)
+                col = cmap.get(v[0]) or category_colors(str(d.get("value", "")), [v[0]])[v[0]]
             elif s.color_metric is not None and isinstance(v, (int, float)):
                 col = sequential((v - v0) / ((v1 - v0) or 1))
             else:
@@ -628,7 +672,7 @@ class PlotWidget(QWidget):
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawPath(path)
         p.setBrush(QColor(t("border-interactive")))
-        p.setPen(QPen(QColor(t("layer-01")), 1))
+        p.setPen(QPen(QColor(self._c("layer-01")), 1))
         self._screen = []
         self._grid = {}
         for i, (xv, yv) in enumerate(zip(xs, ys)):
@@ -653,7 +697,7 @@ class PlotWidget(QWidget):
                 regions[-1][2] = xv
             else:
                 regions.append([cls, xv, xv])
-        shade = {"FCC": t("layer-hover-01"), "BCC + FCC": t("layer-01"), "BCC": t("layer-hover-01")}
+        shade = {"FCC": self._c("layer-hover-01"), "BCC + FCC": self._c("layer-01"), "BCC": self._c("layer-hover-01")}
         for i, (cls, a, b) in enumerate(regions):
             nxt = regions[i + 1][1] if i + 1 < len(regions) else b
             xa, xb = fx(a), fx(nxt)
@@ -665,7 +709,7 @@ class PlotWidget(QWidget):
     def _paint_hist(self, p, rect, fx, fy):
         d = self.spec.data
         edges, counts = d["edges"], d["counts"]
-        p.setPen(QPen(QColor(t("layer-01")), 1))
+        p.setPen(QPen(QColor(self._c("layer-01")), 1))
         p.setBrush(QColor(t("border-interactive")))
         for i, c in enumerate(counts):
             if not c:
@@ -717,7 +761,7 @@ class PlotWidget(QWidget):
             lx = rect.right() - 140 if self.legend_mode != "column" else rect.right() + 16
             paint_html(p, QRectF(lx, rect.top(), 140, 16), s.color_metric.axis_title(), LABEL_01, "text-primary")
             for i in range(10):
-                p.fillRect(QRectF(lx + i * 12, rect.top() + 20, 12, 10), QColor(sequential(i / 9)))
+                p.fillRect(QRectF(lx + i * 12, rect.top() + 20, 12, 10), QColor(sequential_mark(i / 9)))
             vals = [v for v in s.data.get("c", []) if isinstance(v, (int, float))]
             if vals:
                 p.setPen(QColor(t("text-secondary")))
@@ -745,7 +789,7 @@ class PlotWidget(QWidget):
         lx = rect.right() + 16 if self.legend_mode == "column" else rect.right() - lw - 4
         ly = rect.top() + 4
         if self.legend_mode != "column":
-            bg = QColor(t("layer-01"))
+            bg = QColor(self._c("layer-01"))
             bg.setAlpha(220)
             p.fillRect(QRectF(lx - 6, ly - 4, lw + 8, 22 + 18 * len(items)), bg)
         if title:
@@ -858,16 +902,16 @@ class PlotWidget(QWidget):
         cw, ch = rect.width() / len(xs), rect.height() / len(ys)
         vals = [v[0] for v in d["cells"].values() if isinstance(v[0], (int, float))]
         v0, v1 = (min(vals), max(vals)) if vals else (0, 1)
+        cmap = category_colors(str(d["value"]), [v[0] for v in d["cells"].values()]) if d["categorical"] else {}
         p.setFont(font(LABEL_01))
         self._cells = []
         for (xv, yv), (v, rid, name) in d["cells"].items():
             i, j = xs.index(xv), ys.index(yv)
             r = QRectF(rect.left() + i * cw, rect.bottom() - (j + 1) * ch, cw, ch)
             if d["categorical"]:
-                col = class_color(v if v is not None else NA) if str(d["value"]).startswith("model:") else \
-                    categorical(hash(v) % 9)
+                col = cmap.get(v, class_color(NA))
             else:
-                col = sequential((v - v0) / ((v1 - v0) or 1)) if isinstance(v, (int, float)) else "#525252"
+                col = sequential((v - v0) / ((v1 - v0) or 1)) if isinstance(v, (int, float)) else class_color(NA)
             qc = QColor(col)
             p.fillRect(r.adjusted(0.5, 0.5, -0.5, -0.5), qc)
             self._cells.append((r, rid, name, v, xv, yv))
@@ -912,14 +956,15 @@ class PlotWidget(QWidget):
                 counts[v] = counts.get(v, 0) + 1
             x = rect.left()
             from PySide6.QtGui import QFontMetricsF
-            for v in MD.ALL_CLASSES + (NA,):
-                if v not in counts:
-                    continue
-                p.setBrush(QColor(class_color(v)))
+            from ...core.analysis.queries import dim_value_text
+            model = str(d["value"]).startswith("model:")
+            order = [v for v in MD.ALL_CLASSES + (NA,) if v in counts] if model else list(cmap)
+            for v in order:
+                p.setBrush(QColor(cmap.get(v, class_color(NA))))
                 p.setPen(Qt.PenStyle.NoPen)
                 p.drawRect(QRectF(x, 12, 10, 10))
                 p.setPen(QColor(t("text-primary")))
-                text = f"{v} {counts[v]}"
+                text = f"{v if model else dim_value_text(str(d['value']), v)} {counts[v]}"
                 p.drawText(QRectF(x + 14, 9, 80, 16), int(Qt.AlignmentFlag.AlignLeft), text)
                 x += QFontMetricsF(p.font()).horizontalAdvance(text) + 30
 
@@ -957,7 +1002,7 @@ class PlotWidget(QWidget):
             p.setFont(font(LABEL_01))
             bx = label_w
             denom = row["denominator"] or 1
-            p.fillRect(QRectF(bx, y + 8, bar_w, row_h - 16), QColor(t("layer-hover-01")))
+            p.fillRect(QRectF(bx, y + 8, bar_w, row_h - 16), QColor(self._c("layer-hover-01")))
             for name, count, col, extra in row["segments"]:
                 if not count:
                     continue
@@ -1027,7 +1072,7 @@ class PlotWidget(QWidget):
     def hover_text(self, idx: int) -> str:
         """The tooltip as one line (accessible description, keyboard navigation)."""
         title, rows = self.hover_rows(idx)
-        return " · ".join([title] + [f"{plain_text(lab)} {plain_text(val)}" for lab, val, _c in rows])
+        return ", ".join([title] + [f"{plain_text(lab)} {plain_text(val)}" for lab, val, _c in rows])
 
     def mouseMoveEvent(self, e):
         pos = e.position()
@@ -1079,7 +1124,7 @@ class PlotWidget(QWidget):
         if lim is None:
             return None
         rect = self._frame_rect(self.width(), self.height())
-        _fx, _fy, inv = self._to_screen(rect, self.window or lim)
+        _fx, _fy, inv = self._to_screen(rect, self.view_window or lim)
         xv, yv = inv(pos.x(), pos.y())
         (x0, x1), (y0, y1) = d["x"], d["y"]
         nx, ny = d["bins"]
@@ -1113,7 +1158,7 @@ class PlotWidget(QWidget):
         if e.button() in self.PAN_BUTTONS:
             # direct pan (no pan mode): middle- or right-button drag moves the axes window
             if self.spec.kind in ("scatter", "binned", "line", "histogram") and self._limits() is not None:
-                self._pan_start = (e.position(), self.window or self._limits())
+                self._pan_start = (e.position(), self.view_window or self._limits())
                 self.tip.hide()
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
             return
@@ -1173,9 +1218,9 @@ class PlotWidget(QWidget):
         x0, x1, y0, y1 = win
         dx = (pos.x() - start.x()) / rect.width() * (x1 - x0)
         dy = (pos.y() - start.y()) / rect.height() * (y1 - y0)
-        self.window = (x0 - dx, x1 - dx, y0 + dy, y1 + dy)
+        self.view_window = (x0 - dx, x1 - dx, y0 + dy, y1 + dy)
         self._invalidate()
-        self.view_changed.emit(self.window)
+        self.view_changed.emit(self.view_window)
 
     def wheelEvent(self, e):
         s = self.spec
@@ -1189,7 +1234,7 @@ class PlotWidget(QWidget):
         if lim is None:
             return
         rect = self._frame_rect(self.width(), self.height())
-        _fx, _fy, inv = self._to_screen(rect, self.window or lim)
+        _fx, _fy, inv = self._to_screen(rect, self.view_window or lim)
         cx, cy = inv(e.position().x(), e.position().y())
         self.zoom(0.8 if e.angleDelta().y() > 0 else 1.25, QPointF(cx, cy))
         e.accept()
@@ -1220,7 +1265,11 @@ class PlotWidget(QWidget):
         img.setDevicePixelRatio(scale)
         img.fill(QColor(t("layer-01")))
         p = QPainter(img)
-        self.render_to(p, w, h)
+        self._exporting = True                   # exported on plain layer-01, whatever the host surface
+        try:
+            self.render_to(p, w, h)
+        finally:
+            self._exporting = False
         p.end()
         return img
 
@@ -1234,7 +1283,11 @@ class PlotWidget(QWidget):
         gen.setDescription(description)
         p = QPainter(gen)
         p.fillRect(QRectF(0, 0, w, h), QColor(t("layer-01")))
-        self.render_to(p, w, h)
+        self._exporting = True
+        try:
+            self.render_to(p, w, h)
+        finally:
+            self._exporting = False
         p.end()
 
 

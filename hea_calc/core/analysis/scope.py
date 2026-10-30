@@ -1,7 +1,8 @@
 """Collection scope: the explicitly resolved population of Collection analysis (data contract section 5).
 
-A scope names **one** calculation run (rule R1: runs are never mixed silently; composite collections are
-not part of v1), one base population and optional conjunctive restrictions:
+A scope names **one** calculation run (rule R1: runs are never mixed silently), or - explicitly, by the user's
+choice in Combine runs (2026-10-28, :mod:`.combine`) - a *combined* set of compatible runs (``runs``; its ``run_id``
+is the virtual :data:`COMBINED_RUN_ID`), one base population and optional conjunctive restrictions:
 
     population = alive ∩ run ∩ base ∩ families ∩ sizes ∩ blocks
 
@@ -29,6 +30,7 @@ from ..repository import filter_sql
 from ..results import IdSetFilter, ModelFilter, RangeFilter
 
 FULL, FILTERED = "full", "filtered"
+COMBINED_RUN_ID = -1                     # the run id of a combined scope (a logical view, never a stored run)
 BASES = (FULL, FILTERED)
 BASE_LABELS = {FULL: "Full result set", FILTERED: "Filtered result set"}
 
@@ -93,15 +95,30 @@ class CollectionScope:
     families: tuple[str, ...] | None = None
     sizes: tuple[int, ...] | None = None
     blocks: tuple[int, ...] | None = None
+    runs: tuple[int, ...] | None = None      # combined scope: the source runs (sorted); None = the one run_id
     scope_id: str = field(default_factory=lambda: uuid.uuid4().hex, compare=False)
 
     def __post_init__(self):
         if self.base not in BASES:
             raise ValueError(f"Unknown population {self.base!r}")
+        if self.runs is not None:
+            if len(set(self.runs)) < 2:
+                raise ValueError("A combined scope needs at least two runs")
+            object.__setattr__(self, "runs", tuple(sorted(int(r) for r in set(self.runs))))
+
+    @property
+    def combined(self) -> bool:
+        return self.runs is not None
+
+    @property
+    def run_ids(self) -> tuple[int, ...]:
+        """The stored runs the population comes from."""
+        return self.runs if self.runs is not None else (int(self.run_id),)
 
     # -------------------------------------------------------------- identity
     def definition(self) -> dict:
-        return {"run": self.run_id, "base": self.base, "filters": [list(f) for f in self.filters],
+        return {"run": self.run_id, "runs": list(self.runs) if self.runs else None, "base": self.base,
+                "filters": [list(f) for f in self.filters],
                 "families": sorted(self.families) if self.families else None,
                 "sizes": sorted(self.sizes) if self.sizes else None,
                 "blocks": sorted(self.blocks) if self.blocks else None}
@@ -130,8 +147,12 @@ class CollectionScope:
         from the table (and are being deleted), so they are never part of a collection."""
         r = alias
         frm = f"results {r}"
-        where = [f"{r}.run_id = ?", f"{r}.result_id >= ?"]
-        params: list = [int(self.run_id), int(workspace_lo)]
+        if self.runs is not None:
+            where = [f"{r}.run_id IN ({','.join('?' * len(self.runs))})", f"{r}.result_id >= ?"]
+            params: list = [*self.runs, int(workspace_lo)]
+        else:
+            where = [f"{r}.run_id = ?", f"{r}.result_id >= ?"]
+            params = [int(self.run_id), int(workspace_lo)]
         if self.base == FILTERED and self.filters:
             fw, fp = filter_sql(thaw_filters(self.filters))
             # filter_sql emits unqualified results columns; qualify them for joins
@@ -161,7 +182,7 @@ class CollectionScope:
             parts.append(", ".join(str(s) for s in sorted(self.sizes)) + " elements")
         if self.blocks:
             parts.append("Block " + ", ".join(str(b + 1) for b in sorted(self.blocks)))
-        return " · ".join(parts)
+        return ", ".join(parts)
 
 
 @dataclass(frozen=True)

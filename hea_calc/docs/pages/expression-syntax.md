@@ -43,25 +43,41 @@ mixed in one document.
 ```
 lower <= variable <= upper, step=s
 lower <= variable <= upper, points=n
+lower < variable < upper, step=s
 ```
 
 | Part | Rule |
 |---|---|
 | Bounds | Numbers; the lower bound may not exceed the upper bound. Equal bounds give one value. |
+| `<=` (or `≤`) and `<` | `<=` includes the bound, `<` excludes it; the two sides may differ (`0 < x <= 1`). The values are first laid out on the closed interval (from the lower bound in steps, or n points including both bounds), then an excluded bound is removed: `0 < x < 1, step=0.1` gives 0.1 … 0.9 (9 values) and `0 < x < 1, points=11` gives 9 values. A range whose bounds exclude every value is an error. |
 | `step=s` | Values from the lower bound in steps of s up to the upper bound; s must be greater than 0. |
 | `points=n` | n equally spaced values including both bounds; n is a whole number of at least 2. |
 | `step` and `points` | Exactly one of the two. |
 | `p=v` (optional) | The value the block's preview uses; it must lie within the bounds. |
 
 Each variable of an expression needs exactly one range line in its block, and every range line must name a variable
-of that expression. A range belongs to its own block: the same letter in two blocks has two independent ranges.
+of that expression.  When you type a new variable, its range line is added for you - `0 <= x <= 1, step=0.1`, two
+spaces in, after the block's last line - so you only edit the values.  It is added once: a range line you delete
+or undo is not added again.  Renaming a variable renames its range line and keeps its values; a default range line
+whose variable you removed is removed with it, an edited one stays and is reported as not used. A range belongs to its own block: the same letter in two blocks has two independent ranges.
 There is no random sampling.
+
+## Editor
+
+* **Colours.** Element symbols, numbers, variables, range keywords (`step`, `points`, `p`), operators and comparisons,
+  and brackets each have their own colour, read the way the calculation reads the text (`CrMnFeCoNiyCux` is
+  Cr Mn Fe Co Ni y Cu x).  A thin vertical guide joins a block's range lines.
+* **Problems** are underlined with a wavy line where they are, and marked in the strip on the right edge.  The panel
+  header names the problem, or says "Multiple errors"; select it to see every problem by line.  A problem that only
+  means the line is unfinished (a bracket not closed yet) waits until you leave the line or choose Parse expression.
 
 ## Parsing
 
-Nothing is checked while you type. **Parse** (the icon in the field, or Ctrl+Enter) checks every block; **Calculate**
-uses the parsed document only. Editing after a parse marks the result as changed ("Expression changed. Parse again
-to update the result.") and makes **Calculate** unavailable until the next parse.
+**Parse expression** (the footer button, or Ctrl+Enter) parses every block and counts its compositions; the header
+then shows **Parsed successfully** (or **Parsed with warnings** when combinations are skipped or duplicates removed),
+and the footer button becomes **Calculate**. **Calculate** uses the parsed document only: editing after a parse
+shows **Expression changed** and the button returns to Parse expression until the next parse.  A batch that is
+large or above the combination limit is a workload message, not an expression error.
 
 ## Rules for generated compositions
 
@@ -71,7 +87,7 @@ to update the result.") and makes **Calculate** unavailable until the next parse
 
 ## Error messages
 
-Errors are listed below the field, one entry per block: the block number, its first line and the message.
+Each problem is underlined in place; the header's tag lists them by line.
 
 | Message | Cause |
 |---|---|
@@ -82,3 +98,4 @@ Errors are listed below the field, one entry per block: the block number, its fi
 | The variable "x" has no range. Add a line such as 0 <= x <= 1, step=0.1. | A variable without a range line. |
 | The variable "x" is declared twice. | Two range lines for the same variable. |
 | The variable "x" is not used in the expression. | A range line for a letter the expression does not contain. |
+| The range 0 < x < 0 contains no values. | Excluded bounds remove every value of the range. |

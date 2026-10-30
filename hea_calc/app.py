@@ -43,7 +43,7 @@ def run(argv: list[str] | None = None) -> int:
         from PySide6.QtWidgets import QMessageBox
         QMessageBox.critical(None, "HEA Calculator", str(exc))
         return 1
-    win.showMaximized()
+    win.show_initial()                      # the saved state; maximized on a fresh installation
     autoquit = os.environ.get("HEA_CALC_AUTOQUIT_MS")  # used by the entry-point smoke test
     if autoquit:
         from PySide6.QtCore import QTimer

@@ -27,7 +27,8 @@ EXPECTED_TREE = [
                                        "Plots and Statistical Analysis", "Exporting Results"]),
     ("6. Software Examples", ["Equiatomic CoCrFeMnNi", "Composition Space: Al–Co–Cr–Fe–Ni",
                               "Parametric Expression: AlxCoCrFeNi"]),
-    ("7. Data and Prediction Models", ["Elemental Property Data", "Binary Interaction Data",
+    ("7. Data and Prediction Models", ["Elemental Property Data", "Element Property Definitions",
+                                       "Binary Interaction Data",
                                        "Prediction Model Coverage", "Phase-Formation Models M1–M8",
                                        "Scientific References"]),
     ("8. General Reference", ["Symbols, Parameters and Units", "Prediction Result Labels",
@@ -141,7 +142,7 @@ def test_markdown_subset_rendering():
                        "* one\n  continued\n* two\n\n1. first\n2. second\n\nkJ mol⁻¹ <script>bad</script>")
     assert '<p class="lead">Lead.</p>' in out
     assert "<th align=\"left\">b | c</th>" in out and "x<sub>i</sub>" in out
-    assert 'class="callout"' in out and "<b>Note.</b>" in out
+    assert 'class="callout c-info"' in out and "<b>Note.</b>" in out and 'src="notify:info"' in out
     # lists: marker column + text (10.png - Qt cannot space its own list markers)
     assert '<td class="mark" width="16" valign="top">–</td><td class="item" valign="top">one continued</td>' in out
     assert '<table class="ol"' in out and '>2.</td><td class="item" valign="top">second</td>' in out
@@ -355,7 +356,11 @@ def test_help_window_navigation_search_and_theme(win, app):
     hw.view.link.emit("help://defining")                       # breadcrumb
     pump(app)
     assert hw.page == "defining"
-    hw.home_btn.click()
+    assert not hasattr(hw, "home_btn"), "no redundant icon-only Home button (the contents tree has Home)"
+    home = hw.nav.topLevelItem(0)
+    assert home.data(0, 256) == docs.HOME
+    hw.nav.setCurrentItem(home)                              # selecting Home in the tree opens it
+    pump(app)
     assert hw.page == "home"
     hw.search.setText("mixing enthalpy")
     hw._run_search()

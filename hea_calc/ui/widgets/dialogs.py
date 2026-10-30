@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import html
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (QCheckBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
                                QVBoxLayout, QWidget)
 
 from ...core.composition import parse_number
 from ...core.engine import DEFAULT_TCRIT_FRACTION, MODEL_KEYS, MODELS
-from ...core.results import COLUMNS, COLUMN_BY_KEY, DEFAULT_COLUMNS, IdSetFilter, ModelFilter, RangeFilter
+from ...core.results import (COLUMNS, COLUMN_BY_KEY, DEFAULT_COLUMNS, IdSetFilter, ModelFilter, RangeFilter,
+                               chooser_groups)
 from .scroll import inner_scroll_area
 from .common import button, refresh_style, set_prop
 
@@ -72,6 +73,19 @@ class Modal(QDialog):
         else:
             self.setFocus()
 
+    def fit_height(self, content: QWidget, minimum: int = 420) -> None:
+        """Responsive height (2026-10-28): tall enough for the scrolling ``content`` without scrolling when the screen
+        allows, never taller than 90 % of the available screen height and never shorter than ``minimum``; the
+        footer and the title always stay on screen (the content scrolls inside)."""
+        from PySide6.QtGui import QGuiApplication
+        par = self.parentWidget()
+        scr = (par.screen() if par is not None else None) or QGuiApplication.primaryScreen()
+        avail = scr.availableGeometry().height() if scr is not None else 900
+        chrome = 16 + 44 + 16 + 24 + 64 + 40           # title block, body margins, footer, caption allowance
+        want = content.sizeHint().height() + chrome
+        h = max(minimum, min(int(avail * 0.9), want))
+        self.resize(self.width(), h)
+
     def add_footer_button(self, text: str, kind: str, slot, stretch: int = 1):
         b = button(text, kind, "md")
         set_prop(b, "tall", "64")
@@ -79,6 +93,33 @@ class Modal(QDialog):
         self.footer.addWidget(b, stretch)
         self.footer_widget.show()
         return b
+
+
+class _QuietFocus(QObject):
+    """Drops the ``quietfocus`` property (and so shows the normal focus ring) once the keyboard is used or the
+    focus moves on."""
+
+    def eventFilter(self, obj, ev):
+        if ev.type() in (QEvent.Type.FocusOut, QEvent.Type.KeyPress) and obj.property("quietfocus"):
+            obj.setProperty("quietfocus", False)
+            refresh_style(obj)
+            obj.removeEventFilter(self)
+        return False
+
+
+_QUIET = None
+
+
+def quiet_focus(widget: QWidget) -> None:
+    """Give ``widget`` the initial focus without the keyboard focus ring (focus-visible): the ring appears with the
+    first key press or when focus moves on and comes back."""
+    global _QUIET
+    if _QUIET is None:
+        _QUIET = _QuietFocus()
+    widget.setProperty("quietfocus", True)
+    refresh_style(widget)
+    widget.installEventFilter(_QUIET)
+    widget.setFocus(Qt.FocusReason.OtherFocusReason)
 
 
 def scroll(inner: QWidget) -> QScrollArea:
@@ -96,18 +137,18 @@ class ColumnsDialog(Modal):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(24)
         grid.setVerticalSpacing(4)
-        groups: dict[str, list] = {}
-        for c in COLUMNS:
-            groups.setdefault(c.group, []).append(c)
+        # 2026-10-28: Composition, Run, the shared descriptors, then one group per model (its prediction and the
+        # descriptors only it uses - results.chooser_groups); tooltips say what a column holds, without references
         r = 0
-        for gi, (group, cols) in enumerate(groups.items()):
+        for gi, (group, cols) in enumerate(chooser_groups()):
             h = QLabel(group)
-            h.setStyleSheet("font-weight: 600;")
+            h.setStyleSheet("font-weight: 600;" + (" padding-top: 8px;" if gi else ""))
             grid.addWidget(h, r, 0, 1, 2)
             r += 1
             for i, c in enumerate(cols):
                 cb = QCheckBox(c.header)
-                cb.setToolTip(c.tooltip)
+                cb.setToolTip(c.chooser_tip or c.tooltip)
+                cb.setProperty("tip_align", "top")
                 cb.setChecked(c.key in visible)
                 if c.key == "name":
                     cb.setEnabled(False)
@@ -116,14 +157,19 @@ class ColumnsDialog(Modal):
                 grid.addWidget(cb, r + i // 2, i % 2)
             r += (len(cols) + 1) // 2
         self.body.addWidget(scroll(inner), 1)
-        self.order = [c.key for c in COLUMNS]
+        self.order = [c.key for c in COLUMNS if c.key in self.checks]
+        self.fit_height(inner)
         self.add_footer_button("Reset to default", "ghost", self.reset)
         self.add_footer_button("Cancel", "secondary", self.reject)
         self.add_footer_button("Apply", "primary", self.accept)
 
+    reset_widths = False
+
     def reset(self):
+        """Default columns, and on Apply the default (weighted) column widths too."""
         for k, cb in self.checks.items():
             cb.setChecked(k in DEFAULT_COLUMNS)
+        self.reset_widths = True
 
     def selected(self) -> list[str]:
         return [k for k in self.order if self.checks[k].isChecked()]
@@ -133,58 +179,126 @@ FILTER_KEYS = ["dhmix", "dsmix", "delta", "delta_cn12", "vec", "tm", "density", 
                "phi_ye", "k1", "k1cr", "phi_king"]
 
 
+class FilterRule(QWidget):
+    """One rule of the filter builder: the parameter (name and unit), its operator and value(s), and Remove.
+
+    Numeric parameter: *between* (min and max), *at least* (min) or *at most* (max) - inclusive bounds, a value that
+    is N/A never passes (``repository.filter_sql``).  Model prediction: *is one of* the classes that model can
+    produce (``analysis.models.CLASSES``) and N/A.  The rule yields exactly one ``RangeFilter`` / ``ModelFilter``."""
+
+    OPS = (("between", "is between"), ("ge", "is at least"), ("le", "is at most"))
+
+    def __init__(self, key: str, flt=None, on_remove=None, parent=None):
+        super().__init__(parent)
+        from ...core.analysis.models import CLASSES
+        from .dropdown import Dropdown, MultiSelect
+        self.key = key
+        self.col = COLUMN_BY_KEY[key]
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+        unit = f" ({self.col.unit})" if self.col.unit else ""
+        name = QLabel(self.col.header.split(" (")[0] + unit if self.col.kind != "model"
+                      else f"{key} {MODELS[key].short}")
+        name.setFixedWidth(180)
+        name.setToolTip(self.col.chooser_tip or self.col.tooltip)
+        lay.addWidget(name)
+        self.op = self.lo = self.hi = self.classes = None
+        if self.col.kind == "model":
+            have = set(getattr(flt, "labels", ()) or ())
+            opts = [c for c in CLASSES.get(key, ())] + ["N/A"]
+            opts += sorted(have - set(opts))             # a stored filter keeps every class it had
+            lab = QLabel("is one of")
+            lab.setFixedWidth(96)
+            lay.addWidget(lab)
+            self.classes = MultiSelect("classes", [(c, c) for c in opts], tuple(sorted(have)),
+                                       accessible=f"{key} prediction classes")
+            lay.addWidget(self.classes, 1)
+        else:
+            lo = getattr(flt, "minimum", None)
+            hi = getattr(flt, "maximum", None)
+            op = "between" if (lo is not None and hi is not None) or flt is None else ("ge" if lo is not None else "le")
+            self.op = Dropdown(list(self.OPS), op, accessible=f"{self.col.header} condition")
+            self.op.setFixedWidth(136)
+            lay.addWidget(self.op)
+            self.lo, self.hi = QLineEdit(), QLineEdit()
+            self.lo.setPlaceholderText("Min")
+            self.hi.setPlaceholderText("Max")
+            self.lo.setAccessibleName(f"{self.col.header} minimum")
+            self.hi.setAccessibleName(f"{self.col.header} maximum")
+            self.lo.setText("" if lo is None else f"{lo:g}")
+            self.hi.setText("" if hi is None else f"{hi:g}")
+            lay.addWidget(self.lo, 1)
+            lay.addWidget(self.hi, 1)
+            self.op.changed.connect(lambda _v: self._sync_op())
+            self._sync_op()
+        from .common import IconButton
+        self.remove_btn = IconButton("close", f"Remove the {self.col.header.split(' (')[0]} filter")
+        self.remove_btn.setFixedSize(32, 32)
+        if on_remove is not None:
+            self.remove_btn.clicked.connect(lambda: on_remove(self))
+        lay.addWidget(self.remove_btn)
+
+    def _sync_op(self):
+        v = self.op.value
+        self.lo.setVisible(v in ("between", "ge"))
+        self.hi.setVisible(v in ("between", "le"))
+
+    def result(self):
+        """``(filter, error)``: the rule's filter, or why it is not valid yet."""
+        name = self.col.header.split(" (")[0]
+        if self.classes is not None:
+            sel = set(self.classes.selected)
+            if not sel:
+                return None, f"{self.key}: choose at least one class."
+            return ModelFilter(self.key, sel), None
+        v = self.op.value
+        vals = []
+        for f, used in ((self.lo, v in ("between", "ge")), (self.hi, v in ("between", "le"))):
+            txt = f.text().strip() if used else ""
+            num = parse_number(txt) if txt else None
+            bad = used and (not txt or num is None)
+            f.setProperty("invalid", bad)
+            refresh_style(f)
+            if bad:
+                return None, f"{name}: enter a number."
+            vals.append(num)
+        if vals[0] is not None and vals[1] is not None and vals[0] > vals[1]:
+            self.lo.setProperty("invalid", True)
+            refresh_style(self.lo)
+            return None, f"{name}: the minimum exceeds the maximum."
+        return RangeFilter(self.key, vals[0], vals[1]), None
+
+
 class FilterDialog(Modal):
-    """Filter results by descriptor ranges and model predictions (empty = no limit)."""
+    """Filter results: an incremental filter builder (2026-10-28).
+
+    Add filter -> choose a parameter (grouped like Table columns: shared descriptors, then each model with its
+    prediction and the descriptors only it uses) -> set its condition; add more, edit or remove them; Apply.
+    Every rule must hold (AND) - the same semantics as before: one ``RangeFilter`` per descriptor (inclusive bounds,
+    N/A never passes) and one ``ModelFilter`` per model (its prediction is one of the chosen classes).  Opening the
+    dialog shows the table's current filters as rules; Cancel changes nothing."""
 
     def __init__(self, filters: list, parent=None):
-        super().__init__("Filter results", "Results table", parent, width=640)
-        current_r = {f.key: f for f in filters if isinstance(f, RangeFilter)}
-        current_m = {f.key: f for f in filters if isinstance(f, ModelFilter)}
+        super().__init__("Filter results", "Results table", parent, width=720)
+        self.rules: list[FilterRule] = []
+        top = QHBoxLayout()
+        self.add_btn = button("Add filter", "ghost", "sm")
+        self.add_btn.setAccessibleName("Add filter")
+        self.add_btn.clicked.connect(self.open_add_menu)
+        top.addWidget(self.add_btn)
+        top.addStretch(1)
+        self.body.addLayout(top)
         inner = QWidget()
-        g = QGridLayout(inner)
-        g.setContentsMargins(0, 0, 0, 0)
-        g.setHorizontalSpacing(8)
-        g.setVerticalSpacing(4)
-        for j, h in enumerate(("Descriptor", "Min", "Max")):
-            lab = QLabel(h)
-            lab.setStyleSheet("font-weight: 600;")
-            g.addWidget(lab, 0, j)
-        self.ranges: dict[str, tuple[QLineEdit, QLineEdit]] = {}
-        for i, k in enumerate(FILTER_KEYS, start=1):
-            c = COLUMN_BY_KEY[k]
-            g.addWidget(QLabel(c.header), i, 0)
-            mn, mx = QLineEdit(), QLineEdit()
-            mn.setPlaceholderText("no limit")
-            mx.setPlaceholderText("no limit")
-            f = current_r.get(k)
-            if f:
-                mn.setText("" if f.minimum is None else f"{f.minimum:g}")
-                mx.setText("" if f.maximum is None else f"{f.maximum:g}")
-            g.addWidget(mn, i, 1)
-            g.addWidget(mx, i, 2)
-            self.ranges[k] = (mn, mx)
-        r = len(FILTER_KEYS) + 1
-        lab = QLabel("Model predictions")
-        lab.setStyleSheet("font-weight: 600; padding-top: 12px;")
-        g.addWidget(lab, r, 0, 1, 3)
-        self.models: dict = {}
-        from .dropdown import Dropdown
-        options = ["Any", "SS", "MP", "IM", "SS+IM", "MG", "N/A", "SS (any SS)"]
-        for i, k in enumerate(MODEL_KEYS):
-            g.addWidget(QLabel(f"{k} — {MODELS[k].short}"), r + 1 + i, 0)
-            # the shared Carbon dropdown (no wheel changes, no text shift, Carbon menu list)
-            value = "Any"
-            f = current_m.get(k)
-            if f:
-                labels = f.labels
-                if labels == {"SS", "SS+IM"}:
-                    value = "SS (any SS)"
-                elif len(labels) == 1:
-                    value = next(iter(labels))
-            cb = Dropdown([(o, o) for o in options], value, accessible=f"{k} prediction filter")
-            g.addWidget(cb, r + 1 + i, 1, 1, 2)
-            self.models[k] = cb
-        g.setColumnStretch(0, 1)
+        self.list = QVBoxLayout(inner)
+        self.list.setContentsMargins(0, 0, 0, 0)
+        self.list.setSpacing(8)
+        self.empty = QLabel("No filters: every result is shown. Add a filter to show only the results that match "
+                            "it; with several filters a result must match all of them.")
+        self.empty.setWordWrap(True)
+        self.empty.setObjectName("Helper")
+        self.list.addWidget(self.empty)
+        self.list.addStretch(1)
         self.id_filters = [f for f in filters if isinstance(f, IdSetFilter)]
         self.keep_ids = None
         if self.id_filters:
@@ -196,47 +310,78 @@ class FilterDialog(Modal):
         self.error = QLabel("")
         self.error.setObjectName("ErrorText")
         self.body.addWidget(self.error)
-        self.add_footer_button("Clear filters", "ghost", self.clear)
+        self.add_footer_button("Clear all", "ghost", self.clear)
         self.add_footer_button("Cancel", "secondary", self.reject)
         self.add_footer_button("Apply", "primary", self._apply)
         self.result_filters: list = []
+        for f in filters:
+            if isinstance(f, (RangeFilter, ModelFilter)) and f.key in COLUMN_BY_KEY:
+                self.add_rule(f.key, f)
+        self._sync()
+        self.fit_height(inner, minimum=360)
+
+    # -------------------------------------------------------------- rules
+    @staticmethod
+    def parameters() -> list[tuple[str, list]]:
+        """Filterable parameters by group: numeric stored descriptors and the model predictions."""
+        from ...core.chunks import NUM_KEYS
+        ok = lambda c: c.kind == "model" or (c.kind == "num" and c.key in NUM_KEYS)      # noqa: E731
+        return [(g, [c for c in cols if ok(c)]) for g, cols in chooser_groups() if any(ok(c) for c in cols)]
+
+    def used(self) -> set[str]:
+        return {r.key for r in self.rules}
+
+    def open_add_menu(self):
+        from .menu import CarbonMenu
+        menu = CarbonMenu(parent=self)
+        used = self.used()
+        for group, cols in self.parameters():
+            free = [c for c in cols if c.key not in used]
+            if not free:
+                continue
+            sub = menu.add_submenu(group)
+            for c in free:
+                text = f"{c.key} prediction" if c.kind == "model" else c.header
+                sub.add_action(text, lambda _c=False, k=c.key: self.add_rule(k, focus=True))
+        menu.open_below(self.add_btn)
+        menu.deleteLater()
+
+    def add_rule(self, key: str, flt=None, focus: bool = False) -> FilterRule:
+        if key in self.used():
+            return next(r for r in self.rules if r.key == key)
+        rule = FilterRule(key, flt, on_remove=self.remove_rule)
+        self.rules.append(rule)
+        self.list.insertWidget(self.list.count() - 1, rule)
+        self._sync()
+        if focus:
+            (rule.lo if rule.lo is not None and rule.lo.isVisible() else rule.classes or rule.op).setFocus()
+        return rule
+
+    def remove_rule(self, rule: FilterRule) -> None:
+        if rule in self.rules:
+            self.rules.remove(rule)
+            rule.setParent(None)
+            rule.deleteLater()
+        self._sync()
+
+    def _sync(self):
+        self.empty.setVisible(not self.rules)
+        self.error.setText("")
 
     def clear(self):
-        for mn, mx in self.ranges.values():
-            mn.clear()
-            mx.clear()
-        for cb in self.models.values():
-            cb.setCurrentIndex(0)
+        for r in list(self.rules):
+            self.remove_rule(r)
         if self.keep_ids is not None:
             self.keep_ids.setChecked(False)
 
     def _apply(self):
         out = []
-        ok = True
-        for k, (mn, mx) in self.ranges.items():
-            vals = []
-            for f in (mn, mx):
-                txt = f.text().strip()
-                v = parse_number(txt) if txt else None
-                bad = bool(txt) and v is None
-                f.setProperty("invalid", bad)
-                refresh_style(f)
-                ok &= not bad
-                vals.append(v)
-            if vals[0] is not None and vals[1] is not None and vals[0] > vals[1]:
-                mn.setProperty("invalid", True)
-                refresh_style(mn)
-                ok = False
-            if vals[0] is not None or vals[1] is not None:
-                out.append(RangeFilter(k, vals[0], vals[1]))
-        if not ok:
-            self.error.setText("Fix the highlighted fields (numbers only; Min ≤ Max).")
-            return
-        for k, cb in self.models.items():
-            txt = cb.currentText()
-            if txt == "Any":
-                continue
-            out.append(ModelFilter(k, {"SS", "SS+IM"} if txt.startswith("SS (") else {txt}))
+        for r in self.rules:
+            f, err = r.result()
+            if err:
+                self.error.setText(err)
+                return
+            out.append(f)
         if self.keep_ids is not None and self.keep_ids.isChecked():
             out += self.id_filters
         self.result_filters = out
@@ -294,44 +439,6 @@ class SettingsDialog(Modal):
         self.accept()
 
 
-class AlloyDetailsDialog(Modal):
-    """Composition analysis of one result in its own window (row menu "Open details in new window").
-    Holds a snapshot (the materialised engine result), so it stays valid if the row is removed."""
-
-    def __init__(self, row, parent=None, info=None):
-        from ..analysis.composition_view import CompositionContent
-        from .common import LineTabs
-        super().__init__("Alloy details", "Composition analysis", parent, width=900)
-        self.resize(900, 760)
-        self.row, self.info = row, info
-        self.tabs = LineTabs(["Overview", "Descriptors", "Models", "Model details"])
-        self.content = CompositionContent("L")
-        prefs = getattr(parent, "prefs", None)
-        if prefs is not None:
-            self.content.batch_mass = prefs.total_mass
-        self.content.set_result(row, info)
-        wrap = QWidget()
-        tl = QHBoxLayout(wrap)
-        tl.setContentsMargins(20, 0, 20, 0)
-        tl.addWidget(self.tabs)
-        self.body.setContentsMargins(0, 0, 0, 0)
-        self.body.addWidget(wrap)
-        self.body.addWidget(self.content, 1)
-        self.tabs.changed.connect(self.content.setCurrentIndex)
-        self.content.open_tab.connect(self._open_tab)
-        self.content.model_selected.connect(lambda m: self.content.set_model(m))
-        self.add_footer_button("Export report…", "secondary", self.export_report)   # the native caption closes
-
-    def _open_tab(self, tab: str):
-        i = ("overview", "descriptors", "models", "model_details").index(tab)
-        self.tabs.set_index(i)
-        self.content.setCurrentIndex(i)
-
-    def export_report(self):
-        from ..analysis.report_ui import export_composition_snapshot
-        export_composition_snapshot(self, self.row, self.info)
-
-
 class ImportReportDialog(Modal):
     def __init__(self, path: str, layout: str, imported: int, errors: list[tuple[int, str]], parent=None):
         super().__init__("Import report", path, parent, width=640)
@@ -373,3 +480,31 @@ class ChoiceDialog(Modal):
     def _choose(self, key: str):
         self.choice = key
         self.accept() if key != "cancel" else self.reject()
+
+
+class DangerDialog(Modal):
+    """Carbon danger modal (Carbon MCP, components/modal "Danger"): the question as the title, a short
+    consequence, and the footer Cancel (secondary) | <destructive action> (danger primary).  Used only through the
+    one destructive-action policy (``core/destructive.py``); Esc and the caption's Close button cancel."""
+
+    def __init__(self, title: str, question: str, detail: str, action: str, parent=None):
+        # the window caption says what the dialog is (``title``); the heading asks the question once - no label
+        # repeating the caption above it
+        super().__init__(question, "", parent, width=560)
+        self.setWindowTitle(title)
+        self.resize(560, 240)
+        lab = QLabel(detail)
+        lab.setWordWrap(True)
+        self.body.addWidget(lab)
+        self.body.addStretch(1)
+        self.cancel_button = self.add_footer_button("Cancel", "secondary", self.reject)
+        self.action_button = self.add_footer_button(action, "danger", self.accept)
+        self.cancel_button.setDefault(False)
+        self.cancel_button.setAutoDefault(False)
+        self.action_button.setAutoDefault(False)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        # Carbon danger modal: initial focus on Cancel, so a stray Enter never confirms the destructive action -
+        # without the focus ring until the keyboard is used (a ring on a button nobody moved to looked stuck)
+        quiet_focus(self.cancel_button)

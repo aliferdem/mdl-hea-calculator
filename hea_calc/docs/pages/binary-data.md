@@ -9,7 +9,7 @@ binary compounds for M6 and M7, and Miedema enthalpies for M8.
 |---|---|---|---|---|
 | Takeuchi & Inoue (2005) liquid mixing enthalpies [10], kJ mol⁻¹ | 73 | 2,628 | ΔH<sub>mix</sub>; M1, M2, M5, M7 | Every pair of the 73 elements is tabulated; 159 pairs are tabulated as exactly 0 kJ mol⁻¹, which is a value, not missing data. |
 | Troparevsky et al. (2015) formation enthalpies [6], meV atom⁻¹ | 30 | 435 | M6; ΔH<sub>IM</sub> of M7 | Complete for the 30 elements. |
-| Miedema interfacial and elastic enthalpies, from Bakker (1998) parameters [11] | 57 | computed for any pair | M8 | Reproduces Bakker's Table A2 within ±2.1 kJ mol⁻¹. |
+| Miedema interfacial and elastic enthalpies, from Bakker (1998) parameters [11] | 57 | computed for any pair | M8 | Reproduces Bakker's Table A2 within ±2.1 kJ mol⁻¹ and his Tables A3/A4 for Ca, Sr and Ba with transition metals within ±3.6 kJ mol⁻¹ (pair classification after de Boer et al. [14]). |
 
 ΔH<sub>mix</sub> is the regular-solution sum Σ<sub>i&lt;j</sub> 4c<sub>i</sub>c<sub>j</sub>ΔH<sub>ij</sub><sup>mix</sup> over all
 pairs.

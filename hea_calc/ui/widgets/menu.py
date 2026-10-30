@@ -10,7 +10,17 @@ screen-edge collision, submenu placement and accessibility.  Appearance is paint
 semantic theme tokens (Carbon MCP, components/menu "Specifications - Color / Interactive state color"):
 
 * container ``$layer`` - contextual: the menu opens over ``layer-01`` panels, so it is ``layer-02`` - with the
-  Carbon elevation ``box-shadow 0 2px 6px rgba(0,0,0,.2)`` painted in a transparent margin;
+  Carbon elevation ``box-shadow 0 2px 6px rgba(0,0,0,.2)`` painted in a transparent margin.  That is the only
+  elevation: Qt 6.7's ``windows11`` style installs a ``QGraphicsDropShadowEffect`` (3, 3, #b43f3f3f) on every
+  QMenu, which stacked a hard right/bottom band (a light rim in the dark theme) on it - it is removed whenever
+  the style polishes the menu (visual QA F-03);
+* header menus (``open_below(..., merge=True)``) are one elevated surface with their trigger
+  (CORRECT_FILE_BUTTON / CORRECT_THEME_BUTTON): the union outline of trigger and menu is shadowed - no seam at
+  the join, the trigger elevated (F-05).  The menu itself stays an ordinary QMenu (its geometry and hit-testing
+  untouched: offsetting its items under the trigger made QMenu drop the last item's hit area - "Exit" and
+  "System default" were not clickable); the trigger's share of the shadow is a separate decorative window that
+  is transparent for input (:class:`_TriggerShadow`).  A shadow margin at the screen edge hangs off-screen instead
+  of pushing the surface (F-08);
 * items ``sm`` 32 / ``md`` 40 / ``lg`` 48 px (Carbon "Sizing - Height"; a menu matches its trigger: header
   menus lg, the results context menu md, toolbar MenuButtons sm), 16 px inline padding, body-compact-01 text
   in ``$text-secondary``;
@@ -26,9 +36,9 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPoint, QRect, QRectF, Qt
-from PySide6.QtGui import QAction, QColor, QFontMetrics, QFontMetricsF, QKeySequence, QPainter
-from PySide6.QtWidgets import QMenu
+from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt
+from PySide6.QtGui import QAction, QColor, QFontMetrics, QFontMetricsF, QKeySequence, QPainter, QRegion
+from PySide6.QtWidgets import QGraphicsDropShadowEffect, QMenu, QWidget
 
 from .. import crisp, icons
 from ..theme import (BODY_COMPACT_01, FOCUS_WIDTH, HAIRLINE, MENU_MAX_WIDTH, MENU_MIN_WIDTH, MENU_PADDING_X,
@@ -53,13 +63,34 @@ class CarbonMenu(QMenu):
         self.item_height = SIZES.get(size, 32)
         self.block_padding = block_padding
         self._keyboard = False
+        # the merged trigger (header menus) in menu coordinates: it lies just above the surface, outside the
+        # widget, and only shapes the painted shadow - never the menu's geometry or hit-testing
+        self.tab: QRect | None = None
+        self._trigger = None
+        self._target: QPoint | None = None        # the intended top-left (Qt clamps popups to the screen)
+        self._overlay: _TriggerShadow | None = None
+        self._apply_style()
+        self.aboutToShow.connect(self._fit_width)
+
+    def _apply_style(self) -> None:
         self.setStyleSheet(
             f"QMenu#CarbonMenu {{ background: transparent; border: none; margin: {SHADOW}px; "
-            f"padding: {block_padding}px 0px; }}"
+            f"padding: {self.block_padding}px 0px; }}"
             f"QMenu#CarbonMenu::item {{ padding: 0px 16px; min-height: {self.item_height}px; "
             f"height: {self.item_height}px; }}"
             f"QMenu#CarbonMenu::separator {{ height: 1px; margin: 0px; }}")
-        self.aboutToShow.connect(self._fit_width)
+        self._strip_style_shadow()
+
+    def _strip_style_shadow(self) -> None:
+        """Remove the windows11 style's QMenu drop shadow (F-03): Carbon's painted elevation is the only one."""
+        if isinstance(self.graphicsEffect(), QGraphicsDropShadowEffect):
+            self.setGraphicsEffect(None)
+
+    def event(self, e):
+        res = super().event(e)
+        if e.type() in (QEvent.Type.Polish, QEvent.Type.StyleChange):
+            self._strip_style_shadow()
+        return res
 
     # -------------------------------------------------------------- building
     def add_action(self, text: str, slot=None, *, danger: bool = False, icon: str | None = None,
@@ -114,21 +145,32 @@ class CarbonMenu(QMenu):
         x = max(scr.left() - SHADOW, min(x, scr.right() + 1 + SHADOW - size.width()))
         return QPoint(x, y)
 
-    def open_below(self, trigger, exec_: bool = True, align_right: bool = False):
+    def open_below(self, trigger, exec_: bool = True, align_right: bool = False, merge: bool = False,
+                   active=None):
         """Open with the surface flush under ``trigger`` (the shadow margin hangs outside it); above it when the
-        screen has no room below."""
+        screen has no room below.  ``merge`` (header menus): trigger and menu are one elevated surface."""
         self.trigger_width = max(getattr(self, "trigger_width", 0), trigger.width())
+        self.tab, self._trigger = None, None
         self._fit_width()
-        pos = self.placed(self.target_below(trigger, align_right), trigger.mapToGlobal(QPoint(0, 0)).y())
+        top_left = trigger.mapToGlobal(QPoint(0, 0))
+        pos = self.placed(self.target_below(trigger, align_right), top_left.y())
+        if merge and not self.opens_up:
+            dx = top_left.x() - pos.x()
+            if SHADOW <= dx and dx + trigger.width() <= self.width() - SHADOW:
+                self.tab = QRect(dx, SHADOW - trigger.height(), trigger.width(), trigger.height())
+                self._trigger = trigger
+        self._target = pos
         if exec_:
-            return self.exec(pos)
-        self.popup(pos)
+            return self.exec(pos, active) if active is not None else self.exec(pos)
+        self.popup(pos, active) if active is not None else self.popup(pos)
         return None
 
     def exec_at(self, global_pos: QPoint):
         """Context menu: the surface's top-left corner at ``global_pos`` (upward from it near the screen bottom)."""
+        self.tab, self._trigger = None, None
         self._fit_width()
-        return self.exec(self.placed(global_pos - QPoint(SHADOW, SHADOW)))
+        self._target = self.placed(global_pos - QPoint(SHADOW, SHADOW))
+        return self.exec(self._target)
 
     def _columns(self) -> tuple[bool, bool, bool]:
         acts = [a for a in self.actions() if a.isVisible() and not a.isSeparator()]
@@ -163,6 +205,12 @@ class CarbonMenu(QMenu):
     # -------------------------------------------------------------- input (focus ring only for keyboard)
     def keyPressEvent(self, e):
         self._keyboard = True
+        bar = getattr(self, "menubar", None)
+        if bar is not None and e.key() in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+            act = self.activeAction()
+            if not (e.key() == Qt.Key.Key_Right and act is not None and act.menu() is not None):
+                if bar.switch_menu(self, -1 if e.key() == Qt.Key.Key_Left else 1, keyboard=True):
+                    return
         super().keyPressEvent(e)
         self.update()
 
@@ -170,11 +218,43 @@ class CarbonMenu(QMenu):
         if self._keyboard:
             self._keyboard = False
             self.update()
+        bar = getattr(self, "menubar", None)
+        if bar is not None and bar.hover_switch(self, e.globalPosition().toPoint()):
+            return
         super().mouseMoveEvent(e)
+
+    def mousePressEvent(self, e):
+        # the popup receives every press while open; one on its own trigger only closes it (no replay to the
+        # trigger, which would open the menu again) - QMenu does the same for QPushButton::setMenu triggers
+        if self.tab is not None and self.tab.contains(e.position().toPoint()):
+            self.setAttribute(Qt.WidgetAttribute.WA_NoMouseReplay, True)
+            self.close()
+            e.accept()
+            return
+        super().mousePressEvent(e)
 
     def showEvent(self, e):
         self._keyboard = False
+        self._strip_style_shadow()
         super().showEvent(e)
+        # Qt clamps the whole popup, transparent shadow margin included, to the screen: at the screen edge the
+        # surface stopped 6 px short of its trigger (F-08).  The margin may hang off-screen; the surface may not.
+        if self._target is not None and self.pos() != self._target:
+            self.move(self._target)
+        if self.tab is not None:
+            if self._overlay is None:
+                self._overlay = _TriggerShadow(self)
+            self._overlay.place()
+
+    def hideEvent(self, e):
+        self._target = None
+        if self._overlay is not None:
+            self._overlay.hide()
+        super().hideEvent(e)
+
+    def shadow_rects(self) -> tuple[QRect, ...]:
+        """The elevated outline in menu coordinates: the surface, plus the trigger tab for a merged menu."""
+        return (self.surface(),) if self.tab is None else (self.surface(), self.tab)
 
     # -------------------------------------------------------------- painting
     def paintEvent(self, _e):
@@ -182,8 +262,28 @@ class CarbonMenu(QMenu):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         surface = self.surface()
-        paint_shadow(p, surface)
+        if self.tab is not None:
+            # one outline for trigger + menu; nothing is painted over the trigger (its bottom edge overlaps the
+            # top shadow margin), so the join has no seam
+            p.save()
+            p.setClipRegion(QRegion(self.rect()).subtracted(QRegion(self.tab)))
+            paint_shadow(p, surface, self.tab)
+            p.restore()
+        else:
+            paint_shadow(p, surface)
         crisp.fill_rect(p, surface, t("layer-02"))
+        if self.tab is not None:
+            # The menu window and the main window (which paints the open trigger, layer-02) are placed in device
+            # pixels each with its own rounding: at 125 % one device row of the title bar (#161616 in the dark theme)
+            # stayed visible between the trigger and the surface - a seam.  At a fractional ratio the menu paints the
+            # one device row directly above its surface in the open trigger's colour (layer-02): it closes that row
+            # when there is a gap and repaints the trigger's own colour when there is none.  At an integral ratio
+            # both windows sit on whole pixels, there is no gap, and nothing is painted over the trigger.  The
+            # shadow outline is unchanged (painted above, clipped).
+            scale = abs(p.deviceTransform().m11() or 1.0)
+            if abs(scale - round(scale)) > 1e-6:
+                crisp.fill_rect(p, QRectF(self.tab.left(), surface.top() - 1 / scale, self.tab.width(), 1 / scale),
+                                t("layer-02"))
         f = font(BODY_COMPACT_01)
         fm = QFontMetrics(f)
         p.setFont(f)
@@ -247,15 +347,119 @@ class CarbonMenu(QMenu):
         p.end()
 
 
+class _TriggerShadow(QWidget):
+    """The trigger's share of a merged header menu's elevation: a decorative, input-transparent window around the
+    trigger, ending where the menu window begins (no area is painted twice).  It paints the same union outline
+    as the menu, clipped out of the trigger, so trigger and menu read as one elevated surface."""
+
+    def __init__(self, menu: CarbonMenu):
+        super().__init__(menu, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
+                         | Qt.WindowType.WindowTransparentForInput | Qt.WindowType.WindowDoesNotAcceptFocus
+                         | Qt.WindowType.NoDropShadowWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+        self.menu = menu
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+    def place(self) -> None:
+        m = self.menu
+        origin = _origin(m)
+        tab_global = QRect(origin + m.tab.topLeft(), m.tab.size())
+        top = tab_global.top() - SHADOW
+        self.overlap = 0                          # device rows shared with the menu window (painted by the menu)
+        h = origin.y() - top
+        self._rect = QRect(tab_global.left() - SHADOW, top, tab_global.width() + 2 * SHADOW, h)
+        self.setGeometry(self._rect)
+        self.show()
+        self.update()
+        # The two windows are placed in device pixels, each rounded on its own: at a fractional scale (125 %) the
+        # overlay could end one device row above the menu window and that row of the trigger's shadow stayed
+        # unpainted - a white line beside the open trigger in the light theme.  The native rectangles are final
+        # only after this event-loop turn; then the seam is closed exactly.
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self._seal)
+
+    def _seal(self) -> None:
+        m = self.menu
+        if not self.isVisible() or m.tab is None or not m.isVisible():
+            return
+        gap = _native_gap(self, m)
+        if gap is not None and gap > 0:
+            r = QRect(self._rect)
+            r.setHeight(r.height() + 1)           # one logical px = 1-2 device rows: the overlap is clipped
+            self.setGeometry(r)
+            gap = _native_gap(self, m)
+        self.overlap = -gap if gap is not None and gap < 0 else 0
+        self.update()
+
+    def paintEvent(self, _e):
+        from .listbox import paint_shadow
+        m = self.menu
+        if m.tab is None:
+            return
+        off = _origin(m) - _origin(self)
+        surface, tab = m.surface().translated(off), m.tab.translated(off)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        clip = QRegion(self.rect()).subtracted(QRegion(tab))
+        p.setClipRegion(clip)
+        if self.overlap:                          # the rows the menu window paints itself: never twice
+            dpr = self.devicePixelRatioF()
+            p.setClipRect(QRectF(0, 0, self.width(), self.height() - self.overlap / dpr),
+                          Qt.ClipOperation.IntersectClip)
+        paint_shadow(p, surface, tab)
+        p.end()
+
+
+def _origin(window: QWidget) -> QPoint:
+    """Global top-left of a frameless top-level (the menu, the overlay) from its Qt geometry.
+
+    Not ``mapToGlobal``: for a top-level it reads the native window position, which still holds the previous popup
+    position while a menu is shown somewhere new (after the main window moved).  The overlay was then placed where
+    the trigger used to be and the trigger's shadow appeared displaced or clipped on one side."""
+    return window.geometry().topLeft()
+
+
+def _native_gap(overlay: QWidget, menu: QWidget) -> int | None:
+    """Device rows between the overlay window's bottom and the menu window's top (negative: overlap), from the
+    windows' real native rectangles; None where they cannot be read (not Windows)."""
+    import sys
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        a, b = wintypes.RECT(), wintypes.RECT()
+        u = ctypes.windll.user32
+        if not (u.GetWindowRect(wintypes.HWND(int(overlay.winId())), ctypes.byref(a)) and
+                u.GetWindowRect(wintypes.HWND(int(menu.winId())), ctypes.byref(b))):
+            return None
+        return b.top - a.bottom
+    except Exception:                             # noqa: BLE001 - cosmetic only
+        return None
+
+
 # ---------------------------------------------------------------------- other popups
 def carbon_context_menu(widget) -> None:
     """Show a text widget's standard context menu (Undo / Cut / Copy / Paste / Select all) as a
-    CarbonMenu: the actions are Qt's own (behaviour, enablement, shortcuts), only the popup is ours."""
+    CarbonMenu: the actions are Qt's own (behaviour, enablement, shortcuts), only the popup is ours.
+
+    A widget may add its own items after the standard ones: ``widget.context_extra`` is a callable returning
+    ``(text, slot, danger)`` tuples (e.g. "Remove element" on a composition row).  Their slots run after the menu
+    has closed, so a slot may delete the widget that owns the menu."""
     def show(pos):
         std = widget.createStandardContextMenu()
         menu = CarbonMenu(parent=widget)
         for act in std.actions():
             menu.addAction(act)
+        extra = getattr(widget, "context_extra", None)
+        items = extra() if callable(extra) else []
+        if items:
+            from PySide6.QtCore import QTimer
+            menu.addSeparator()
+            for text, slot, danger in items:
+                menu.add_action(text, lambda s=slot: QTimer.singleShot(0, s), danger=danger)
         target = widget.viewport() if hasattr(widget, "viewport") else widget
         menu.exec_at(target.mapToGlobal(pos))
         menu.deleteLater()

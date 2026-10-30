@@ -24,8 +24,10 @@ SINGH_EXCEPTIONS = {"ZrCrFeNiCu", "ZrHfTiCuFe", "ZrHfTiCuCo", "AlTiCoCrNiCu",
                     "Al25.53Co19.24Cr19.06Fe19.11Ni19.06", "AlTiCoNiCuZn",
                     "Co24.90Cr25.12Fe24.58Ni25.90", "Co32.9Fe34.0Ni33.1"}
 SENKOV_EXCEPTIONS = {"Al0.3NbTa0.8Ti1.4V0.2Zr1.3"}
+# rows internally inconsistent in the Ye Intermetallics SI (verified against the source 2026-10-28; reasons in
+# test_published_benchmarks.KNOWN_DISCREPANCIES and YE_INTERMETALLICS_SOURCE_VERIFICATION_2026-10-28.md)
 YE_SE_EXCEPTIONS = {"FeCoNiCrCuAl0.3", "CoCrFeNiAlNb0.25",
-                    "Fe66Ni8.46Ti0.35Cr20.16Mo0.75W0.39Nb0.24C1.38Mn1.1Si1.18"}  # contains interstitial C
+                    "Fe66Ni8.46Ti0.35Cr20.16Mo0.75W0.39Nb0.24C1.38Mn1.1Si1.18"}
 
 
 def _calc(engine, formula):
@@ -73,16 +75,44 @@ def test_guo_2013_table1_delta_and_dhmix(engine):
     assert checked >= 180
 
 
+# Lambda-only published-reference discrepancy (audit section 20): delta is still checked; Lambda must stay a bounded
+# discrepancy (outside 2 %, within 3 %), so it can neither grow nor disappear unnoticed.
+SINGH_LAMBDA_KNOWN = {
+    "Mo0.3CoCrFeNi": "Singh et al. used Smithells radii (Ref. [47]); with the Guo & Liu printed radii Lambda 2.2686 vs "
+                     "printed 2.317 (-2.09 %, tolerance 2 %); delta 2.3777 vs 2.35 within tolerance",
+}
+
+
 def test_singh_2014_table1_delta_and_lambda(engine):
-    checked = 0
+    checked = known = 0
     for row in _rows(P.SINGH_2014_TABLE_1):
         if row["formula"] in SINGH_EXCEPTIONS:
             continue
         d = _calc(engine, row["formula"]).descriptors
         assert d["delta"] == pytest.approx(row["delta"], abs=0.05), row["formula"]
-        assert d["lambda"] == pytest.approx(row["lambda"], rel=0.02, abs=0.005), row["formula"]
+        if row["formula"] in SINGH_LAMBDA_KNOWN:
+            rel = abs(d["lambda"] - row["lambda"]) / row["lambda"]
+            assert 0.02 < rel <= 0.03, (row["formula"], rel, SINGH_LAMBDA_KNOWN[row["formula"]])
+            known += 1
+        else:
+            assert d["lambda"] == pytest.approx(row["lambda"], rel=0.02, abs=0.005), row["formula"]
         checked += 1
-    assert checked >= 65
+    assert checked >= 65 and known == len(SINGH_LAMBDA_KNOWN)
+
+
+def test_singh_row_067_lambda_is_the_independent_f2_value(engine):
+    """The F2 descriptor itself for the documented row: Singh's Lambda = dS_mix / delta^2 written out with the
+    printed Guo & Liu radii (Mo 136.3, Co 125.1, Cr 124.9, Fe 124.1, Ni 124.6 pm)."""
+    import math
+    r = {"Mo": 136.3, "Co": 125.1, "Cr": 124.9, "Fe": 124.1, "Ni": 124.6}
+    a = {"Mo": 0.3, "Co": 1.0, "Cr": 1.0, "Fe": 1.0, "Ni": 1.0}
+    c = {e: v / sum(a.values()) for e, v in a.items()}
+    rbar = sum(c[e] * r[e] for e in c)
+    delta = 100 * math.sqrt(sum(c[e] * (1 - r[e] / rbar) ** 2 for e in c))
+    lam = -R * sum(x * math.log(x) for x in c.values()) / delta ** 2
+    d = _calc(engine, "Mo0.3CoCrFeNi").descriptors
+    assert d["delta"] == pytest.approx(delta, rel=1e-9) and d["lambda"] == pytest.approx(lam, rel=1e-9)
+    assert lam == pytest.approx(2.26864, abs=5e-5)
 
 
 def test_senkov_2016_dhim_from_published_troparevsky_matrix(engine):

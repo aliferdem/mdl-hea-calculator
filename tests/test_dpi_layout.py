@@ -262,40 +262,44 @@ def test_upper_panels_fit_and_table_fills_width_at_each_scale(app, scale):
         assert not rep["horizontalOverflow"], rep
         e, c, d = rep["upperPanels"]
         width = MATEBOOK_CLIENTS[scale][0]
-        if rep["detailsStacked"]:     # Analysis below Elements + Composition (the row cannot hold 805 px)
-            assert e + c + 3 * 20 <= width and d == width - 40, rep     # fixed panels, left-aligned (§18)
+        if rep["detailsStacked"]:     # Analysis below Elements + Composition (the row cannot hold it)
+            assert e + c + 3 * 16 <= width and d == width - 32, rep     # fixed panels, left-aligned (§18)
         else:
-            assert e + c + d + 4 * 20 == width, rep
-        assert e == 578 and c == 457 and d >= 454, rep        # Elements and Composition never resize
+            assert e + c + d + 4 * 16 == width, rep                   # Figma: 16 px margins and gaps
+        assert e == 570 and c == 457 and d >= 454, rep        # Elements and Composition never resize
         # results table spans the content width; default columns fill it exactly, no scroll bars
-        assert rep["tableWidth"] == MATEBOOK_CLIENTS[scale][0] - 40, rep
+        assert rep["tableWidth"] == MATEBOOK_CLIENTS[scale][0] - 32, rep
         assert rep["tableColumnsSum"] == rep["tableViewportWidth"], rep
         assert not rep["tableHorizontalScrollbarVisible"], rep
         assert not rep["tableVerticalScrollbarVisible"] and rep["tableVerticalScrollRange"] == 0, rep
         # periodic table and Analysis tabs fit inside their panels
         el = w.elements
-        assert el.table.x() + el.table.width() <= el.width() - 20
+        assert el.table.x() + el.table.width() <= el.width() - 16
         for tabs in (w.analysis.comp_tabs, w.analysis.coll_tabs):
             last = tabs.buttons[-1]
             assert last.x() + last.width() <= tabs.width(), "all four tabs visible"
         info = el.info
         right = max(g.x() + g.width() for g in info.group_wraps)
-        assert right <= info.width() - 20, (right, info.width())
+        assert right <= info.width() - 16, (right, info.width())
     finally:
         w.close()
 
 
 def test_design_viewport_reproduces_reference_geometry(app):
-    """1920 px: panels at the current Figma positions (20 / 618 / 1095: Elements 578, Composition setup 457,
-    Analysis 805 px, right edge 1900)."""
+    """1920 px: panels at the final Figma positions (Main window 501:39126: 16 / 602 / 1075 at y = 52 -
+    Elements 570, Composition setup 457, Analysis 829 px, right edge 1904; the results table at y = 558)."""
     w = make_window(app, (1920, 1000))
     try:
         xs = [p.mapTo(w, QPoint(0, 0)).x() for p in (w.elements, w.composition, w.details)]
-        assert xs == [20, 618, 1095]
-        assert w.elements.width() == 578 and w.composition.width() == 457
-        assert w.details.width() == 805
-        assert w.details.mapTo(w, QPoint(0, 0)).x() + w.details.width() == 1900
-        assert w.elements.table.tile_size == 28        # 578 px panel: 18 × 28 px tiles + 2 px gaps (Figma)
+        assert xs == [16, 602, 1075]
+        assert {p.mapTo(w, QPoint(0, 0)).y() for p in (w.elements, w.composition, w.details)} == {52}
+        assert {p.height() for p in (w.elements, w.composition, w.details)} == {490}
+        assert w.elements.width() == 570 and w.composition.width() == 457
+        assert w.details.width() == 829
+        assert w.details.mapTo(w, QPoint(0, 0)).x() + w.details.width() == 1904
+        assert w.table.mapTo(w, QPoint(0, 0)).y() == 558
+        assert w.elements.table.tile_size == 28        # 570 px panel: 18 × 28 px tiles + 2 px gaps (Figma)
+        assert w.elements.table.mapTo(w.elements, QPoint(0, 0)) == QPoint(16, 56)
         assert not w.layout_report()["mainScrollbarVisible"], "no unnecessary main scroll bar"
     finally:
         w.close()
@@ -395,9 +399,9 @@ def test_main_scrollbar_is_an_overlay_in_the_right_margin(app):
         assert ov.isVisible()
         assert w.table.width() == before, "the main scroll bar takes no width from the content"
         vp = w.scroll.viewport()
-        # visible 4 px thumb centred 10 px from the right edge: inside the 20 px content margin
+        # visible 4 px thumb centred in the 16 px outer gutter (2026-10-28: formerly 10 px from the edge)
         centre = ov.x() + ov.thumb_rect().center().x()
-        assert vp.width() - centre == pytest.approx(10, abs=1)
+        assert vp.width() - centre == pytest.approx(8, abs=1)
     finally:
         w.close()
 
@@ -471,7 +475,7 @@ def test_tooltip_respects_screen_edges(app):
 
 def test_model_support_is_a_keyboard_accessible_toggletip(app, win):
     from hea_calc.ui.widgets.tooltip import InfoButton
-    trig = next(b for b in win.elements.findChildren(InfoButton))
+    trig = next(b for b in win.elements.findChildren(InfoButton) if b.accessibleName() == "Model support legend")
     assert trig.accessibleName() == "Model support legend"
     assert not trig.toolTip(), "a toggletip trigger is not also a hover tooltip"
     trig.setFocus(Qt.FocusReason.TabFocusReason)
@@ -543,17 +547,19 @@ def test_composition_panel_states_fit_at_150_percent(app):
         f = next(iter(comp.single.rows.values())).fields["at"]
         m = f.textMargins()
         assert f.width() - m.left() - m.right() >= fm.horizontalAdvance("14.2857"), "value clipped"
-        # sweep: the title keeps its full width next to the unit select and the switcher
+        # sweep: the heading dropdown shows its whole label (mode and basis) and stays clear of the collapse button
         comp.set_mode(1)
         QApplication.processEvents()
-        assert comp.title.width() >= comp.title.sizeHint().width(), "panel title clipped"
-        # expression: the wrapped helper sits below the field, not over it
+        h = comp.heading
+        assert h.width() >= 16 + h.text_width() + 8 + 16 + 16, "panel title clipped"
+        assert h.x() + h.width() <= comp.collapse_btn.x()
+        # expression: the parsed section sits below the editor, not over it
         comp.set_mode(2)
-        comp.expr.edit.setPlainText("(FeCoNi)1-xAlx\n0 <= x <= 1, step=0.1")
+        comp.expr.set_text("(FeCoNi)1-xAlx\n0 <= x <= 1, step=0.1")
         comp.expr.parse()
         QApplication.processEvents()
         e = comp.expr
-        assert e.feedback.y() >= e.edit.y() + e.edit.height(), (e.feedback.geometry(), e.edit.geometry())
+        assert e.section.y() >= e.edit.y() + e.edit.height(), (e.section.geometry(), e.edit.geometry())
         assert e.minimumSizeHint().height() <= e.height()
     finally:
         w.close()

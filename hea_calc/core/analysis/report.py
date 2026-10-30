@@ -57,7 +57,8 @@ LIMITATIONS = [
     "Rule-of-mixtures T<sub>m</sub> and density ignore excess quantities.",
 ]
 
-MODE_NAMES = {"single": "Single composition", "sweep": "Composition space", "expression": "Composition expression",
+MODE_NAMES = {"combined": "Combined runs", "single": "Single composition", "sweep": "Composition space",
+              "expression": "Composition expression",
               "import": "Imported compositions"}
 
 _SUP = {"⁻": "−", "¹": "1", "²": "2", "³": "3", "⁰": "0", "⁴": "4"}
@@ -119,7 +120,7 @@ def _provenance_rows(info) -> list[tuple[str, str]]:
     rows = []
     if info is None:
         return [("Calculation run", "not stored (snapshot)")]
-    rows.append(("Calculation run", f"Run {info.run_id} · {MODE_NAMES.get(info.mode, info.mode)} · status {info.status}"))
+    rows.append(("Calculation run", f"Run {info.run_id}, {MODE_NAMES.get(info.mode, info.mode)} (status: {info.status})"))
     if info.created:
         rows.append(("Calculated", info.created.replace("T", " ")))
     rows += _settings_rows(info)
@@ -149,9 +150,19 @@ def table(headers, rows, widths=None, num_cols=()) -> str:
     return f"<table width='100%'><thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table>"
 
 
+BRAND = "MDL HEA Calculator"          # report identity: the header line and every page footer (2026-10-28)
+
+
 def _header(title: str, subtitle: str, created: str) -> str:
-    return (f"<h1>{_e(title)}</h1><p class='meta'>HEA Calculator {APP_VERSION} · report created {created}</p>"
+    return (f"<h1>{_e(title)}</h1><p class='meta'>{BRAND} {APP_VERSION}, report created {created}</p>"
             f"<p>{subtitle}</p>")
+
+
+def scope_title(sc, info) -> str:
+    """``Run 3 (Composition space)`` or ``Combined: Runs 1, 2`` - how a report names its collection."""
+    if getattr(sc, "combined", False):
+        return "Combined: Runs " + ", ".join(str(r) for r in sc.run_ids)
+    return f"Run {sc.run_id} ({MODE_NAMES.get(info.mode, info.mode) if info else ''})"
 
 
 # ====================================================================== composition report
@@ -220,7 +231,7 @@ def composition_report_html(row, info=None, created: str | None = None, batch_ma
         if o.label != NA and o.caution:
             kind = {STATUS_DATA_SUSPECT: "Flagged binary data", STATUS_EXTRAPOLATED: "Extrapolated"}.get(o.status,
                                                                                                         "Caution")
-            notes.append(f"<b>{k} · {kind}.</b> {_e(o.caution)}")
+            notes.append(f"<b>{k}, {kind}.</b> {_e(o.caution)}")
     if notes:
         parts.append("<h3>Not-available reasons and cautions</h3>" + "".join(f"<p>{n}</p>" for n in notes))
     parts.append("<h2>Data quality</h2>")
@@ -283,10 +294,18 @@ def collection_report_html(ctx: dict, created: str | None = None) -> str:
     pop, stats, dist = ctx["population"], ctx["stats"], ctx["distribution"]
     from .scope import BASE_LABELS
     parts = [f"<html><head><style>{CSS}</style></head><body>"]
-    title = f"Run {sc.run_id} · {MODE_NAMES.get(info.mode, info.mode) if info else ''}"
+    title = scope_title(sc, info)
     parts.append(_header("Collection analysis report", f"<b>{_e(title)}</b>", created))
     parts.append("<h2>Collection</h2>")
-    rows = [("Calculation run", _e(title)), ("Population", _e(BASE_LABELS[sc.base]))]
+    rows = [("Calculation run" if not getattr(sc, "combined", False) else "Calculation runs", _e(title)),
+            ("Population", _e(BASE_LABELS[sc.base]))]
+    if getattr(sc, "combined", False):
+        counts = ctx.get("run_counts") or {}
+        rows.append(("Contributing runs", _e("; ".join(
+            f"Run {r} ({MODE_NAMES.get(m, m)}): {counts.get(r, 0):,} results"
+            for r, m in ((r, (info.source or {}).get("modes", {}).get(str(r), "")) for r in sc.run_ids)))))
+        rows.append(("Combination", "A view of the selected runs: every result keeps its own result and run "
+                                    "identifiers and counts once; nothing is merged."))
     if sc.base == "filtered":
         rows.append(("Results-table filter (copy)", _e(ctx.get("filters_text") or "none")))
     if sc.families:
@@ -295,7 +314,8 @@ def collection_report_html(ctx: dict, created: str | None = None) -> str:
         rows.append(("Restriction: system size", _e(", ".join(str(s) for s in sc.sizes)) + " elements"))
     if sc.blocks:
         rows.append(("Restriction: expression block", _e(", ".join(str(b + 1) for b in sc.blocks))))
-    rows += [("Analysed results", f"{pop['n']:,} of {ctx.get('run_count', pop['n']):,} results of the run"),
+    rows += [("Analysed results", f"{pop['n']:,} of {ctx.get('run_count', pop['n']):,} results of the "
+                                  f"{'runs' if getattr(sc, 'combined', False) else 'run'}"),
              ("Evaluated / not evaluable", f"{pop['n_evaluated']:,} / {pop['n_error']:,}")]
     parts.append(kv_table(rows))
     if ctx.get("stale"):
@@ -372,13 +392,20 @@ def collection_report_html(ctx: dict, created: str | None = None) -> str:
         parts.append("<p class='note'>Classes differ between models; a class a model cannot produce is not listed "
                      "(it is not a zero count). Not-available results are counted separately and are excluded from "
                      "the “% of evaluated” denominator.</p>")
-    plot = ctx.get("plot")
-    if plot:
-        parts.append("<h2 style='page-break-before: always;'>Plot</h2>")
+    plots = list(ctx.get("plots") or ([ctx["plot"]] if ctx.get("plot") else []))
+    scope_line = f"{_e(title)}, {_e(BASE_LABELS[sc.base])}"
+    if sc.base == "filtered":
+        scope_line += f" (filter: {_e(ctx.get('filters_text') or 'none')})"
+    for i, plot in enumerate(plots, start=1):
+        # one plot per page: never split at a page boundary; title, axes and legend are part of the image
+        head = "Plot" if len(plots) == 1 else f"Plot {i} of {len(plots)}"
+        parts.append(f"<h2 style='page-break-before: always;'>{head}</h2>")
         parts.append(f"<p><b>{plot['title']}</b></p>")
         parts.append(f"<p><img src='{plot['image']}' width='{plot.get('width', 640)}'></p>")
-        prow = [("Plot type", _e(plot.get("type", ""))), ("X axis", plot.get("x", "")), ("Y axis", plot.get("y", "")),
-                ("Colour / grouping", plot.get("colour", "")), ("Representation", _e(plot["representation"]))]
+        prow = [("Source", _e(plot.get("source", "Analysis"))), ("Plot type", _e(plot.get("type", ""))),
+                ("X axis", sup(plot.get("x", ""))), ("Y axis", sup(plot.get("y", ""))),
+                ("Colour / grouping", plot.get("colour", "")), ("Representation", _e(plot["representation"])),
+                ("Scope", scope_line)]
         if plot.get("sampled"):
             prow.append(("Sample", f"{plot['shown']:,} of {plot['population']:,} points drawn (uniform, fixed seed); "
                                    "statistics and counts in this report use all results, not the sample."))

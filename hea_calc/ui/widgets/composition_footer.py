@@ -1,16 +1,14 @@
-"""Composition setup footer (current Figma component "Composition setup", Mode=Single / Space / Expression).
+"""Composition setup footer (current Figma component "Composition setup", Mode=Single / Space / Expression,
+nodes 392:69182 / 392:69349 / 392:69514 and the Composition space / Expression bases).
 
-Geometry (Figma 392:69349 and its bases): a 32 px footer whose 1 px ``border-subtle`` rule is the panel's at
-y = 433; the status sits on the left - a 16 px status icon at x = 12, label-01 text at x = 36 and, when the
-status explains itself further, a Toggletip trigger 8 px after the text; on the right the danger-ghost
-*Clear* button and the 141 px primary *Calculate* button, flush with the panel edge, followed in Single and
-Expression mode by a 32 px chevron segment (1 px separator) opening the secondary actions (Normalize,
-Set equal, Copy table).  While a batch runs (State=Calculating) *Clear* becomes *Cancel* and *Calculate* an
-inline loading "Calculating…"; the progress itself is shown in the UI shell header.
+Geometry: a 40 px footer under a 1 px ``background-selected`` rule (Figma Rectangle 257, y = 449 of 490).  On the
+right the ghost *Clear* button (``link-primary``, 66 px) and the split *Calculate* button - a 141 px primary part
+and a 40 px chevron segment (1 px apart) opening the secondary actions (Set equal, Copy table) - flush
+with the panel edge.  While a batch runs (State=Calculating) *Clear* becomes *Cancel* and *Calculate* an inline
+loading "Calculating…"; the progress itself is shown in the title bar.
 
-The footer is the one place where Composition setup explains a problem: invalid input, counting, readiness,
-workload and model coverage.  Fields only mark *which* input is invalid (red frame).  Its geometry never
-changes with the message, so a status never moves the panel.
+The panel's status (invalid input, counting, readiness, workload, model coverage) is no longer in the footer: it is
+the panel header's :class:`~.status_tag.PanelStatus` (``footer.status``, placed in the header by the panel).
 """
 
 from __future__ import annotations
@@ -18,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
+from PySide6.QtGui import QColor, QFontMetrics, QFontMetricsF, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QStackedWidget, QWidget
 
 from .. import crisp, icons
@@ -27,9 +25,9 @@ from .common import button
 from .menu import CarbonMenu
 from .tooltip import InfoButton
 
-FOOTER_HEIGHT = 32
+FOOTER_HEIGHT = 40
 CALC_WIDTH = 141
-CHEVRON_WIDTH = 32
+CHEVRON_WIDTH = 40
 STATUS_ICON_X = 12
 STATUS_TEXT_X = 36
 
@@ -51,6 +49,7 @@ class Status:
     text: str
     info: object = None
     info_title: str = ""
+    tag: str | None = None           # tag colour override (red / green / blue / gray) of the header status
 
     @property
     def blocking(self) -> bool:
@@ -93,86 +92,21 @@ class _Spinner(QWidget):
         p.end()
 
 
-class FooterStatus(QWidget):
-    """Left part of the footer: status icon, label-01 text, optional Toggletip trigger."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.status: Status | None = None
-        self.setFixedHeight(FOOTER_HEIGHT)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(STATUS_TEXT_X, 0, 0, 0)
-        lay.setSpacing(8)
-        self.text = QLabel("")
-        self.text.setObjectName("FooterStatusText")
-        self.text.setFont(font(LABEL_01))
-        self.text.setTextFormat(Qt.TextFormat.PlainText)
-        lay.addWidget(self.text, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.info = InfoButton("", title="Status details")
-        lay.addWidget(self.info, 0, Qt.AlignmentFlag.AlignVCenter)
-        lay.addStretch(1)
-        self.spinner = _Spinner(self)
-        self.spinner.move(STATUS_ICON_X, (FOOTER_HEIGHT - 16) // 2)
-        self.spinner.hide()
-        self.info.hide()
-        self.setAccessibleName("Composition status")
-
-    def set_status(self, status: Status | None) -> None:
-        if status == self.status:
-            return
-        self.status = status
-        if status is None:
-            self.text.setText("")
-            self.info.hide()
-            self.spinner.hide()
-            self.setAccessibleDescription("")
-            self.update()
-            return
-        _icon, token = STATUS_STYLE.get(status.kind, STATUS_STYLE["info"])
-        self.text.setStyleSheet(f"color: {t(token)}; font-size: 12px; letter-spacing: 0.32px;")
-        avail = max(40, self.width() - STATUS_TEXT_X - (24 if status.info else 0))
-        self.text.setText(QFontMetrics(self.text.font()).elidedText(status.text, Qt.TextElideMode.ElideRight, avail))
-        self.text.setToolTip(status.text if self.text.text() != status.text else "")
-        self.info.tip_text = status.info or ""
-        self.info.title = status.info_title or status.text
-        self.info.setAccessibleName(f"About: {status.text}")
-        self.info.setVisible(bool(status.info))
-        self.spinner.setVisible(status.kind == "loading")
-        self.setAccessibleDescription(status.text)
-        self.update()
-
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        st, self.status = self.status, None
-        self.set_status(st)
-
-    def paintEvent(self, _e):
-        st = self.status
-        if st is None:
-            return
-        name = STATUS_STYLE.get(st.kind, STATUS_STYLE["info"])[0]
-        if name:
-            p = QPainter(self)
-            p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            icons.paint(p, name, QRectF(STATUS_ICON_X, (FOOTER_HEIGHT - 16) / 2, 16, 16))
-            p.end()
-
-
 class SplitButton(QWidget):
     """Primary button with a chevron segment opening secondary actions (Figma: Calculate ▾).  The main part
-    keeps the Figma width (141 px); the chevron is a 32 px primary segment after a 1 px separator."""
+    keeps the Figma width (141 px); the chevron is a 40 px primary segment after a 1 px separator."""
 
     def __init__(self, text: str, parent=None):
         super().__init__(parent)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(1)
-        self.main = button(text, "primary", "sm")
+        self.main = button(text, "primary", "md")
         self.main.setFixedSize(CALC_WIDTH, FOOTER_HEIGHT)
         lay.addWidget(self.main)
         self.chevron = QPushButton()
         self.chevron.setProperty("kind", "primary")
-        self.chevron.setProperty("btnsize", "sm")
+        self.chevron.setProperty("btnsize", "md")
         self.chevron.setObjectName("SplitChevron")
         self.chevron.setFixedSize(CHEVRON_WIDTH, FOOTER_HEIGHT)
         self.chevron.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -226,18 +160,25 @@ class SplitButton(QWidget):
 
 
 class CompositionFooter(QWidget):
-    """The 32 px Composition setup footer (status | Clear | Calculate [▾])."""
+    """The 40 px Composition setup footer (Clear | Calculate [▾]); ``status`` is the header status."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        from .status_tag import PanelStatus
         self.setObjectName("CompositionFooter")
-        self.setFixedHeight(FOOTER_HEIGHT)
+        self.setFixedHeight(FOOTER_HEIGHT + 1)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setContentsMargins(0, 1, 0, 0)
         lay.setSpacing(0)
-        self.status = FooterStatus()
-        lay.addWidget(self.status, 1)
-        self.clear_btn = button("Clear", "danger-ghost", "sm")
+        self.status = PanelStatus()            # shown in the panel header (CompositionPanel places it)
+        # Add element (icon-only ghost, md 40 x 40) at the far left: compositions can be built with the Elements
+        # panel collapsed.  Clear and Calculate keep their group and geometry on the right.
+        from .common import IconButton, set_prop
+        self.add_btn = IconButton("add", "Add element")
+        set_prop(self.add_btn, "square", str(FOOTER_HEIGHT))   # the 40 x 40 icon buttons' rule (toolbar, pager)
+        lay.addWidget(self.add_btn)
+        lay.addStretch(1)
+        self.clear_btn = button("Clear", "ghost", "md")
         self.clear_btn.setProperty("tip_align", "bottom")
         lay.addWidget(self.clear_btn)
         self.action_stack = QStackedWidget()
@@ -260,7 +201,16 @@ class CompositionFooter(QWidget):
 
     def set_split(self, on: bool) -> None:
         self.calc.set_split(on)
-        self.action_stack.setFixedWidth(self.calc.width())
+        self.action_stack.setFixedWidth(CALC_WIDTH + CHEVRON_WIDTH + 1)
+
+    def set_primary(self, text: str, split: bool) -> None:
+        """The primary action: Calculate [v], or Expression's Parse expression - full width (182 px, Figma Draft)
+        or split (Stale).  The footer's geometry never changes."""
+        if self.calc.main.text() != text:
+            self.calc.main.setText(text)
+        self.calc.set_split(split)
+        self.calc.main.setFixedWidth(CALC_WIDTH if split else CALC_WIDTH + CHEVRON_WIDTH + 1)
+        self.calc.setFixedWidth(CALC_WIDTH + CHEVRON_WIDTH + 1)
 
     def set_running(self, running: bool) -> None:
         """State=Calculating: Clear -> Cancel, Calculate -> inline loading (geometry unchanged)."""
@@ -271,7 +221,7 @@ class CompositionFooter(QWidget):
 
     def paintEvent(self, _e):
         p = QPainter(self)
-        crisp.hline(p, 0, self.width(), 0, t("border-subtle-01"), HAIRLINE)
+        crisp.hline(p, 0, self.width(), 0, t("background-selected"), HAIRLINE)
         p.end()
 
 
@@ -310,7 +260,12 @@ class WorkloadSummary(QWidget):
 
 
 class _EstimateRow(QWidget):
-    """"⏱ ~1 s runtime   🗄 ~3.2 MB temp. storage" with vector Carbon icons."""
+    """"⏱ ~1 s runtime   🗄 ~3.2 MB temp. storage" with vector Carbon icons.  Text that does not fit ends in an
+    ellipsis and the full estimate becomes the row's Tooltip (Carbon overflow content; visual QA F-06 - a
+    five-character storage value was cut mid-word: "temp. storag")."""
+
+    ICON_ADVANCE = 20
+    GAP = 12
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -320,25 +275,63 @@ class _EstimateRow(QWidget):
 
     def set_values(self, runtime: str, storage: str) -> None:
         self.runtime, self.storage = runtime, storage
+        self._sync_tip()
         self.update()
+
+    def _fonts(self):
+        f = font(LABEL_01)
+        fb = font(LABEL_01)
+        fb.setWeight(fb.Weight.DemiBold)
+        return f, fb
+
+    def _parts(self):
+        return (("time", self.runtime or "…", " runtime"), ("file_storage", self.storage or "…", " temp. storage"))
+
+    def full_text(self) -> str:
+        return f"{self.runtime or '…'} runtime, {self.storage or '…'} temp. storage"
+
+    def natural_width(self) -> float:
+        f, fb = self._fonts()
+        fm, fmb = QFontMetricsF(f), QFontMetricsF(fb)
+        parts = self._parts()
+        return sum(self.ICON_ADVANCE + fmb.horizontalAdvance(v) + fm.horizontalAdvance(w) for _i, v, w in parts) \
+            + self.GAP * (len(parts) - 1)
+
+    def is_elided(self) -> bool:
+        return self.natural_width() > self.width()
+
+    def _sync_tip(self) -> None:
+        self.setToolTip(self.full_text() if self.is_elided() else "")
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._sync_tip()
 
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        f = font(LABEL_01)
-        fb = font(LABEL_01)
-        fb.setWeight(fb.Weight.DemiBold)
+        f, fb = self._fonts()
+        avail = float(self.width())
         x = 0.0
-        for icon, value, word in (("time", self.runtime, " runtime"), ("file_storage", self.storage,
-                                                                           " temp. storage")):
+        for icon, value, word in self._parts():
+            if x + 16 > avail:
+                break
             icons.paint(p, icon, QRectF(x, 1, 16, 16), "icon-secondary")
-            x += 20
-            p.setFont(fb)
-            p.setPen(QColor(t("text-primary")))
-            p.drawText(QRectF(x, 0, 200, 18), int(Qt.AlignmentFlag.AlignVCenter), value or "…")
-            x += QFontMetrics(fb).horizontalAdvance(value or "…")
-            p.setFont(f)
-            p.setPen(QColor(t("text-secondary")))
-            p.drawText(QRectF(x, 0, 200, 18), int(Qt.AlignmentFlag.AlignVCenter), word)
-            x += QFontMetrics(f).horizontalAdvance(word) + 12
+            x += self.ICON_ADVANCE
+            stop = False
+            for text, fnt, token in ((value, fb, "text-primary"), (word, f, "text-secondary")):
+                fm = QFontMetricsF(fnt)
+                adv = fm.horizontalAdvance(text)
+                if x + adv > avail:                     # overflow: end in a visible ellipsis, never a cut glyph
+                    text = fm.elidedText(text, Qt.TextElideMode.ElideRight, max(0.0, avail - x))
+                    stop = True
+                p.setFont(fnt)
+                p.setPen(QColor(t(token)))
+                p.drawText(QRectF(x, 0, max(0.0, avail - x), 18), int(Qt.AlignmentFlag.AlignVCenter), text)
+                if stop:
+                    break
+                x += adv
+            if stop:
+                break
+            x += self.GAP
         p.end()

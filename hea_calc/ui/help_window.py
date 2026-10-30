@@ -4,7 +4,8 @@ A non-modal top-level window with the native Windows caption (no in-content Clos
 "Help — HEA Calculator", 960 × 720 by default.  Layout (Thermo-Calc-style documentation browser, Carbon v11
 behaviour):
 
-* compact 48 px header - Home (Documentation Home) and the documentation search field;
+* compact 48 px header - the documentation search field, aligned with the article column (no Home button:
+  Documentation Home is the first entry of the contents tree, and F1 / Alt+Home open it);
 * 264 px navigation tree - every section and page of ``docs.TREE``, the current page marked with the Carbon
   selected-node bar; sections expand and collapse;
 * article view - breadcrumb, H1, lead, body, related topics and previous / next, rendered from Markdown.
@@ -35,6 +36,8 @@ NAV_WIDTH = 264
 HEADER_HEIGHT = 48
 ROW_HEIGHT = 32
 CONTENT_MARGIN = 40           # article side margins
+NAV_BUTTON = 32               # Back / Forward ghost icon buttons
+NAV_BUTTON_X = 8              # their left edge: the 16 px icons sit on the contents' text line (x 16)
 MAX_IMAGE_WIDTH = 760
 PAGE_ROLE = Qt.ItemDataRole.UserRole
 
@@ -204,12 +207,258 @@ class HelpBrowser(QTextBrowser):
         thin_scrollbars(self)
         self.anchorClicked.connect(lambda url: self.link.emit(url.toString()))
         self._images: dict = {}
+        # Carbon link states (hover: link-primary-hover + underline; active: text-primary + underline; keyboard
+        # focus: 1 px focus outline, no selection fill).  Paint-only extra selections: no layout shift.
+        self._base_sels: list = []
+        self.hover_range: tuple[int, int] | None = None
+        self.active_range: tuple[int, int] | None = None
+        self.focus_range: tuple[int, int] | None = None
+        self.selectionChanged.connect(self._sync_focus_link)
+        self.cursorPositionChanged.connect(self._sync_focus_link)
+
+    # ------------------------------------------------------------------ link states
+    def _anchor_range(self, pos: int) -> tuple[int, int] | None:
+        """The document range of the link whose text contains the character at ``pos``."""
+        doc = self.document()
+        block = doc.findBlock(pos)
+        if not block.isValid():
+            return None
+        frags = []
+        it = block.begin()
+        while not it.atEnd():
+            f = it.fragment()
+            if f.isValid():
+                frags.append(f)
+            it += 1
+        for i, f in enumerate(frags):
+            if f.position() <= pos < f.position() + f.length():
+                href = f.charFormat().anchorHref() if f.charFormat().isAnchor() else ""
+                if not href:
+                    return None
+                lo = hi = i
+                while lo > 0 and frags[lo - 1].charFormat().isAnchor() \
+                        and frags[lo - 1].charFormat().anchorHref() == href:
+                    lo -= 1
+                while hi + 1 < len(frags) and frags[hi + 1].charFormat().isAnchor() \
+                        and frags[hi + 1].charFormat().anchorHref() == href:
+                    hi += 1
+                return frags[lo].position(), frags[hi].position() + frags[hi].length()
+        return None
+
+    def _range_at(self, vp_pos) -> tuple[int, int] | None:
+        if not self.anchorAt(vp_pos):
+            return None
+        from PySide6.QtCore import QPointF
+        p = QPointF(vp_pos.x() + self.horizontalScrollBar().value(), vp_pos.y() + self.verticalScrollBar().value())
+        hit = self.document().documentLayout().hitTest(p, Qt.HitTestAccuracy.FuzzyHit)
+        for pos in (hit, hit - 1):
+            if pos >= 0:
+                r = self._anchor_range(pos)
+                if r is not None:
+                    return r
+        return None
+
+    def setExtraSelections(self, sels):              # the window's search marks + the link states
+        self._base_sels = list(sels)
+        self._apply_link_states()
+
+    def _link_sel(self, rng, color: str):
+        sel = QTextEdit.ExtraSelection()
+        cur = QTextCursor(self.document())
+        cur.setPosition(rng[0])
+        cur.setPosition(rng[1], QTextCursor.MoveMode.KeepAnchor)
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(color))
+        fmt.setFontUnderline(True)
+        sel.cursor, sel.format = cur, fmt
+        return sel
+
+    def _apply_link_states(self):
+        sels = list(self._base_sels)
+        if self.hover_range is not None and self.hover_range != self.active_range:
+            sels.append(self._link_sel(self.hover_range, t("link-primary-hover")))
+        if self.active_range is not None:
+            sels.append(self._link_sel(self.active_range, t("text-primary")))
+        super().setExtraSelections(sels)
+
+    def clear_link_states(self):
+        """A new document: the ranges of the old one mean nothing."""
+        self.hover_range = self.active_range = self.focus_range = None
+        self._base_sels = []
+        self._apply_link_states()
+        self._sync_palette()
+
+    def _set_hover(self, rng):
+        if rng != self.hover_range:
+            self.hover_range = rng
+            self._apply_link_states()
+
+    def mouseMoveEvent(self, e):
+        super().mouseMoveEvent(e)
+        self._set_hover(self._range_at(e.position().toPoint()))
+
+    def mousePressEvent(self, e):
+        rng = self._range_at(e.position().toPoint()) if e.button() == Qt.MouseButton.LeftButton else None
+        if rng is not None:
+            self.active_range = rng
+            self._apply_link_states()
+        super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        was = self.active_range
+        self.active_range = None
+        super().mouseReleaseEvent(e)
+        if was is not None:
+            self._apply_link_states()
+
+    def viewportEvent(self, e):
+        if e.type() == QEvent.Type.Leave:
+            self.active_range = None
+            self._set_hover(None)
+            self._apply_link_states()
+        return super().viewportEvent(e)
+
+    def _sync_focus_link(self):
+        """Tab / Shift+Tab select a link: show it as Carbon's focused link (outline), not as selected text."""
+        cur = self.textCursor()
+        rng = None
+        if cur.hasSelection():
+            r = self._anchor_range(cur.selectionStart())
+            if r is not None and r == (cur.selectionStart(), cur.selectionEnd()):
+                rng = r
+        if rng != self.focus_range:
+            self.focus_range = rng
+            self._sync_palette()
+            self.viewport().update()
+
+    def _sync_palette(self):
+        pal = self.palette()
+        saved = getattr(self, "_sel_colors", None)
+        if self.focus_range is not None:
+            if saved is None:
+                self._sel_colors = (QColor(pal.color(pal.ColorRole.Highlight)),
+                                    QColor(pal.color(pal.ColorRole.HighlightedText)))
+            pal.setColor(pal.ColorRole.Highlight, QColor(0, 0, 0, 0))
+            pal.setColor(pal.ColorRole.HighlightedText, QColor(t("link-primary")))
+        elif saved is not None:
+            pal.setColor(pal.ColorRole.Highlight, saved[0])
+            pal.setColor(pal.ColorRole.HighlightedText, saved[1])
+            self._sel_colors = None
+        else:
+            return
+        self.setPalette(pal)
+
+    def link_rects(self, rng) -> list:
+        """Viewport rectangles of a link's text, one per line it wraps over."""
+        doc = self.document()
+        rects: list[QRectF] = []
+        cur = QTextCursor(doc)
+        line_top = None
+        for pos in range(rng[0], rng[1] + 1):
+            cur.setPosition(pos)
+            r = self.cursorRect(cur)
+            if line_top is None or abs(r.top() - line_top) > 2:
+                line_top = r.top()
+                rects.append(QRectF(r.left(), r.top(), 0, r.height()))
+            else:
+                last = rects[-1]
+                last.setRight(r.left())
+        return [r for r in rects if r.width() > 0]
+
+    # ------------------------------------------------------------------ notifications (callouts)
+    def callout_boxes(self) -> list:
+        """``(kind, rect)`` of every notification callout in viewport coordinates.  A callout is the 3-column table
+        whose middle cell holds the ``notify:<kind>`` status icon (docs.article_html)."""
+        from PySide6.QtGui import QTextTable
+        doc = self.document()
+        lay = doc.documentLayout()
+        dx, dy = self.horizontalScrollBar().value(), self.verticalScrollBar().value()
+        out = []
+        stack = list(doc.rootFrame().childFrames())
+        while stack:
+            frame = stack.pop(0)
+            stack.extend(frame.childFrames())
+            if not isinstance(frame, QTextTable) or frame.columns() != 3 or frame.rows() != 1:
+                continue
+            kind = self._callout_kind(frame)
+            if kind is not None:
+                # The bounding rect includes the table's CSS margins, but Qt lays the cell row out at its top: both the
+                # top and the bottom margin lie below the cells (measured on every callout of the documentation).
+                f = frame.format()
+                r = lay.frameBoundingRect(frame).adjusted(f.leftMargin(), 0, -f.rightMargin(),
+                                                          -(f.topMargin() + f.bottomMargin()))
+                out.append((kind, r.translated(-dx, -dy)))
+        return out
+
+    @staticmethod
+    def _callout_kind(table) -> str | None:
+        cell = table.cellAt(0, 1)
+        block = cell.firstCursorPosition().block()
+        end = cell.lastCursorPosition().block()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                fmt = it.fragment().charFormat()
+                if fmt.isImageFormat():
+                    name = fmt.toImageFormat().name()
+                    if name.startswith("notify:"):
+                        return name.split(":", 1)[1]
+                it += 1
+            if block == end:
+                break
+            block = block.next()
+        return None
+
+    @staticmethod
+    def callout_colors(kind: str) -> tuple[str, str, str]:
+        """(surface, accent, edge): the app's InlineNotification rule - ``notification-<kind>-bg``, a 3 px
+        ``support-<kind>`` accent and a 1 px ``support-<kind>`` edge at 40 % over the surface (pre-blended)."""
+        k = THEME.tokens
+        bg, acc = k[f"notification-{kind}-bg"], k[f"support-{kind}"]
+        a, b = QColor(acc), QColor(bg)
+        edge = QColor(round(0.4 * a.red() + 0.6 * b.red()), round(0.4 * a.green() + 0.6 * b.green()),
+                      round(0.4 * a.blue() + 0.6 * b.blue()))
+        return bg, acc, edge.name()
+
+    def paintEvent(self, e):
+        # Notification callouts are painted here, not by rich-text CSS: the document lays them out at fractional
+        # positions (line heights of 110 %), where Qt's table borders anti-alias into two-row smears and its collapsed
+        # cell borders leave a step at the accent.  Surface first (the text is painted over it), then the edges and the
+        # 3 px accent - all snapped to whole device pixels with one rectangle, so the four sides always meet.
+        boxes = self.callout_boxes()
+        if boxes:
+            p = QPainter(self.viewport())
+            for kind, r in boxes:
+                crisp.fill_rect(p, r, self.callout_colors(kind)[0])
+            p.end()
+        super().paintEvent(e)
+        if boxes:
+            p = QPainter(self.viewport())
+            for kind, r in boxes:
+                _bg, acc, edge = self.callout_colors(kind)
+                crisp.frame(p, r, 1, edge)
+                crisp.fill_rect(p, QRectF(r.left(), r.top(), 3, r.height()), acc)
+            p.end()
+        if self.focus_range is not None and self.hasFocus():
+            p = QPainter(self.viewport())
+            for r in self.link_rects(self.focus_range):
+                crisp.frame(p, r.adjusted(-1, 0, 1, 0), 1, t("focus"))
+            p.end()
+
+    def focusOutEvent(self, e):
+        super().focusOutEvent(e)
+        self.viewport().update()
 
     def loadResource(self, kind, url):
         """Screenshots are scaled here, smoothly and at the screen's device-pixel ratio, to the width the article
         gives them - QTextDocument would otherwise scale the full-size capture with a fast, jagged transform."""
         if kind == QTextDocument.ResourceType.ImageResource.value or kind == QTextDocument.ResourceType.ImageResource:
             name = url.toString()
+            if name.startswith("notify:"):                # callout status icon: the notification's own icon
+                from . import icons
+                kind_ = name.split(":", 1)[1]
+                return icons.pixmap(f"notify_{kind_}", size=20, dpr=self.devicePixelRatioF(),
+                                    color=None)
             path = docs.DOCS_DIR / name
             size = docs.png_size(path)
             if size:
@@ -259,8 +508,11 @@ table.data th {{ background-color: {k['layer-accent-01'] if 'layer-accent-01' in
                  font-weight: 600; color: {k['text-primary']}; }}
 table.data td {{ border-bottom: 1px solid {k['border-subtle-01']}; color: {k['text-primary']}; }}
 table.callout {{ margin-top: 4px; margin-bottom: 16px; }}
-td.bar {{ background-color: {k['border-interactive']}; }}
-td.note {{ background-color: {k['layer-01']}; padding: 12px 16px 0px 16px; }}
+/* the callout's surface, 3 px accent and 1 px edges are painted by HelpBrowser.paintEvent (device pixels) */
+td.icon {{ padding-top: 14px; padding-left: 13px; padding-right: 12px; padding-bottom: 14px; }}
+td.note {{ color: {k['text-primary']}; padding: 15px 16px 15px 0px; }}
+p.np {{ margin-top: 0px; margin-bottom: 8px; }}
+p.nlast {{ margin-top: 0px; margin-bottom: 0px; }}
 h2.related {{ margin-top: 32px; }}
 table.prevnext {{ margin-top: 32px; border-top: 1px solid {k['border-subtle-01']}; }}
 td.pn {{ padding-top: 16px; padding-bottom: 24px; }}
@@ -296,12 +548,22 @@ class HelpWindow(QWidget):
         hl = QHBoxLayout(header)
         hl.setContentsMargins(0, 0, 8, 0)
         hl.setSpacing(0)
-        self.home_btn = IconButton("home", "Documentation Home", header)
-        self.home_btn.setFixedSize(HEADER_HEIGHT, HEADER_HEIGHT)
-        self.home_btn.clicked.connect(lambda: self.open(docs.HOME))
-        self.home_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
-        hl.addWidget(self.home_btn)
-        hl.addSpacing(NAV_WIDTH - HEADER_HEIGHT)
+        # Back / Forward (2026-10-28): Carbon ghost icon buttons over the contents column, their icons on the
+        # contents' text line (x = 16)
+        navbar = QWidget(header)
+        navbar.setFixedWidth(NAV_WIDTH)
+        nl = QHBoxLayout(navbar)
+        nl.setContentsMargins(NAV_BUTTON_X, 0, 0, 0)
+        nl.setSpacing(0)
+        self.back_btn = IconButton("arrow_left", "Back (Alt+Left)", navbar)
+        self.forward_btn = IconButton("arrow_right", "Forward (Alt+Right)", navbar)
+        for b in (self.back_btn, self.forward_btn):
+            b.setFixedSize(NAV_BUTTON, NAV_BUTTON)
+            nl.addWidget(b)
+        self.back_btn.setAccessibleName("Back")
+        self.forward_btn.setAccessibleName("Forward")
+        nl.addStretch(1)
+        hl.addWidget(navbar)
         self.search = QLineEdit(header)
         self.search.setObjectName("HelpSearch")
         self.search.setPlaceholderText("Search documentation")
@@ -335,6 +597,14 @@ class HelpWindow(QWidget):
         self.search.installEventFilter(self)
         self.nav.page_activated.connect(lambda pid: self.open(pid))
         self.view.link.connect(self.follow)
+        # navigation history: articles visited (page, anchor, scroll position); a new page after Back drops the
+        # forward branch.  Search result listings are not entries - the hit that is opened is.
+        self.history: list[dict] = []
+        self.history_pos = -1
+        self.back_btn.clicked.connect(self.back)
+        self.forward_btn.clicked.connect(self.forward)
+        QShortcut(QKeySequence("Alt+Left"), self, activated=self.back)
+        QShortcut(QKeySequence("Alt+Right"), self, activated=self.forward)
         QShortcut(QKeySequence.StandardKey.Find, self, activated=self._focus_search)
         QShortcut(QKeySequence("Alt+Home"), self, activated=lambda: self.open(docs.HOME))
         QShortcut(QKeySequence("F1"), self, activated=lambda: self.open(docs.HOME))
@@ -350,12 +620,19 @@ class HelpWindow(QWidget):
         self.nav.setFocus(Qt.FocusReason.OtherFocusReason)
 
     # ------------------------------------------------------------------ styling
+    def set_base_sheet(self, sheet: str) -> None:
+        """The main window's window-scoped sheet: Help is unowned (its own taskbar button), so it does not inherit
+        it; its own rules below are appended, never replaced."""
+        self.base_sheet = sheet
+        self._apply_style()
+
     def _apply_style(self):
         k = THEME.tokens
         self.setStyleSheet(
-            f"#HelpWindow, #HelpHeader {{ background: {k['background']}; }}"
-            f"#HelpNav {{ background: {k['background']}; border: none; outline: none; }}"
-            f"#HelpBrowser {{ background: {k['background']}; border: none; }}")
+            getattr(self, "base_sheet", "") +
+            f"#HelpWindow, #HelpHeader {{ background: {k['shell']}; }}"
+            f"#HelpNav {{ background: {k['shell']}; border: none; outline: none; }}"
+            f"#HelpBrowser {{ background: {k['shell']}; border: none; }}")
         self.view.document().setDefaultStyleSheet(stylesheet())
 
     def _theme_changed(self, *_):
@@ -363,9 +640,12 @@ class HelpWindow(QWidget):
         self._rerender()
 
     # ------------------------------------------------------------------ navigation
-    def open(self, page: str, anchor: str = "", highlight: list[str] | None = None) -> None:
+    def open(self, page: str, anchor: str = "", highlight: list[str] | None = None, _scroll: int | None = None,
+             _record: bool = True) -> None:
         """Show ``page`` (an id, alias or help:// URL) scrolled to ``anchor``; unknown targets show Home."""
         route = docs.resolve(page) or docs.Route(docs.HOME)
+        if _record:
+            self._record(route.page, anchor or route.anchor)
         self.page = route.page
         self.anchor = anchor or route.anchor
         self._highlight = list(highlight or [])
@@ -376,6 +656,57 @@ class HelpWindow(QWidget):
             self.query = ""
         self.nav.select_page(self.page)
         self._render_page()
+        if _scroll is not None:
+            bar = self.view.verticalScrollBar()
+            QTimer.singleShot(0, lambda: bar.setValue(min(_scroll, bar.maximum())))
+        self._sync_history_buttons()
+
+    # ------------------------------------------------------------------ history
+    def _save_scroll(self) -> None:
+        if 0 <= self.history_pos < len(self.history) and not self.query:
+            self.history[self.history_pos]["scroll"] = self.view.verticalScrollBar().value()
+
+    def _record(self, page: str, anchor: str) -> None:
+        """A new location: keeps the current one's scroll position, drops the forward branch, and never adds the
+        same location twice in a row (re-opening the current page is not a step back)."""
+        cur = self.history[self.history_pos] if 0 <= self.history_pos < len(self.history) else None
+        if cur is not None and cur["page"] == page and cur["anchor"] == anchor:
+            return
+        self._save_scroll()
+        del self.history[self.history_pos + 1:]
+        self.history.append({"page": page, "anchor": anchor, "scroll": 0})
+        self.history_pos = len(self.history) - 1
+
+    def can_go_back(self) -> bool:
+        return self.history_pos > 0
+
+    def can_go_forward(self) -> bool:
+        return self.history_pos < len(self.history) - 1
+
+    def _go(self, step: int) -> None:
+        pos = self.history_pos + step
+        if not 0 <= pos < len(self.history):
+            return
+        self._save_scroll()
+        self.history_pos = pos
+        e = self.history[pos]
+        if self.query:                                  # leave the search listing for the article
+            self.search.blockSignals(True)
+            self.search.clear()
+            self.search.blockSignals(False)
+            self.query = ""
+        self.open(e["page"], "", None, _scroll=e["scroll"], _record=False)
+        self.anchor = e["anchor"]                       # kept for re-renders; the saved position wins
+
+    def back(self) -> None:
+        self._go(-1)
+
+    def forward(self) -> None:
+        self._go(1)
+
+    def _sync_history_buttons(self) -> None:
+        self.back_btn.setEnabled(self.can_go_back())
+        self.forward_btn.setEnabled(self.can_go_forward())
 
     def follow(self, href: str) -> None:
         if href.startswith(("http://", "https://", "mailto:")):
@@ -410,6 +741,7 @@ class HelpWindow(QWidget):
         doc.setDefaultStyleSheet(stylesheet())
         doc.setDocumentMargin(0)
         self.view.setHtml(html_text)
+        self.view.clear_link_states()
         fmt = doc.rootFrame().frameFormat()
         fmt.setLeftMargin(CONTENT_MARGIN)
         fmt.setRightMargin(CONTENT_MARGIN)

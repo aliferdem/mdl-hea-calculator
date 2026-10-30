@@ -11,20 +11,25 @@ Explore a region of composition space systematically. Select the elements, give 
 |---|---|
 | **Range basis** (panel heading) | The representation of Min, Max and Step: **At. ratio**, **at.%**, **wt.%** or **Mass**. Changing it resets the ranges to the defaults of the new basis. |
 | Element symbol | Type a new symbol to replace the element and keep its range. A duplicate or unknown symbol is reported in the footer. |
+| **Add element** (+, footer) | Adds a blank row with the cursor in its symbol field: type a symbol and press **Enter** to add the element (as if you had clicked its tile) and get the next blank row; **Esc**, or leaving the row empty, closes it. A blank row is never part of the space. |
+| **Remove element** | Right-click any field of an element's row and select **Remove element** — the same as clicking its selected tile. |
 | **Min**, **Max**, **Step** | The values of an element are Min, Min + Step, Min + 2 × Step, … up to Max, handled as exact decimals. With Min = Max the element has one value. |
 | **Lock** | On: the element is required in every composition. Off: optional — systems with and without it are generated. |
 | **All:** row | A value typed in its Min, Max or Step sets every element; its Lock switches every element. "Mixed" means the rows differ. |
-| **System size** | Keeps only systems with the chosen numbers of elements; **All** keeps every size. See [System Size and Element Constraints](help://system-size). |
+| **System size** | Keeps only systems with the chosen numbers of elements; **All** keeps every size. When every element is locked, every system contains all N elements, so System size shows N and cannot be changed; unlocking or removing an element makes it selectable again. See [System Size and Element Constraints](help://system-size). |
 | **Workload summary** | The exact number of valid compositions with the estimated runtime and temporary storage. |
 
 ### Range bases and defaults
 
 | Range basis | Defaults (Min, Max, Step) | What counts as a valid composition |
 |---|---|---|
-| **At. ratio** | 1.0, 1.0, 0.1 | Every combination; a combination proportional to one already generated (2 : 2 : 2 after 1 : 1 : 1) is the same alloy and counted once. |
+| **At. ratio** | 1.0, 2.0, 0.1 | Every combination; a combination proportional to one already generated (2 : 2 : 2 after 1 : 1 : 1) is the same alloy and counted once. |
 | **at.%** | 0, 100, 10 | Only combinations whose values add up to exactly 100 at.%. |
 | **wt.%** | 0, 100, 10 | Only combinations whose values add up to exactly 100 wt.%; each is converted to atomic fractions. |
-| **Mass** | 1.0, 1.0, 0.1 (g) | Like At. ratio: masses are proportional, so proportional combinations are counted once. |
+| **Mass** | 1.0, 2.0, 0.1 (g) | Like At. ratio: masses are proportional, so proportional combinations are counted once. |
+
+There is no balance element in a composition space: in at.% and wt.% every element keeps its own grid, and only the
+combinations that sum to 100 are kept.
 
 Whatever the basis, every generated composition is converted to atomic fractions before calculation. The values
 you entered are kept with each result, so plots of a composition space can use the grid coordinates of the chosen

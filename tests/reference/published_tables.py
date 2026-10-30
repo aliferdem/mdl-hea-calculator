@@ -419,6 +419,8 @@ YE_2015_TABLE_S1 = (
 
 #: Ye et al. (2015, Intermetallics) supplementary Tables S1 and S3: |S_E| in kB per atom at packing
 #: fractions 0.68 and 0.74. Rows the tables print twice are listed once.
+#: Verified 2026-10-28 against the publisher's SI file (Model Sources: 1-s2.0-S0966979514003239-mmc1.docx):
+#: all 174 rows equal, 0 differences (docs/analysis-redesign/YE_INTERMETALLICS_SOURCE_VERIFICATION_2026-10-28.md).
 YE_2015_INTERMETALLICS_EXCESS_ENTROPY = (
     {"formula": "CoCrCu0.5FeNi", "excess_entropy_068": 0.0019, "excess_entropy_074": 0.003, "phase": "FCC"},
     {"formula": "FeCoNiCrCu", "excess_entropy_068": 0.0029, "excess_entropy_074": 0.0047, "phase": "FCC"},

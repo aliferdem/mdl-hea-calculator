@@ -135,22 +135,57 @@ def session_roots() -> list[Path]:
     return roots
 
 
+SESSION_GRACE_S = 120          # a session folder this young may still be opening its database
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x1000, False, pid)          # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            return bool(k32.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259     # STILL_ACTIVE
+        finally:
+            k32.CloseHandle(h)
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def cleanup_stale_sessions(root: Path, keep: Path | None = None) -> int:
-    """Delete session folders left by sessions that are no longer running; returns how many."""
+    """Delete session folders left by sessions that are no longer running; returns how many.
+
+    A folder is kept while its owner process is alive, and while it is younger than ``SESSION_GRACE_S``.  (On
+    Windows the open database file used to be the only guard - but a new session holds just ``owner.pid`` until
+    its database opens, and a second instance starting at that moment deleted it: "unable to open database
+    file".)  Windows still refuses to delete a file another process has open."""
     removed = 0
     if not root.is_dir():
         return 0
+    now = time.time()
     for d in root.glob("session-*"):
         if keep is not None and d.resolve() == keep.resolve():
             continue
         pid_file = d / "owner.pid"
-        if os.name != "nt":
-            try:
-                pid = int(pid_file.read_text().split()[0])
-                os.kill(pid, 0)
+        try:
+            parts = pid_file.read_text().split()
+            if _pid_alive(int(parts[0])):
                 continue                      # owner alive
-            except (OSError, ValueError, IndexError):
-                pass
+            if len(parts) > 1 and now - float(parts[1]) < SESSION_GRACE_S:
+                continue                      # just created (pid reuse / clock edge): leave it alone
+        except (OSError, ValueError, IndexError):
+            try:
+                if now - d.stat().st_mtime < SESSION_GRACE_S:
+                    continue                  # no owner file yet: being created
+            except OSError:
+                continue
         try:
             # Windows refuses to delete a file another process has open: a live session survives.
             for f in sorted(d.iterdir(), key=lambda p: p.name != "results.sqlite"):
@@ -211,6 +246,11 @@ _SCHEMA = [
     "CREATE TABLE IF NOT EXISTS families(family_id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, size INTEGER)",
     _RESULTS_DDL,
 ]
+
+
+def trash_table(op: int) -> str:
+    """The table holding the rows of one undoable removal (``op``) until it is undone or purged."""
+    return f"trash_{int(op)}"
 
 
 def design_table(run_id: int) -> str:
@@ -666,6 +706,154 @@ class _WriterCore:
         self.in_txn = False
         return removed
 
+    # -------------------------------------------------------------- reversible removal (Undo / Redo)
+    # A removal the user can undo moves its rows into ``trash_<op>`` (same schema as ``results``, so either can
+    # become the other by RENAME) instead of deleting them.  Every step costs the *smaller* side: clearing the
+    # whole table renames ``results`` (O(1), however large the session) and moves back only rows outside the
+    # range; undo swaps or merges in whichever direction copies fewer rows.  Rows never pass through Python, and
+    # a 4 GB session is never duplicated.  Design rows stay in place until the removal is purged (queries reach
+    # them only through ``results``).  ``purge_trash`` deletes for good when the operation leaves the undo stack.
+    def _trash_create(self, t: str) -> None:
+        self._con.execute(_RESULTS_DDL.replace("results(", f"{q(t)}(", 1))
+
+    def _table_exists(self, name: str) -> bool:
+        return self._con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                                 (name,)).fetchone() is not None
+
+    def _id_bounds(self, table: str) -> tuple:
+        """MIN / MAX of the primary key in two queries: SQLite answers a lone MIN() or MAX() from the B-tree in
+        O(log n), but ``SELECT MIN(x), MAX(x)`` in one statement scans the table (437 ms at 1 M rows)."""
+        con = self._con
+        lo = con.execute(f"SELECT MIN(result_id) FROM {q(table)}").fetchone()[0]
+        hi = con.execute(f"SELECT MAX(result_id) FROM {q(table)}").fetchone()[0]
+        return lo, hi
+
+    def _txn(self):
+        con = self._con
+        con.execute("BEGIN")
+        self.in_txn = True
+        self._txn_first_id = self.next_id
+
+    def do_trash_ids(self, op: int, ids: list[int]) -> int:
+        con, t = self._con, trash_table(op)
+        self._txn()
+        try:
+            if not self._table_exists(t):
+                self._trash_create(t)
+            moved = 0
+            for i in range(0, len(ids), 500):
+                part = ids[i:i + 500]
+                marks = ",".join("?" * len(part))
+                con.execute(f"INSERT INTO {q(t)} SELECT * FROM results WHERE result_id IN ({marks})", part)
+                moved += con.execute(f"DELETE FROM results WHERE result_id IN ({marks})", part).rowcount
+            con.execute("COMMIT")
+        except Exception:
+            self.rollback()
+            raise
+        self.in_txn = False
+        return moved
+
+    def do_trash_range(self, op: int, lo: int, hi: int) -> dict:
+        """Move ids ``lo..hi`` to ``trash_<op>``; runs wholly inside are marked cleared (as :meth:`do_clear`)."""
+        con, t = self._con, trash_table(op)
+        # which side is smaller decides only the cost, never the result: estimate it from the primary key (O(log n))
+        # instead of COUNT(*) scans, which alone cost ~0.3 s per million rows on the GUI's wait
+        first, last = self._id_bounds("results")
+        if first is None:
+            inside_est = outside_est = 0
+        else:
+            inside_est = max(0, min(hi, last) - max(lo, first) + 1)
+            outside_est = (last - first + 1) - inside_est
+        whole = first is None or (lo <= first and last <= hi)
+        runs = [r[0] for r in con.execute(
+            "SELECT run_id FROM runs WHERE cleared IS NULL AND first_id IS NOT NULL AND first_id >= ? AND last_id <= ?",
+            (lo, hi))]
+        self._txn()
+        try:
+            if self._table_exists(t):
+                con.execute(f"DROP TABLE {q(t)}")
+            if whole or outside_est <= inside_est:
+                con.execute(f"ALTER TABLE results RENAME TO {q(t)}")          # O(1): no row is copied
+                con.execute(_RESULTS_DDL)
+                if not whole:
+                    con.execute(f"INSERT INTO results SELECT * FROM {q(t)} WHERE result_id NOT BETWEEN ? AND ?",
+                                (lo, hi))
+                    con.execute(f"DELETE FROM {q(t)} WHERE result_id NOT BETWEEN ? AND ?", (lo, hi))
+            else:
+                self._trash_create(t)
+                con.execute(f"INSERT INTO {q(t)} SELECT * FROM results WHERE result_id BETWEEN ? AND ?", (lo, hi))
+                con.execute("DELETE FROM results WHERE result_id BETWEEN ? AND ?", (lo, hi))
+            for run_id in runs:
+                con.execute("UPDATE runs SET cleared=? WHERE run_id=?", (_now(), run_id))
+            con.execute("COMMIT")
+        except Exception:
+            self.rollback()
+            raise
+        self.in_txn = False
+        return {"removed_estimate": inside_est, "runs": runs}
+
+    def do_restore_trash(self, op: int, runs: list[int]) -> int:
+        """Undo: the trashed rows return to ``results`` (swap or merge, whichever copies fewer rows)."""
+        con, t = self._con, trash_table(op)
+        if not self._table_exists(t):
+            return 0
+        def size(table: str) -> int:              # id-range estimate from the primary key: O(log n)
+            a, b = self._id_bounds(table)
+            return 0 if a is None else b - a + 1
+        n_t, n_r = size(t), size("results")
+        self._txn()
+        try:
+            if n_r <= n_t:
+                if n_r:
+                    con.execute(f"INSERT INTO {q(t)} SELECT * FROM results")
+                con.execute("DROP TABLE results")
+                con.execute(f"ALTER TABLE {q(t)} RENAME TO results")
+            else:
+                con.execute(f"INSERT INTO results SELECT * FROM {q(t)}")
+                con.execute(f"DROP TABLE {q(t)}")
+            for run_id in runs:
+                con.execute("UPDATE runs SET cleared=NULL WHERE run_id=?", (run_id,))
+            con.execute("COMMIT")
+        except Exception:
+            self.rollback()
+            raise
+        self.in_txn = False
+        return n_t
+
+    def do_purge_trash(self, op: int, cleared_runs: list[int]) -> int:
+        """Delete a trashed removal for good (it left the undo stack): its rows and their design rows."""
+        con, t = self._con, trash_table(op)
+        if not self._table_exists(t):
+            return 0
+        self._txn()
+        try:
+            n = con.execute(f"SELECT COUNT(*) FROM {q(t)}").fetchone()[0]
+            for (run_id,) in con.execute(f"SELECT DISTINCT run_id FROM {q(t)}").fetchall():
+                if not self._has_design(run_id):
+                    continue
+                if run_id in cleared_runs:
+                    con.execute(f"DROP TABLE IF EXISTS {q(design_table(run_id))}")
+                else:
+                    con.execute(f"DELETE FROM {q(design_table(run_id))} WHERE result_id IN "
+                                f"(SELECT result_id FROM {q(t)})")
+            con.execute(f"DROP TABLE {q(t)}")
+            con.execute("COMMIT")
+        except Exception:
+            self.rollback()
+            raise
+        self.in_txn = False
+        if con.execute("SELECT 1 FROM results LIMIT 1").fetchone() is None and not self._trash_tables():
+            try:                                  # nothing left anywhere: give the space back (as do_clear)
+                con.execute("VACUUM")
+                con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error:
+                pass
+        return n
+
+    def _trash_tables(self) -> list[str]:
+        return [r[0] for r in self._con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'trash!_%' ESCAPE '!'")]
+
     def _has_design(self, run_id: int) -> bool:
         return self._con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
                                  (design_table(run_id),)).fetchone() is not None
@@ -717,6 +905,8 @@ class _WriterCore:
             # a run still open was interrupted (application closed): its committed rows form a valid
             # partial run, recoverable from the file if it is kept
             self._con.execute("UPDATE runs SET status='interrupted', finished=? WHERE status='running'", (_now(),))
+            for t in self._trash_tables():        # pending undoable removals are final when the session ends
+                self._con.execute(f"DROP TABLE IF EXISTS {q(t)}")
             self._con.execute("INSERT OR REPLACE INTO meta VALUES('next_result_id', ?)", (str(self.next_id),))
             self._con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         except sqlite3.Error:
@@ -1132,6 +1322,11 @@ class ResultRecord:
             return self.name
         if key == "composition":
             return self.v[_I_COMP] or ""
+        if key == "run":
+            return self.v[_I_RUN]
+        if key == "variables":
+            from .results import variables_text
+            return variables_text(self.reader.design_values(self))
         i = COL.get(key)
         return None if i is None else self.v[i]
 
@@ -1275,6 +1470,30 @@ class Reader:
             yield from self.records(rows)
             last = rows[-1][0]
 
+    def iter_range_desc(self, lo: int, hi: int, chunk: int = 2000) -> Iterator[ResultRecord]:
+        """Results ``hi..lo`` - newest first (keyset paging)."""
+        last = hi + 1
+        while True:
+            rows = self.con.execute(f"SELECT {_SELECT} FROM results WHERE result_id < ? AND result_id >= ? "
+                                    f"ORDER BY result_id DESC LIMIT ?", (last, lo, chunk)).fetchall()
+            if not rows:
+                return
+            yield from self.records(rows)
+            last = rows[-1][0]
+
+    def iter_view_desc(self, table: str, chunk: int = 2000, schema: str = "vw") -> Iterator[ResultRecord]:
+        """Results of a materialised view in reverse view order."""
+        last = None
+        while True:
+            cond, args = ("v.pos < ?", (last,)) if last is not None else ("1", ())
+            rows = self.con.execute(f"SELECT v.pos, {_SELECT_R} FROM {schema}.{q(table)} v JOIN results r "
+                                    f"ON r.result_id = v.rid WHERE {cond} ORDER BY v.pos DESC LIMIT ?",
+                                    (*args, chunk)).fetchall()
+            if not rows:
+                return
+            yield from self.records(rows, with_pos=True)
+            last = rows[-1][0]
+
     def iter_query(self, lo: int, hi: int, where: str = "", params: tuple = (), order: str = "result_id",
                    chunk: int = 2000) -> Iterator[ResultRecord]:
         """Results ``lo..hi`` passing ``where`` in ``order`` - one statement streamed ``chunk`` rows at a
@@ -1314,6 +1533,50 @@ class Reader:
         except sqlite3.OperationalError:
             return {}
         return {a["name"]: v for a, v in zip(cols, row or ()) if v is not None}
+
+    DESIGN_VALUE_KINDS = ("variable", "element")
+
+    def _design_value_axes(self, run_id: int) -> list[dict]:
+        """The stored design axes that distinguish results within a run (expression variables, composition-space
+        grid values), in their stored order - never the derived atomic fractions."""
+        info = self.run(run_id)
+        return [a for a in (info.axes if info else []) if a.get("col") and a.get("kind") in self.DESIGN_VALUE_KINDS]
+
+    def design_values(self, rec: ResultRecord) -> dict:
+        """The values that distinguish a result within its run (Variables column, 2026-10-28): expression
+        variables, or composition-space grid values - never the derived atomic fractions; empty otherwise."""
+        names = {a["name"] for a in self._design_value_axes(rec.run_id)}
+        if not names:
+            return {}
+        return {k: v for k, v in self.design(rec).items() if k in names}
+
+    BATCH_PARAMS = 900                    # result ids per IN (...) list (well under SQLite's parameter limit)
+
+    def design_values_batch(self, recs) -> dict[int, dict]:
+        """:meth:`design_values` for many records at once (export, 2026-10-29): one query per run and per
+        ``BATCH_PARAMS`` ids - never one query per row.  Results without design values (single compositions,
+        imports, a missing design row, NULL values) map to ``{}``; runs without design axes issue no query."""
+        by_run: dict[int, list[int]] = {}
+        for r in recs:
+            by_run.setdefault(r.run_id, []).append(r.id)
+        out: dict[int, dict] = {}
+        for run_id, ids in by_run.items():
+            axes = self._design_value_axes(run_id)
+            for rid in ids:
+                out[rid] = {}
+            if not axes:
+                continue
+            cols = ", ".join(q(a["col"]) for a in axes)
+            for i in range(0, len(ids), self.BATCH_PARAMS):
+                part = ids[i:i + self.BATCH_PARAMS]
+                try:
+                    rows = self.con.execute(f"SELECT result_id, {cols} FROM {q(design_table(run_id))} "
+                                            f"WHERE result_id IN ({','.join('?' * len(part))})", part).fetchall()
+                except sqlite3.OperationalError:          # no design table (cleared run): no values
+                    continue
+                for row in rows:
+                    out[row[0]] = {a["name"]: v for a, v in zip(axes, row[1:]) if v is not None}
+        return out
 
     def variables(self, rec: ResultRecord) -> dict:
         info = self.run(rec.run_id)
@@ -1375,6 +1638,8 @@ def order_sql(key: str | None, descending: bool) -> str:
     if key in ("name", "composition"):
         col = "name" if key == "name" else "comp"
         return f"{q(col)}{d}, result_id"
+    if key == "run":
+        return f"run_id{d}, result_id"
     if key in NUM_KEYS:
         return f"(err != 0 OR {q(key)} IS NULL), {q(key)}{d}, result_id"
     if key in MODEL_KEYS or key in TEXT_KEYS:
@@ -1474,6 +1739,27 @@ class ResultRepository:
 
     def delete_results(self, ids: Sequence[int]) -> int:
         return self.writer.call("delete", sorted(set(int(i) for i in ids)))
+
+    # reversible removal (see _WriterCore.do_trash_range): ``op`` names the undoable operation
+    def trash_results(self, op: int, ids: Sequence[int]) -> int:
+        self.reader._runs.clear()
+        return self.writer.call("trash_ids", int(op), sorted(set(int(i) for i in ids)))
+
+    def trash_range(self, op: int, lo: int, hi: int) -> dict:
+        self.reader._runs.clear()
+        return self.writer.call("trash_range", int(op), int(lo), int(hi), timeout=None)
+
+    def restore_trash(self, op: int, runs: Sequence[int] = ()) -> int:
+        self.reader._runs.clear()
+        return self.writer.call("restore_trash", int(op), [int(r) for r in runs], timeout=None)
+
+    def purge_trash(self, op: int, cleared_runs: Sequence[int] = ()):
+        """Fire and forget: the removal can no longer be undone."""
+        return self.writer.call("purge_trash", int(op), [int(r) for r in cleared_runs], wait=False)
+
+    def trash_tables(self) -> list[str]:
+        return [r[0] for r in self.con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'trash!_%' ESCAPE '!'")]
 
     delete_result = delete_results
 
@@ -1735,11 +2021,20 @@ class ResultView:
         self.last_build_end = 0.0
         self._cache = LRU(4)
         self.streaming = False                 # a calculation is storing rows (re-sorts are paced then)
+        # Without a column sort the table shows the newest result first (the results table sets this; the
+        # dataset order - iterate(), exports - stays the calculation order).  Natural and filtered views are
+        # read backwards: nothing is re-materialised, new rows simply appear at index 0.
+        self.newest_first = False
 
     # -------------------------------------------------------------- state
     @property
     def natural(self) -> bool:
         return not self.filters and self.sort_key is None
+
+    @property
+    def reversed_order(self) -> bool:
+        """Table index 0 is the newest result (no column sort, ``newest_first``)."""
+        return self.newest_first and self.sort_key is None
 
     @property
     def stale(self) -> bool:
@@ -1913,8 +2208,19 @@ class ResultView:
         return p
 
     def page(self, index: int, size: int, natural: bool = False) -> list[ResultRecord]:
-        """Rows ``index .. index+size-1`` of the view - or of the whole workspace in id order when
-        ``natural`` - (bounded cache of a few pages)."""
+        """Rows ``index .. index+size-1`` of the view in table order (newest first without a column sort when
+        ``newest_first``) - or of the whole workspace in id order when ``natural``."""
+        if natural or not self.reversed_order:
+            return self._page_asc(index, size, natural)
+        n = self.count()
+        if index < 0 or size <= 0 or index >= n:
+            return []
+        end = n - 1 - index
+        start = max(0, end - size + 1)
+        return list(reversed(self._page_asc(start, end - start + 1, False)))
+
+    def _page_asc(self, index: int, size: int, natural: bool = False) -> list[ResultRecord]:
+        """Rows ``index .. index+size-1`` in ascending view order (bounded cache of a few pages)."""
         mat = None if natural else self.mat
         key = (mat.token if mat else 0, index, size, self.hi, len(self.removed), len(mat.removed) if mat else 0)
         hit = self._cache.get(key)
@@ -1953,6 +2259,15 @@ class ResultView:
             return rd.iter_range(self.lo, self.hi, chunk)
         return rd.iter_view(self.mat.table, chunk)
 
+    def iterate_table(self, chunk: int = 2000) -> Iterator[ResultRecord]:
+        """Every row in *table* order (newest first without a column sort when ``newest_first``)."""
+        if not self.reversed_order:
+            return self.iterate(False, chunk)
+        rd = self.repo.reader
+        if self.mat is None:
+            return rd.iter_range_desc(self.lo, self.hi, chunk)
+        return rd.iter_view_desc(self.mat.table, chunk)
+
     def __iter__(self) -> Iterator[ResultRecord]:
         return self.iterate()
 
@@ -1974,6 +2289,13 @@ class ResultView:
         return self.repo.reader.iter_query(sp["lo"], sp["hi"], sp["where"], sp["params"], sp["order"])
 
     def position_of(self, rid: int) -> int:
+        """Logical index of result ``rid`` in the view (table order), or -1 (not shown / not found quickly)."""
+        pos = self._position_asc(rid)
+        if pos < 0 or not self.reversed_order:
+            return pos
+        return self.count() - 1 - pos
+
+    def _position_asc(self, rid: int) -> int:
         """Logical index of result ``rid`` in the view, or -1 (not shown / not found quickly)."""
         if not self.is_alive(rid):
             return -1
@@ -2010,13 +2332,17 @@ class ResultView:
         return row[0] if row else 0
 
     # -------------------------------------------------------------- removal / clear
-    def remove(self, records: Sequence[ResultRecord]) -> int:
-        """Delete these results from the dataset and from the view (positions known from the page)."""
+    def remove(self, records: Sequence[ResultRecord], op: int | None = None) -> int:
+        """Delete these results from the dataset and from the view (positions known from the page).  With ``op``
+        the removal is reversible (rows moved to ``trash_<op>``; :meth:`restore_ids` undoes it)."""
         records = list({r.id: r for r in records if self.is_alive(r.id)}.values())    # each result once
         if not records:
             return 0
         positions = [self._verified_position(r) for r in records] if self.mat is not None else []
-        self.repo.delete_results([r.id for r in records])
+        if op is None:
+            self.repo.delete_results([r.id for r in records])
+        else:
+            self.repo.trash_results(op, [r.id for r in records])
         for r in records:
             bisect.insort(self.removed, r.id)
             if self.pending is not None:
@@ -2036,8 +2362,20 @@ class ResultView:
                 return rec.pos
         return self._lookup_position(rec.id, scan_limit=None)
 
-    def remove_ids(self, ids: Sequence[int]) -> int:
-        return self.remove([rec for rec in (self.repo.get_result(i) for i in ids) if rec is not None])
+    def remove_ids(self, ids: Sequence[int], op: int | None = None) -> int:
+        return self.remove([rec for rec in (self.repo.get_result(i) for i in ids) if rec is not None], op)
+
+    def restore_ids(self, ids: Sequence[int]) -> None:
+        """Undo of :meth:`remove` (the repository has restored the rows): they are alive in the view again."""
+        gone = set(int(i) for i in ids)
+        self.removed = [r for r in self.removed if r not in gone]
+        self.rebuild()
+
+    def restore_range(self, lo: int, removed: Sequence[int]) -> None:
+        """Undo of :meth:`clear`: the workspace starts at ``lo`` again (rows added since stay; ids only grow)."""
+        self.lo = min(self.lo, lo)
+        self.removed = sorted(set(self.removed) | set(int(i) for i in removed))
+        self.rebuild()
 
     def hide_all(self) -> tuple[int, int]:
         """Empty the workspace (the rows stay in the database until deleted); returns the old range.
@@ -2051,12 +2389,17 @@ class ResultView:
         self.rebuild()
         return old
 
-    def clear(self) -> None:
-        """Trash: delete every result of the workspace (in the background) and empty the view."""
+    def clear(self, op: int | None = None) -> dict | None:
+        """Trash: delete every result of the workspace (in the background) and empty the view.  With ``op`` the
+        clear is reversible: an O(1) table swap in the writer (:meth:`_WriterCore.do_trash_range`)."""
         lo, hi = self.hide_all()
-        if hi >= lo:
-            self.repo.clear_range(lo, hi)
-            self.repo.builder.submit(ViewTask("vacuum"))
+        if hi < lo:
+            return None
+        if op is not None:
+            return self.repo.trash_range(op, lo, hi)
+        self.repo.clear_range(lo, hi)
+        self.repo.builder.submit(ViewTask("vacuum"))
+        return None
 
 
 _ = (Future,)

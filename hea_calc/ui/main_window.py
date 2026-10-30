@@ -9,6 +9,7 @@ from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QIcon, QKeySeq
 from PySide6.QtWidgets import (QApplication, QFileDialog, QMainWindow, QMessageBox, QScrollArea, QStackedWidget,
                                QVBoxLayout, QWidget)
 
+from ..core import destructive
 from ..core.engine import DEFAULT_TCRIT_FRACTION, Engine, default_engine
 from ..core.export import CLIPBOARD_MAX_ROWS, XLSX_MAX_ROWS, write_records, write_tsv
 from ..core.jobs import CalculationJob, CalculationService, JobInput
@@ -18,10 +19,9 @@ from ..core.repository import RepositoryError, ResultRecord, ResultRepository, u
 from ..core.results import DEFAULT_COLUMNS, COLUMN_BY_KEY, ResultRow, table_tsv
 from ..core.spreadsheet import SpreadsheetError, read_compositions
 from . import icons
-from .theme import (ANALYSIS_STACKED_HEIGHT, ANALYSIS_WIDE_MIN, COMPOSITION_PANEL_MIN, COMPOSITION_PANEL_WIDTH, CONTENT_MARGIN_BOTTOM,
+from .theme import (qss_tokens, ANALYSIS_STACKED_HEIGHT, ANALYSIS_WIDE_MIN, COMPOSITION_PANEL_MIN, COMPOSITION_PANEL_WIDTH, CONTENT_MARGIN_BOTTOM,
                     CONTENT_MARGIN_TOP, CONTENT_MARGIN_X, DETAILS_PANEL_WIDTH, ELEMENT_PANEL_MIN, ELEMENT_PANEL_WIDTH,
                     PANEL_GAP, THEME, TOP_ROW_HEIGHT, stylesheet)
-from .widgets.common import InlineNotification
 from . import system_theme, win_titlebar
 from .preferences import Preferences
 from ..core.analysis import state as AS
@@ -30,10 +30,11 @@ from .analysis.panel import AnalysisPanel
 from .analysis.widgets import stylesheet_rules as analysis_rules
 from .analysis.workspace import AnalysisWorkspace
 from .widgets.composition_panel import CompositionPanel
-from .widgets.dialogs import (AlloyDetailsDialog, ChoiceDialog, ColumnsDialog, FilterDialog,
+from .widgets.dialogs import (ChoiceDialog, ColumnsDialog, FilterDialog,
                               ImportReportDialog, SettingsDialog)
 from .widgets.element_panel import ElementPanel
-from .widgets.header import AppHeader
+from .widgets.header import TitleBar
+from .win_chrome import WinChrome
 from .widgets.layouts import UpperPanels
 from .widgets.menu import CarbonMenu, carbonize_popups
 from .widgets.results_table import PAGE_SIZES, ResultsTable, StickyHeader
@@ -83,11 +84,19 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout(body)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        self.header = AppHeader(self.file_menu, self.theme_menu)
+        # The 32 px title bar (+ its 4 px state line) is the window's caption: native behaviour from win_chrome
+        self.header = TitleBar(self.file_menu, self.view_menu, edit_menu=self.edit_menu, help_menu=self.help_menu)
+        self.titlebar = self.header
         self.header.about_requested.connect(self.show_about)
         self.header.help_requested.connect(lambda: self.show_help("home"))
+        self.header.minimize_requested.connect(self.showMinimized)
+        self.header.maximize_requested.connect(self.toggle_maximized)
+        self.header.close_requested.connect(self.close)
+        self.header.top_panels_toggled.connect(lambda: self.set_top_panels_visible(not self.top_panels_visible()))
+        self.header.exit_fullscreen_requested.connect(lambda: self.set_fullscreen(False))
         root.addWidget(self.header)
-        # calculation / export progress lives in the UI shell header (stable geometry)
+        self.chrome = WinChrome(self, self.header)
+        # calculation / export progress lives in the title bar (stable geometry)
         self.progress = self.header.progress
         self.progress_line = self.progress.bar
         content_w = QWidget()
@@ -96,10 +105,9 @@ class MainWindow(QMainWindow):
         content = QVBoxLayout(content_w)
         content.setContentsMargins(CONTENT_MARGIN_X, CONTENT_MARGIN_TOP, CONTENT_MARGIN_X, CONTENT_MARGIN_BOTTOM)
         content.setSpacing(PANEL_GAP)
-        # Upper area: the design's 596 / 457 / 787 px panels (1920 px frame) as reference widths,
-        # compressed proportionally on narrower windows (Windows 125 % / 150 %) and grown only in
-        # Calculation details on wider ones (responsive.distribute).  Once the three no longer fit at
-        # their minimum widths, Details moves below the other two (widgets/layouts.UpperPanels).
+        # Upper area: fixed Elements (578) and Composition setup (457); Analysis takes the rest of the row, from its
+        # 454 px minimum (805 px preferred, grown beyond on wider windows - responsive.distribute).  Once Analysis
+        # can no longer get its minimum, it moves below the other two (widgets/layouts.UpperPanels).
         self.elements = ElementPanel(self.engine)
         self.composition = CompositionPanel(self.engine.data, engine=self.engine)
         self.composition.set_total_mass(self.prefs.total_mass)
@@ -109,19 +117,35 @@ class MainWindow(QMainWindow):
         self.analysis_ctl.batch_mass = self.prefs.total_mass             # Mass (… g batch) in Analysis
         self.prefs.total_mass_changed.connect(self.analysis_ctl.set_batch_mass)
         self._restore_analysis_tabs()
+        # Composition space: Step size | Points (the Step heading) is remembered between sessions
+        sweep = self.composition.sweep
+        sweep.set_discretization(str(self.prefs.get("composition/space_discretization", "step")), convert=False)
+        sweep.discretization_changed.connect(lambda m: self.prefs.put("composition/space_discretization", m))
         self.analysis_ctl.state_changed.connect(self._remember_analysis_tabs)
         self.analysis = AnalysisPanel(self.analysis_ctl)
         self.details = self.analysis                 # former name, kept for tools and tests
+        # the Analysis slot: the compact panel, or the workspace layout when the slot is wide enough (C4, 2026-10-28)
+        from .analysis.workspace import AnalysisDock
+        self.analysis_dock = AnalysisDock(self.analysis, self.analysis_ctl)
+        self.analysis_dock.layout_changed.connect(self._dock_layout_changed)
         top_w = UpperPanels([(self.elements, ELEMENT_PANEL_WIDTH, ELEMENT_PANEL_MIN, ELEMENT_PANEL_WIDTH),
                              (self.composition, COMPOSITION_PANEL_WIDTH, COMPOSITION_PANEL_MIN,
                               COMPOSITION_PANEL_WIDTH),
-                             (self.details, DETAILS_PANEL_WIDTH, ANALYSIS_WIDE_MIN, None)],
-                            TOP_ROW_HEIGHT, PANEL_GAP, stacked_height=ANALYSIS_STACKED_HEIGHT)
+                             (self.analysis_dock, DETAILS_PANEL_WIDTH, ANALYSIS_WIDE_MIN, None)],
+                            TOP_ROW_HEIGHT, PANEL_GAP, stacked_height=ANALYSIS_STACKED_HEIGHT,
+                            titles=["Elements", "Composition setup", "Analysis"])
         self.top_row = top_w
+        # each panel header's collapse button (Figma Mode=Collapsed); the choice is kept across sessions
+        for i, panel in enumerate((self.elements, self.composition, self.details)):
+            btn = getattr(panel, "collapse_btn", None)
+            if btn is not None:
+                btn.clicked.connect(lambda _c=False, i=i: self.top_row.set_collapsed(i, True))
+        top_w.collapse_changed.connect(self._collapse_changed)
         content.addWidget(top_w)
+        self._top_visible = True
         table_col = QVBoxLayout()
         table_col.setSpacing(0)
-        self.notification = InlineNotification()
+        # messages go to the title bar's status column (HeaderProgress.show_message) - never above the table
         self.progress.cancel.clicked.connect(self.cancel_calculation)
         self.table = ResultsTable(engine=self.engine, repo=self.repo)
         self.analysis_ctl.model = self.table.model
@@ -131,7 +155,6 @@ class MainWindow(QMainWindow):
         self.exporter.finished.connect(self._export_done)
         self.runner.progress.connect(self._progress)
         self.runner.finished.connect(self._done)
-        table_col.addWidget(self.notification)
         table_col.addWidget(self.table, 1)
         content.addLayout(table_col, 1)
         # One primary vertical scrolling context below the fixed header.  The results section
@@ -146,8 +169,10 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         self.pages.addWidget(self.scroll)
         self.workspace = AnalysisWorkspace(self.analysis_ctl)
+        self.workspace.setProperty("carbon_layer", 0)       # the in-window workspace: background (ui/surface.py)
         # the workspace page grows with its content; its one vertical scroll is this page's (7.png, §20)
-        self.workspace.setMinimumWidth(1000)
+        from .analysis.workspace import WORKSPACE_MIN_WIDTH
+        self.workspace.setMinimumWidth(WORKSPACE_MIN_WIDTH)
         self.workspace_scroll = QScrollArea()
         self.workspace_scroll.setObjectName("ContentScroll")
         self.workspace_scroll.setWidgetResizable(True)
@@ -171,13 +196,14 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(body)
         body.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         body.setFocus()  # no control shows a focus ring until the keyboard is used
-        self._notify_timer = QTimer(self)
-        self._notify_timer.setSingleShot(True)
-        self._notify_timer.timeout.connect(self.notification.dismiss)
 
         # wiring: selection ↔ composition
         self.elements.element_toggled.connect(self.composition.element_toggled)
         self.composition.elements_changed.connect(self._composition_elements)
+        # setup edits (2026-10-28): the last recorded state of the composition setup; each finished edit that
+        # changes it becomes one Undo step (ui/undo.SetupEditCommand)
+        self._setup_state = self.composition.undo_state()
+        self.composition.edit_committed.connect(self._setup_committed)
         self.composition.calculate_requested.connect(self.calculate)
         self.composition.message.connect(self.notify)
         self.composition.copy_compositions.connect(self._copy_generated)
@@ -192,7 +218,7 @@ class MainWindow(QMainWindow):
         self.composition.mode_changed.connect(
             lambda mode: self.jobs.warm_up() if mode in ("sweep", "expression") and not self._closed else None)
         # table: double click -> the active composition of Analysis; row menu -> separate details window
-        self.table.view.details_requested.connect(self.show_details)
+        self.table.view.details_requested.connect(self._row_activated)
         self.table.view.window_requested.connect(self.open_details)
         self.table.view.rows_removed.connect(self._check_details)
         self.table.view.removed_ids.connect(self.analysis_ctl.results_removed)
@@ -203,12 +229,14 @@ class MainWindow(QMainWindow):
         self.workspace.back_requested.connect(lambda: self.set_expanded(False))
         ctl.show_in_table.connect(self.show_in_table)
         ctl.report_requested.connect(self.export_report)
+        ctl.window_requested.connect(lambda: self.open_analysis_window())
         ctl.export_requested.connect(self.export_analysis)
         ctl.help_requested.connect(self.show_help)
         self.runner.progress.connect(lambda *_: ctl.rows_committed(self.runner.run_id))
-        self._expand_shortcut = QShortcut(QKeySequence("Ctrl+Shift+E"), self)
-        self._expand_shortcut.activated.connect(lambda: self.set_expanded(self.pages.currentIndex() == 0))
+        # Ctrl+Shift+E is the View > Expand analysis action's shortcut (one command)
         self.table.delete_requested.connect(self.delete_rows)
+        self.table.view.remove_handler = self.remove_results
+        self.composition.clear_handler = self.clear_composition
         self.table.filter_requested.connect(self.edit_filters)
         self.table.columns_requested.connect(self.edit_columns)
         self.table.copy_requested.connect(self.copy_table)
@@ -218,8 +246,14 @@ class MainWindow(QMainWindow):
         self.table.model.state_changed.connect(self._update_status)
         # restore table preferences
         cols = self.settings.value("columns", None)
-        if isinstance(cols, list) and all(c in COLUMN_BY_KEY for c in cols) and "name" in cols:
-            self.table.model.set_keys(cols)
+        if isinstance(cols, list) and "name" in cols:
+            # a stored layout keeps every column that still exists and is still offered (2026-10-28: Composition
+            # (at.%) left Table columns - a layout that had it simply no longer shows it); unknown keys are dropped
+            cols = [c for c in cols if c in COLUMN_BY_KEY and COLUMN_BY_KEY[c].chooser]
+            if "name" in cols:
+                self.table.model.set_keys(cols)
+        self._restore_column_widths()
+        self.table.view.user_widths_changed.connect(self._save_column_widths)
         size = int(self.settings.value("page_size", 100))
         if size in PAGE_SIZES:
             self.table.pagination.size_box.setCurrentIndex(PAGE_SIZES.index(size))
@@ -231,7 +265,22 @@ class MainWindow(QMainWindow):
         # the user's choice and - with System default - the OS colour scheme
         self.apply_theme()
         self._update_status()
-        self._place_progress_line()
+        self._f10 = QShortcut(QKeySequence("F10"), self)
+        self._f10.activated.connect(self._menu_mode)
+        # Alt+F / Alt+E / Alt+V / Alt+H open File / Edit / View / Help (the Windows menu-bar access keys)
+        self._menu_keys = []
+        for key, item in (("Alt+F", self.header.file_item), ("Alt+E", self.header.edit_item),
+                          ("Alt+V", self.header.view_item), ("Alt+H", self.header.help_item)):
+            if item is None:
+                continue
+            sc = QShortcut(QKeySequence(key), self)
+            sc.activated.connect(lambda it=item: it._open(keyboard=True) if it.isVisible() else None)
+            self._menu_keys.append(sc)
+        self.set_top_panels_visible(self.settings.value("top_panels_visible", True, bool), persist=False)
+        saved = self.settings.value("collapsed_panels", "")
+        for part in str(saved or "").split(","):
+            if part.strip().isdigit() and int(part) < 3:
+                self.top_row.set_collapsed(int(part), True)
 
     # ------------------------------------------------------------------ scrolling / layout
     def eventFilter(self, obj, ev):
@@ -240,33 +289,209 @@ class MainWindow(QMainWindow):
             self._sticky_timer.start()
         return super().eventFilter(obj, ev)
 
+    def _remember_normal(self) -> None:
+        """The last geometry seen in the normal state - what Restore returns to.  (``normalGeometry()`` of a
+        maximized window under this chrome is Windows' restore rectangle less frame margins Qt assumes.)"""
+        if not (self.windowState() & (Qt.WindowState.WindowMaximized | Qt.WindowState.WindowMinimized
+                                      | Qt.WindowState.WindowFullScreen)):
+            self._normal_geometry = self.geometry()
+
+    def moveEvent(self, e):
+        super().moveEvent(e)
+        self._remember_normal()
+
     def resizeEvent(self, e):
+        self._remember_normal()
         super().resizeEvent(e)
         if hasattr(self, "_sticky_timer"):
             self._sticky_timer.start()
-        self._place_progress_line()
 
-    def _place_progress_line(self) -> None:
-        """The shell state line sits on the header's bottom edge, across the window (Main window.svg)."""
-        line = getattr(self, "progress_line", None)
-        if line is None:
+    # ------------------------------------------------------------------ window chrome
+    def nativeEvent(self, event_type, message):                 # noqa: N802 - Qt API
+        chrome = getattr(self, "chrome", None)
+        if chrome is not None:
+            handled, result = chrome.native_event(event_type, message)
+            if handled:
+                return True, result
+        return super().nativeEvent(event_type, message)
+
+    # ------------------------------------------------------------------ one Analysis view at work
+    def _dock_layout_changed(self, wide: bool) -> None:
+        """The docked Analysis switched layout: the workspace layout's collapse button collapses the slot like the
+        panel's, and only the layout on screen renders."""
+        ws = self.analysis_dock.workspace
+        if wide and ws is not None and ws.collapse_btn is not None and not getattr(ws, "_collapse_wired", False):
+            ws.collapse_btn.clicked.connect(lambda _c=False: self.top_row.set_collapsed(self.ANALYSIS_PANEL, True))
+            ws.expand_btn.clicked.connect(lambda _c=False: self.set_expanded(True))
+            ws._collapse_wired = True
+        self._sync_view_actions()
+        if hasattr(self, "top_row"):
+            self.top_row._sync_directions()          # a workspace created just now gets the row's icon direction
+        self.schedule_analysis_suspension()
+
+    def schedule_analysis_suspension(self) -> None:
+        t_ = getattr(self, "_suspension_timer", None)
+        if t_ is None:
+            t_ = self._suspension_timer = QTimer(self)
+            t_.setSingleShot(True)
+            t_.setInterval(0)
+            t_.timeout.connect(self.sync_analysis_suspension)
+        t_.start()
+
+    def _owns_active_window(self) -> bool:
+        w = QApplication.activeWindow()
+        while w is not None:
+            if w is self:
+                return True
+            w = w.parentWidget()
+        return False
+
+    def sync_analysis_suspension(self) -> None:
+        """Only the Analysis view in use does work (AnalysisPanel.set_suspended): while the separate Analysis
+        window is open and the main window is not the active one, the embedded panel is suspended; a minimised
+        main window suspends it too; a minimised or hidden Analysis window suspends its own panel."""
+        if getattr(self, "_closed", False) or not hasattr(self, "analysis"):
             return
-        host = self.centralWidget()
-        if line.parent() is not host:
-            line.setParent(host)
-        g = self.header.geometry()
-        line.setGeometry(0, g.bottom() + 1, host.width(), line.HEIGHT)
-        line.raise_()
+        aw = self.analysis_window(create=False)
+        ext_open = aw is not None and aw.isVisible() and not aw.isMinimized()
+        try:
+            dock_wide = getattr(getattr(self, "analysis_dock", None), "wide", False)   # the workspace layout shows
+            self.analysis.set_suspended(self.isMinimized() or dock_wide
+                                        or (ext_open and not self._owns_active_window()))
+            if aw is not None:
+                # the window's compact panel renders only while it is the layout on screen (not the wide one)
+                aw.panel.set_suspended(not ext_open or not aw.compact_shown())
+        except RuntimeError:                          # shutting down
+            pass
+
+    def changeEvent(self, e):
+        super().changeEvent(e)
+        if e.type() in (QEvent.Type.WindowStateChange, QEvent.Type.ActivationChange):
+            self.schedule_analysis_suspension()
+        if e.type() == QEvent.Type.WindowStateChange and hasattr(self, "header"):
+            self.header.set_maximized(bool(self.windowState() & Qt.WindowState.WindowMaximized))
+            fs = self.isFullScreen()
+            ws = self.windowState()
+            if not (ws & Qt.WindowState.WindowMinimized) and not fs:
+                self._last_state = "maximized" if ws & Qt.WindowState.WindowMaximized else "normal"
+            self.header.set_caption_buttons_visible(not fs)      # full screen: no minimise / maximise / close
+            if hasattr(self, "fullscreen_action") and self.fullscreen_action.isChecked() != fs:
+                self.fullscreen_action.setChecked(fs)
+
+    def toggle_maximized(self) -> None:
+        if self.isFullScreen():
+            self.set_fullscreen(False)
+        elif self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+
+    def set_fullscreen(self, on: bool) -> None:
+        """View > Full screen (F11): the window covers the screen (the title bar and its menus stay; the caption
+        buttons hide); leaving it returns to the previous normal or maximized state."""
+        on = bool(on)
+        if on == self.isFullScreen():
+            self.fullscreen_action.setChecked(on)
+            return
+        if on:
+            self._pre_fullscreen_maximized = self.isMaximized()
+            self.showFullScreen()
+        elif getattr(self, "_pre_fullscreen_maximized", False):
+            self.showMaximized()
+        else:
+            self.showNormal()
+
+    def _menu_mode(self) -> None:
+        """F10: keyboard access to the title bar menus (Left / Right between them, Down / Enter opens, Esc)."""
+        if self.header.in_menu_mode():
+            self.header.leave_menu_mode()
+        else:
+            self.header.enter_menu_mode()
+
+    def _panel_action(self, i: int) -> None:
+        """View > Panels: expand (check) or collapse (uncheck) one upper panel - exactly its header's collapse /
+        strip's expand button.  Expanding a panel while the top panels are hidden shows them."""
+        on = self.panel_actions[i].isChecked()
+        if on and not self._top_visible:
+            self.set_top_panels_visible(True)
+        self.top_row.set_collapsed(i, not on)
+        self._sync_view_actions()
+
+    def _sync_view_actions(self) -> None:
+        """View menu checks follow the window, whichever control changed it (panel buttons, strips, shortcuts)."""
+        if not hasattr(self, "panel_actions"):
+            return
+        for i, act in enumerate(self.panel_actions):
+            act.setChecked(not self.top_row.is_collapsed(i))
+        expanded = self.pages.currentIndex() == 1 if hasattr(self, "pages") else False
+        self.expand_action.setChecked(expanded)
+        has = bool(self.table.model.total_count()) if hasattr(self, "table") else False
+        self.expand_action.setEnabled(has or expanded)
+        ws = getattr(getattr(self, "analysis_dock", None), "workspace", None)
+        if ws is not None and ws.expand_btn is not None:      # the wide docked layout's Expand analysis
+            ws.expand_btn.setEnabled(has)
+            ws.expand_btn.setToolTip("Expand analysis (Ctrl+Shift+E)" if has else
+                                     "Expand analysis — available after a calculation")
+
+    def reset_workspace(self) -> None:
+        """View > Reset workspace: the default layout - the calculation page, the top panels shown, every upper
+        panel expanded, the page scrolled to the top.  Layout only: compositions, expressions, ranges, settings,
+        results, the theme and the window's size / full-screen state are untouched."""
+        if hasattr(self, "pages") and self.pages.currentIndex() != 0:
+            self.set_expanded(False)
+        for i in range(len(self.top_row.panels)):
+            self.top_row.set_collapsed(i, False)
+        self.set_top_panels_visible(True)
+        self.scroll.verticalScrollBar().setValue(0)
+        self.scroll.horizontalScrollBar().setValue(0)
+        self._sync_view_actions()
+
+    def _collapse_changed(self, i: int, on: bool) -> None:
+        self.settings.setValue("collapsed_panels", ",".join(str(k) for k in sorted(self.top_row.collapsed)))
+        self._sync_view_actions()
+        # all three collapsed: the strips serve no purpose - the region hides, as Hide top panels does
+        if on and len(self.top_row.collapsed) == len(self.top_row.panels) and self._top_visible:
+            self._last_collapsed = i
+            self.set_top_panels_visible(False)
+        self._sticky_timer.start()
+
+    def top_panels_visible(self) -> bool:
+        return self._top_visible
+
+    def set_top_panels_visible(self, on: bool, persist: bool = True) -> None:
+        """Title bar top-panels action / View > Top panels (Figma Main window State=Top panels hidden): the
+        Elements, Composition setup and Analysis row is hidden and the results table takes the page.
+
+        Showing the region while all three panels are collapsed expands the one collapsed last (the
+        configuration just before the region hid itself), so it never disappears again at once."""
+        if on and len(self.top_row.collapsed) == len(self.top_row.panels):
+            last = getattr(self, "_last_collapsed", len(self.top_row.panels) - 1)
+            self.top_row.blockSignals(True)
+            self.top_row.set_collapsed(last, False)
+            self.top_row.blockSignals(False)
+            self.settings.setValue("collapsed_panels", ",".join(str(k) for k in sorted(self.top_row.collapsed)))
+        self._top_visible = bool(on)
+        self.top_row.setVisible(self._top_visible)
+        self.header.set_top_panels_visible(self._top_visible)
+        if hasattr(self, "top_panels_action"):
+            self.top_panels_action.setChecked(self._top_visible)
+        self._sync_view_actions()
+        if persist:
+            self.settings.setValue("top_panels_visible", self._top_visible)
+        self._sticky_timer.start()
 
     def _place_sticky(self):
         self.sticky.place(self.scroll.viewport())
+        if self.top_row.isVisible():
+            self.header.align_status_to(self.composition.title)
 
     def layout_report(self) -> dict:
         """Live layout facts for tools/dpi_diagnostics.py and the DPI tests."""
         vbar = self.table.view.verticalScrollBar()
         hbar = self.table.view.horizontalScrollBar()
         return {
-            "upperPanels": [self.elements.width(), self.composition.width(), self.details.width()],
+            "upperPanels": [self.elements.width(), self.composition.width(), self.analysis_dock.width()],   # the slot
+            "analysisWide": self.analysis_dock.wide,
             "upperRowWidth": self.top_row.width(),
             "detailsStacked": self.top_row.stacked,
             "contentWidth": self.content.width(), "viewportWidth": self.scroll.viewport().width(),
@@ -288,37 +513,93 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ menus
     def _build_menus(self):
-        # Every opening menu is the shared Carbon menu (widgets/menu.py).  CORRECT_FILE_BUTTON: the header File
-        # menu is lg (48 px items, the header height), no dividers, no shortcut column; Help and About live in
-        # the header.  The shortcuts stay active as window actions.
-        self.file_menu = CarbonMenu(parent=self, size="lg", block_padding=0)
-        self.file_menu.setProperty("show_shortcuts", False)
-        a = self.file_menu.add_action("Import compositions", self.import_compositions, shortcut="Ctrl+O")
-        self.file_menu.add_action("Export results", self.export_dialog)
-        c = self.file_menu.add_action("Copy table", self.copy_table, shortcut="Ctrl+Shift+C")
-        self.file_menu.add_action("Calculation settings", self.edit_settings)
-        q = self.file_menu.add_action("Exit", self.close, shortcut="Ctrl+Q")
-        for act in (a, c, q):
+        # Every opening menu is the shared Carbon menu (widgets/menu.py): 32 px items (the title bar height), the
+        # shortcut column, an ellipsis on commands that open a dialog, separators between command groups.  The
+        # contents follow the former window-chrome branch where its commands exist in this application (File /
+        # Edit / View / Help, Copy table under Edit, Full screen, the Help pages); every action does something.
+        # Shortcuts are window actions, so they work while the menus are closed.
+        self.file_menu = CarbonMenu(parent=self)
+        self.import_action = self.file_menu.add_action("Import compositions…", self.import_compositions,
+                                                       shortcut="Ctrl+O")
+        self.export_action = self.file_menu.add_action("Export results…", self.export_dialog)
+        self.file_menu.addSeparator()
+        self.settings_action = self.file_menu.add_action("Calculation settings…", self.edit_settings)
+        self.file_menu.addSeparator()
+        self.exit_action = self.file_menu.add_action("Exit", self.close, shortcut="Ctrl+Q")
+        for act in (self.import_action, self.exit_action):
             self.addAction(act)
-        # F1 / header Help: one command, Documentation Home
-        self.help_action = QAction("Help", self)
+        # F1 / Help > Documentation: one command, Documentation Home
+        self.help_action = QAction("Documentation", self)
         self.help_action.setShortcut(QKeySequence("F1"))
         self.help_action.triggered.connect(lambda: self.show_help("home"))
         self.addAction(self.help_action)
-        # Theme (CORRECT_THEME_BUTTON): Light, Dark, divider, System default - check + trailing icon, lg items
-        self.theme_menu = CarbonMenu(parent=self, size="lg", block_padding=0)
+        # View (title bar): Top panels (Ctrl+B) and Full screen (F11), then the Theme choices (Light, Dark, System
+        # default - one check; the Figma View menu)
+        from .widgets.dropdown import RichMenu
+        self.view_menu = RichMenu(parent=self)
+        self.top_panels_action = self.view_menu.add_action(
+            "Top panels", lambda: self.set_top_panels_visible(self.top_panels_action.isChecked()), checkable=True,
+            checked=True, shortcut="Ctrl+B")
+        self.fullscreen_action = self.view_menu.add_action(
+            "Full screen", lambda: self.set_fullscreen(self.fullscreen_action.isChecked()), checkable=True,
+            checked=False, shortcut="F11")
+        # Expand analysis (Ctrl+Shift+E): the in-window expanded workspace - the panel's button and the shortcut, now
+        # also in the menu (restored 2026-10-28; one action for the menu and the shortcut)
+        self.expand_action = self.view_menu.add_action(
+            "Expand analysis", lambda: (self.set_expanded(self.expand_action.isChecked()), self._sync_view_actions()),
+            checkable=True,
+            checked=False, shortcut="Ctrl+Shift+E")
+        for act in (self.top_panels_action, self.fullscreen_action, self.expand_action):
+            self.addAction(act)
+        # Panels: each upper panel expanded (checked) or collapsed to its strip - the panel headers' collapse /
+        # expand buttons as menu commands (restored 2026-10-28 from the former View > Panels; this application
+        # collapses panels instead of hiding them, and the results table is always shown)
+        self.view_menu.addSeparator()
+        sec = self.view_menu.add_action("Panels", enabled=False)
+        sec.setProperty("section", True)
+        self.panel_actions = []
+        for i, name in enumerate(("Elements", "Composition setup", "Analysis")):
+            act = self.view_menu.add_action(name, lambda i=i: self._panel_action(i), checkable=True, checked=True)
+            self.panel_actions.append(act)
+        self.reset_workspace_action = self.view_menu.add_action("Reset workspace", self.reset_workspace)
+        self.view_menu.addSeparator()
+        sec = self.view_menu.add_action("Theme", enabled=False)
+        sec.setProperty("section", True)
         group = QActionGroup(self)
         group.setExclusive(True)
         pref = self.prefs.theme
-        icons_ = {"light": "brightness_contrast", "dark": "asleep", "system": "contrast"}
+        icons_ = {"light": "brightness_contrast", "dark": "asleep", "system": "screen"}     # Carbon icons
         for name, label in (("light", "Light"), ("dark", "Dark"), ("system", "System default")):
-            if name == "system":
-                self.theme_menu.addSeparator()
-            act = self.theme_menu.add_action(label, lambda n=name: self.set_theme(n), checkable=True,
-                                             checked=pref == name, trailing_icon=icons_[name])
+            act = self.view_menu.add_action(label, lambda n=name: self.set_theme(n), checkable=True,
+                                            checked=pref == name, trailing_icon=icons_[name])
             act.setData(name)
             group.addAction(act)
         self.theme_actions = group
+        self.theme_menu = self.view_menu             # former name (tests, tools)
+        # Help (title bar): Getting started, Documentation (F1), the reference pages, About
+        self.help_menu = CarbonMenu(parent=self)
+        self.help_menu.add_action("Getting started", lambda: self.show_help("first-calculation"))
+        self.help_menu.addAction(self.help_action)
+        self.help_menu.addSeparator()
+        self.help_menu.add_action("Expression syntax", lambda: self.show_help("expression-syntax"))
+        self.help_menu.add_action("Model support", lambda: self.show_help("model-coverage"))
+        self.help_menu.add_action("Keyboard shortcuts", lambda: self.show_help("shortcuts"))
+        self.help_menu.addSeparator()
+        self.help_menu.add_action("About MDL HEA Calculator", self.show_about)
+        # Edit (right of File): Undo / Redo of meaningful data edits (ui/undo.py); the command's name is shown
+        from .undo import UndoManager
+        self.undo_mgr = UndoManager(self)
+        self.edit_menu = CarbonMenu(parent=self)
+        self.undo_action = self.edit_menu.add_action("Undo", self.undo, shortcut="Ctrl+Z")
+        self.redo_action = self.edit_menu.add_action("Redo", self.redo, shortcut="Ctrl+Y")
+        self.redo_action.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
+        self.edit_menu.addSeparator()
+        self.copy_table_action = self.edit_menu.add_action("Copy table", self.copy_table, shortcut="Ctrl+Shift+C")
+        for act in (self.undo_action, self.redo_action, self.copy_table_action):
+            self.addAction(act)            # window shortcuts; a focused text field keeps its own Ctrl+Z / Ctrl+Y
+        self.undo_mgr.changed.connect(self._sync_edit_actions)
+        self.undo_mgr.changed.connect(self._resync_setup_state)
+        self._sync_edit_actions()
 
     def set_theme(self, name: str):
         """Store the theme *preference* (system / light / dark) and apply the effective theme."""
@@ -356,9 +637,18 @@ class MainWindow(QMainWindow):
             app.setStyleSheet("")
         sheet = _SHEET_CACHE.get(THEME.name)
         if sheet is None:
-            sheet = stylesheet(lambda name, token: icons.file_url(name, token)) + analysis_rules(THEME.tokens)
+            sheet = stylesheet(lambda name, token: icons.file_url(name, token)) + analysis_rules(qss_tokens())
             _SHEET_CACHE[THEME.name] = sheet
         self.setStyleSheet(sheet)
+        w = self.analysis_window(create=False) if hasattr(self, "analysis_ctl") else None
+        if w is not None:
+            w.setStyleSheet(sheet)
+        hw = getattr(self, "_help", None)          # unowned too (own taskbar button)
+        try:
+            if hw is not None:
+                hw.set_base_sheet(sheet)
+        except RuntimeError:
+            self._help = None
         self._sync_theme_actions()
         themer = win_titlebar.themer()
         if themer is not None:
@@ -366,16 +656,17 @@ class MainWindow(QMainWindow):
         self.update()
 
     # ------------------------------------------------------------------ feedback
-    def notify(self, kind: str, text: str, timeout_ms: int = 8000):
-        titles = {"error": "Error", "warning": "Warning", "success": "Done", "info": "Info"}
-        self.notification.show_message(kind, titles.get(kind, ""), text)
-        if kind in ("success", "info"):
-            self._notify_timer.start(timeout_ms)
-        else:
-            self._notify_timer.stop()
+    NOTIFY_TITLES = {"error": "Error", "warning": "Warning", "success": "Done", "info": "Info"}
+
+    def notify(self, kind: str, text: str, timeout_ms: int = 8000, title: str | None = None):
+        """A message of the window: shown in the title bar's status column (never above the results table).
+        Success / info go after ``timeout_ms`` or the next mouse press; warnings and errors on the next press."""
+        self.progress.show_message(kind, title or self.NOTIFY_TITLES.get(kind, ""), text, timeout_ms)
 
     def _update_status(self):
         m = self.table.model
+        self.table.set_has_results(m.total_count() > 0)
+        self._sync_view_actions()                       # Expand analysis needs results
         # The reference toolbar carries no standing label - the paginator already reports the
         # range - so this slot is reserved for filter / background sort state and cell info on hover.
         if m.pending:
@@ -383,7 +674,7 @@ class MainWindow(QMainWindow):
                 "Filtering and sorting"
             text = f"{what} {m.total_count():,} results…"
         elif m.filters:
-            text = f"· filter active ({m.view_count():,} shown)"
+            text = f"Filter active ({m.view_count():,} shown)"
         else:
             text = ""
         if self.table.status.text() != text:
@@ -411,10 +702,12 @@ class MainWindow(QMainWindow):
         if self.runner.running:
             self.notify("warning", "A calculation is already running.")
             return
-        self.notification.dismiss()
+        self.progress.dismiss_message()
         self._job_queue = []
         self._batch_added = self._batch_failed = 0
         self._batch_first = None
+        self._batch_last = None
+        self.table.model.user_paged = False          # paging during this run is the user's: it is kept
         if not callable(comps) and len(comps) == 1:
             res = self.engine.calculate(comps[0], **self.options())
             src = source[0] if isinstance(source, list) else source
@@ -427,7 +720,8 @@ class MainWindow(QMainWindow):
             self._update_status()
             if self.analysis_ctl.state.active is None:
                 self.analysis_ctl.apply(AS.switch_context, AS.COMPOSITION)
-            self._jump_to(rng.start)
+            self.table.model.user_paged = False
+            self._show_new_results(rng.start)
             self.analysis_ctl.run_finished(None)
             if not res.ok:
                 self.notify("error", res.error)
@@ -473,6 +767,8 @@ class MainWindow(QMainWindow):
         self.progress.cancel.setEnabled(True)
         self.progress.show()
         self.composition.set_calculating(True)
+        self.elements.set_read_only(True)            # the running setup is frozen (visual QA F-02)
+        self._sync_edit_actions()                    # no Undo / Redo while a batch is stored
         self.runner.start(CalculationJob(data, self.engine), run_id)
         return True
 
@@ -496,26 +792,31 @@ class MainWindow(QMainWindow):
         self._batch_failed += info.errors if info else 0
         if self._batch_first is None and r.first_id is not None:
             self._batch_first = r.first_id
+        if info is not None and info.last_id is not None:
+            self._batch_last = info.last_id
         cancelled = job.state == "cancelled"
         if r.storage_error:
             self._finish_batch(cancelled=True)
             self.progress.set_result("error", "Calculation failed",
                                      "An error interrupted the calculation before completion.")
-            self.notify("error", f"{r.storage_error} The calculation was stopped; {self._batch_added:,} "
-                                 "calculated result(s) were kept.")
+            reason = (f"{r.storage_error} The calculation was stopped; {self._batch_added:,} "
+                      "calculated result(s) were kept.")
+            self.progress.set_reason(reason)      # the Figma Failed state stays; the reason is its tooltip
+            self.composition.set_run_failed(reason)
             return
         if job.state == "error":
             self._finish_batch(cancelled=True)
             self.progress.set_result("error", "Calculation failed",
                                      "An error interrupted the calculation before completion.")
-            self.notify("error", job.error or "The calculation failed.")
+            self.progress.set_reason(job.error or "The calculation failed.")
+            self.composition.set_run_failed(job.error or "The calculation failed.")
             return
         if self._job_queue and not cancelled:
             if self._next_job():
                 return
         self._finish_batch(cancelled)
         if self._batch_first is not None:
-            self._jump_to(self._batch_first)
+            self._show_new_results(self._batch_last if self._batch_last is not None else self._batch_first)
         # CORRECT_CALCULATION_COMPLETED: the outcome is the shell header's state, not a table notification
         n = self._batch_added
         failed = f"; {self._batch_failed:,} could not be evaluated" if self._batch_failed else ""
@@ -524,13 +825,15 @@ class MainWindow(QMainWindow):
                                      f"{n:,} composition{'s' if n != 1 else ''} calculated before cancellation"
                                      + failed)
         else:
-            self.progress.set_result("success", "Calculation succeeded",
+            self.progress.set_result("success", "Calculation completed",
                                      f"{n:,} composition{'s' if n != 1 else ''} calculated successfully" + failed)
 
     def _finish_batch(self, cancelled: bool):
         self._job_queue = []
         self.progress.hide()
         self.composition.set_calculating(False)
+        self.elements.set_read_only(False)
+        self._sync_edit_actions()
         if self._pending_delete is not None:
             lo, hi = self._pending_delete           # recalculation: the superseded rows go now
             self._pending_delete = None
@@ -559,6 +862,18 @@ class MainWindow(QMainWindow):
         if select_first and len(rng):
             self._jump_to(rng.start)
 
+    def _show_new_results(self, newest_id: int) -> None:
+        """A calculation has finished: the table shows page 1 - newest first, the new results at the top - unless
+        the user paged during the run (their page is kept); Analysis shows the run's newest result.  Never the
+        page of the run's first (oldest) result: with newest-first ordering that was the run's last page
+        (2026-10-28).  Results committed while the run is active never move the page."""
+        m = self.table.model
+        if not getattr(m, "user_paged", False):
+            m.set_page(0)
+        rec = self.repo.get_result(newest_id) if m.view.is_alive(newest_id) else None
+        if rec is not None:
+            self.show_details(rec)
+
     def _jump_to(self, row_id: int, analyse: bool = True):
         """Show the page holding result ``row_id`` (and make it the active composition of Analysis)."""
         m = self.table.model
@@ -573,10 +888,29 @@ class MainWindow(QMainWindow):
             if rec is not None:
                 self.show_details(rec)
 
+    ANALYSIS_PANEL = 2                       # index of Analysis in the top row (Elements, Composition setup, Analysis)
+
+    def docked_analysis_shown(self) -> bool:
+        """Whether this window itself shows Analysis: the expanded workspace, or the embedded panel with the top
+        panels visible and Analysis not collapsed to its strip.  The one routing rule for a result activation."""
+        if self.pages.currentIndex() == 1:
+            return True
+        return self.top_panels_visible() and not self.top_row.is_collapsed(self.ANALYSIS_PANEL)
+
+    def _row_activated(self, row):
+        """A results-row double click / Enter / "Analyse composition": the active composition of Analysis.  When
+        this window does not show Analysis (top panels hidden, or Analysis collapsed - a collapse the user chose
+        and that is not undone here) the separate Analysis window opens, or is reused and raised, with it;
+        otherwise the embedded panel shows it (an open Analysis window follows - shared state)."""
+        if not self.docked_analysis_shown():
+            self.open_analysis_window(row)
+            return
+        self.show_details(row)
+
     def show_details(self, row):
         """The active composition of Analysis (double click, single calculation).  A stored record is
         reproduced into a full engine result once, by its stable id - never by its row on screen."""
-        self.analysis.set_has_results(bool(self.table.model.total_count()))
+        self._set_has_results(bool(self.table.model.total_count()))
         if row is None:
             self._details_id = None
             self.analysis_ctl.set_active(None)
@@ -590,7 +924,7 @@ class MainWindow(QMainWindow):
     def _check_details(self):
         m = self.table.model
         total = m.total_count()
-        self.analysis.set_has_results(bool(total))
+        self._set_has_results(bool(total))
         st = self.analysis_ctl.state
         if st.active is not None and st.active_gone is None and not m.view.is_alive(st.active):
             self.analysis_ctl.results_removed([st.active])
@@ -598,20 +932,119 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ table actions
     def delete_rows(self):
-        """Clear the results table.
+        """Clear the results table (toolbar "Clear table").
 
-        The toolbar's trash button is "Clear table" (tooltip in 21_dark_mode_fullscreen_tooltips): it
-        deletes every result of the table from the dataset (in the background), immediately - no
-        confirmation dialog.  The composition panel is left untouched, and so are filters and sort.
+        Undoable (Edit > Undo; ``ui/undo.ClearTableCommand``: an O(1) table swap in the session database, no
+        copy).  A table of ``CONFIRM_AT`` results or more asks first in a Carbon danger modal
+        (``core/destructive.py`` - the one policy); a handful is cleared at once.  The composition panel,
+        filters and sort are left untouched.
         """
+        from .undo import ClearTableCommand
         m = self.table.model
-        if not m.total_count():
+        n = m.total_count()
+        if not n or self.runner.running:
             return
-        lo, hi = m.view.lo, m.view.hi
-        m.clear()
-        self.analysis_ctl.table_cleared(lo=lo, hi=hi)
-        self.analysis.set_has_results(False)
-        self._update_status()
+        if destructive.needs_confirmation(n) and not self._confirm_destructive(
+                "Clear results", f"Clear all {destructive.describe(n)}?",
+                "They are removed from this session's results table. Edit › Undo brings them back.",
+                "Clear results"):
+            return
+        self.undo_mgr.push(ClearTableCommand(self, n))
+
+    def remove_results(self, records) -> None:
+        """Remove result(s) (row menu): undoable; a batch of ``CONFIRM_AT`` or more asks first."""
+        from .undo import RemoveResultsCommand
+        records = [r for r in records if r is not None]
+        if not records or self.runner.running:
+            return
+        n = len(records)
+        if destructive.needs_confirmation(n) and not self._confirm_destructive(
+                "Remove results", f"Remove {destructive.describe(n)}?",
+                "They are removed from this session's results table. Edit › Undo brings them back.", "Remove"):
+            return
+        self.undo_mgr.push(RemoveResultsCommand(self, records))
+
+    def clear_composition(self) -> None:
+        """Composition setup Clear: undoable (the setup is restored exactly, element selection included)."""
+        from .undo import ClearCompositionCommand
+        comp = self.composition
+        if comp.is_empty():
+            comp.clear()
+            return
+        text = {"single": "Clear composition", "sweep": "Clear composition space",
+                "expression": "Clear composition expression"}[comp.mode]
+        self.undo_mgr.push(ClearCompositionCommand(comp, comp.snapshot(), text))
+
+    def _setup_committed(self, text: str) -> None:
+        """A finished setup edit: one Undo step when the state changed (several boundaries of one edit - focus
+        leaving the field after a commit, a toggle that changed nothing - record nothing)."""
+        from .undo import SetupEditCommand
+        comp = self.composition
+        try:
+            if not self.isVisible() or self.runner is None:
+                return                                    # closing: focus changes are not edits
+            after = comp.undo_state()
+        except RuntimeError:                              # being destroyed
+            return
+        before = dict(self._setup_state, mode=after["mode"])     # switching the mode is not an edit
+        if self.runner.running or before == after:
+            self._setup_state = after
+            return
+        self._setup_state = after
+        self.undo_mgr.push(SetupEditCommand(self, before, after, text))
+
+    def apply_setup_state(self, st: dict) -> None:
+        """Undo / Redo of a setup edit: the panel, the periodic table (``elements_changed``) and the baseline."""
+        self.composition.apply_undo_state(st)
+        self._setup_state = self.composition.undo_state()
+
+    def _resync_setup_state(self) -> None:
+        """Any undo stack move (Clear composition, its Undo, a result removal): the baseline is the setup as it is."""
+        if hasattr(self, "composition"):
+            self._setup_state = self.composition.undo_state()
+
+    def _confirm_destructive(self, title: str, question: str, detail: str, action: str) -> bool:
+        from .widgets.dialogs import DangerDialog
+        dlg = DangerDialog(title, question, detail, action, self)
+        ok = dlg.exec() == DangerDialog.DialogCode.Accepted
+        dlg.deleteLater()
+        return ok
+
+    def results_restored(self) -> None:
+        """Undo brought results back: Analysis, details and the toolbar follow."""
+        self.analysis_ctl.results_restored()
+        self._set_has_results(bool(self.table.model.total_count()))
+        self._check_details()
+
+    def undo(self) -> None:
+        if not self.runner.running:
+            self.undo_mgr.undo()
+
+    def redo(self) -> None:
+        if not self.runner.running:
+            self.undo_mgr.redo()
+
+    def _sync_edit_actions(self) -> None:
+        st = self.undo_mgr.stack
+        running = bool(getattr(self, "runner", None) and self.runner.running)
+        u, r = st.undoText(), st.redoText()
+        self.undo_action.setText(f"Undo {u[:1].lower() + u[1:]}" if u else "Undo")
+        self.redo_action.setText(f"Redo {r[:1].lower() + r[1:]}" if r else "Redo")
+        self.undo_action.setEnabled(st.canUndo() and not running)
+        self.redo_action.setEnabled(st.canRedo() and not running)
+
+    def _restore_column_widths(self) -> None:
+        import json
+        try:
+            widths = json.loads(str(self.settings.value("column_widths", "{}")))
+        except ValueError:
+            widths = {}
+        if isinstance(widths, dict):
+            self.table.view.set_user_widths(widths)
+
+    def _save_column_widths(self) -> None:
+        import json
+        self.settings.setValue("column_widths", json.dumps(self.table.view.user_widths))
 
     def edit_filters(self):
         dlg = FilterDialog(self.table.model.filters, self)
@@ -628,6 +1061,8 @@ class MainWindow(QMainWindow):
             keys = dlg.selected()
             self.table.model.set_keys(keys)
             self.settings.setValue("columns", keys)
+            if dlg.reset_widths:
+                self.table.view.reset_width(None)
         dlg.deleteLater()
 
     INLINE_ROWS = 2000          # exports / copies up to this size run at once (≈ 0.1 s); larger in a process
@@ -651,7 +1086,8 @@ class MainWindow(QMainWindow):
             return
         if n <= self.INLINE_ROWS:
             QGuiApplication.clipboard().setText(table_tsv(list(m.view_rows), m.keys))
-            self.notify("success", f"Copied {n:,} row(s) × {len(m.keys)} columns (paste into Excel).", 4000)
+            self.notify("success", f"{n:,} row(s) × {len(m.keys)} columns (paste into Excel).", 4000,
+                        title="Table copied to clipboard")
             return
         if self._busy():
             return
@@ -667,16 +1103,18 @@ class MainWindow(QMainWindow):
             self.notify("info", "The table is empty.")
             return
         QGuiApplication.clipboard().setText(table_tsv(rows, m.keys))
-        self.notify("success", f"Copied {len(rows):,} visible row(s) × {len(m.keys)} columns.", 4000)
+        self.notify("success", f"{len(rows):,} visible row(s) × {len(m.keys)} columns (paste into Excel).", 4000,
+                    title="Rows copied to clipboard")
 
     def _copy_text(self, tsv: str, what: str):
         QGuiApplication.clipboard().setText(tsv)
-        self.notify("success", f"Copied the {what} (paste into Excel).", 4000)
+        self.notify("success", f"The {what} (paste into Excel).", 4000, title="Copied to clipboard")
 
     def _copy_generated(self, tsv: str):
         QGuiApplication.clipboard().setText(tsv)
         n = max(len(tsv.strip().splitlines()) - 1, 0)
-        self.notify("success", f"Copied {n:,} generated composition(s) (paste into Excel).", 4000)
+        self.notify("success", f"{n:,} generated composition(s) (paste into Excel).", 4000,
+                    title="Compositions copied to clipboard")
 
     def export_dialog(self):
         """File › Export results: one save dialog; the file type chosen there decides Excel or CSV."""
@@ -732,9 +1170,9 @@ class MainWindow(QMainWindow):
             try:
                 n = write_records(view.export_rows(filtered), path, elements, notes=notes)
             except Exception as exc:  # noqa: BLE001 - report any I/O problem to the user
-                self.notify("error", f"Export failed: {exc}")
+                self.notify("error", str(exc), title="Export failed")
                 return
-            self.notify("success", f"Exported {n:,} rows to {Path(path).name}.")
+            self.notify("success", f"{n:,} rows written to {Path(path).name}.", title="Export completed")
             return
         if self._busy():
             return
@@ -770,15 +1208,16 @@ class MainWindow(QMainWindow):
                     QGuiApplication.clipboard().setText(fh.read())
             finally:
                 path.unlink(missing_ok=True)
-            self.notify("success", f"Copied {value:,} row(s) × {job['cols']} columns (paste into Excel).", 4000)
+            self.notify("success", f"{value:,} row(s) × {job['cols']} columns (paste into Excel).", 4000,
+                        title="Table copied to clipboard")
         elif status == "ok":
-            self.notify("success", f"Exported {value:,} rows to {path.name}.")
+            self.notify("success", f"{value:,} rows written to {path.name}.", title="Export completed")
         else:
             path.unlink(missing_ok=True)
             if status == "cancelled":
-                self.notify("warning", "Export cancelled; no file was written.")
+                self.notify("warning", "No file was written.", title="Export cancelled")
             else:
-                self.notify("error", f"Export failed: {value}")
+                self.notify("error", str(value), title="Export failed")
 
     def _temperature_note(self) -> str:
         return f"{self.annealing:g} K (user)" if self.annealing else f"{self.fraction:g}·Tm (estimated)"
@@ -791,14 +1230,14 @@ class MainWindow(QMainWindow):
         try:
             res = read_compositions(path, self.engine.data)
         except (SpreadsheetError, OSError, ValueError) as exc:
-            self.notify("error", f"Import failed: {exc}")
+            self.notify("error", str(exc), title="Import failed")
             return
         if res.errors:
             rep = ImportReportDialog(Path(path).name, res.layout, len(res.entries), res.errors, self)
             rep.exec()
             rep.deleteLater()
         if not res.entries:
-            self.notify("error", "No valid compositions found in the file.")
+            self.notify("error", "No valid compositions found in the file.", title="Import failed")
             return
         names = [n or "" for n, _ in res.entries]
         comps = [c for _, c in res.entries]
@@ -847,9 +1286,11 @@ class MainWindow(QMainWindow):
             rm = {"mode": info.mode, "elements": info.elements, "axes": info.axes,
                   "source": {**info.source, "recalculated_from": info.run_id}}
             queue.append((recipe, rm))
-        self.notification.dismiss()
+        self.progress.dismiss_message()
         self._batch_added = self._batch_failed = 0
         self._batch_first = None
+        self._batch_last = None
+        self.table.model.user_paged = False          # paging during this run is the user's: it is kept
         self._pending_delete = (lo, hi)
         self._job_queue = queue
         if not self._next_job():
@@ -864,16 +1305,44 @@ class MainWindow(QMainWindow):
         return False
 
     def open_details(self, row):
-        """Composition analysis of one result in a separate window (row context menu).  The window
-        holds a snapshot of the result, so it stays valid if the stored row is removed later."""
-        if row is not None:
-            info = None
-            if isinstance(row, ResultRecord):
-                info = self.repo.get_run(row.run_id)
-                row = row.materialize()
-            dlg = AlloyDetailsDialog(row, self, info=info)
-            dlg.exec()
-            dlg.deleteLater()
+        """Row menu "Open details in new window": the separate Analysis window with that composition."""
+        self.open_analysis_window(row)
+
+    def analysis_window(self, create: bool = True):
+        """The one separate Analysis window (analysis/window.py), created on first use and then reused."""
+        w = getattr(self, "_analysis_window", None)
+        try:
+            if w is not None:
+                w.isVisible()                   # raises if Qt deleted it
+        except RuntimeError:
+            w = None
+        if w is None and create and not self._closed:
+            from .analysis.window import AnalysisWindow
+            w = self._analysis_window = AnalysisWindow(self.analysis_ctl, self)
+            w.setStyleSheet(self.styleSheet())  # unowned (own taskbar button): it does not inherit the sheet
+            w.panel.set_has_results(bool(self.table.model.total_count()))
+        return w
+
+    def open_analysis_window(self, row=None):
+        """Open (or raise) the separate Analysis window; ``row`` (a result) becomes the active composition and
+        Analysis shows Composition.  The window and the embedded panel are views of the same state."""
+        w = self.analysis_window()
+        if w is None:
+            return None
+        if isinstance(row, ResultRecord):
+            self._details_id = row.id
+            self.analysis_ctl.set_active(row.id)
+            self.analysis_ctl.apply(AS.switch_context, AS.COMPOSITION)
+        w.present()
+        if isinstance(row, ResultRecord):
+            w.panel.acknowledge()
+        return w
+
+    def _set_has_results(self, has: bool) -> None:
+        self.analysis.set_has_results(has)
+        w = self.analysis_window(create=False)
+        if w is not None:
+            w.panel.set_has_results(has)
 
     # ------------------------------------------------------------------ Analysis
     def _restore_analysis_tabs(self) -> None:
@@ -903,10 +1372,13 @@ class MainWindow(QMainWindow):
             return
         self.analysis_ctl.apply(AS.set_expanded, on)
         self.pages.setCurrentIndex(1 if on else 0)
+        self._sync_view_actions()
         if on:
             self.workspace.focus_title()
         else:
-            self.analysis.expand_btn.setFocus(Qt.FocusReason.OtherFocusReason)
+            dock = self.analysis_dock                  # focus returns to the Expand analysis that is on screen
+            btn = dock.workspace.expand_btn if dock.wide and dock.workspace is not None else self.analysis.expand_btn
+            btn.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def show_in_table(self, ids):
         """Analysis -> table: jump to one result; for several, check them and say so (never filters silently)."""
@@ -952,10 +1424,10 @@ class MainWindow(QMainWindow):
         try:
             if win is None or not win.isVisible():
                 if win is None:
-                    win = self._help = HelpWindow(self)
+                    win = self._help = self._new_help_window(HelpWindow)
                 win.show()
-        except RuntimeError:                       # deleted with its parent during shutdown
-            win = self._help = HelpWindow(self)
+        except RuntimeError:                       # deleted during shutdown
+            win = self._help = self._new_help_window(HelpWindow)
             win.show()
         win.open(page, anchor)
         if win.isMinimized():
@@ -963,6 +1435,15 @@ class MainWindow(QMainWindow):
         win.raise_()
         win.activateWindow()
         return win
+
+    def _new_help_window(self, cls):
+        """The Help window is an independent top-level window (no owner): its own taskbar button and Alt+Tab entry,
+        minimisable on its own, free to go behind the main window - never a tool or always-on-top window.  Being
+        unowned it does not inherit the window-scoped sheet, so it gets it here (and from ``apply_theme``)."""
+        w = cls(None)
+        w.main = self
+        w.set_base_sheet(self.styleSheet())
+        return w
 
     def show_about(self):
         """Show (or raise) the single, non-modal About window."""
@@ -993,12 +1474,86 @@ class MainWindow(QMainWindow):
             self.runner.job.cancel()
             self.runner.job.wait(2.0)
         self.exporter.shutdown()
+        rt = getattr(self, "_report_task", None)
+        if rt is not None:
+            rt.shutdown()                 # a report QThread is joined, never left running at exit
         self.analysis_ctl.close()
         self.jobs.shutdown()          # no worker process outlives the window
         self.table.model.close()
         self.repo.close()
 
+    DEFAULT_SIZE = (1095, 670)      # first-run restored size (logical px); the minimum stays 1024 x 640
+
+    def show_initial(self) -> None:
+        """Open as the user left the window: maximized, or at the saved normal size and position (on a screen
+        that still exists, inside its work area).  A fresh installation opens maximized on the primary screen
+        (Restore then gives the default size, centred).  Closing minimized reopens in the state before
+        minimising; closing in full screen reopens in the state before full screen."""
+        from PySide6.QtCore import QRect
+        st = self.settings
+        state = st.value("window/state", None)
+        rect = st.value("window/normal", None)
+        if state is None and st.value("window_geometry", None) is not None:
+            # a geometry saved by an earlier version (QWidget.saveGeometry)
+            if self.restoreGeometry(st.value("window_geometry")):
+                self.show()
+                return
+        screens = QGuiApplication.screens()
+        primary = (QGuiApplication.primaryScreen() or self.screen()).availableGeometry()
+        if isinstance(rect, QRect) and rect.isValid():
+            target = rect
+            home = next((sc.availableGeometry() for sc in screens if sc.availableGeometry().intersects(rect)
+                         and sc.availableGeometry().intersected(rect).height() >= 40), None)
+            if home is None:                          # its monitor is gone: centre on the primary screen
+                home = primary
+                target = QRect(0, 0, rect.width(), rect.height())
+                target.moveCenter(home.center())
+            w = max(self.minimumWidth(), min(target.width(), home.width()))
+            h = max(self.minimumHeight(), min(target.height(), home.height()))
+            x = max(home.left(), min(target.x(), home.right() + 1 - w))     # never above / left of the work area
+            y = max(home.top(), min(target.y(), home.bottom() + 1 - h))
+            self.setGeometry(QRect(x, y, w, h))
+        else:
+            self.resize(*self.DEFAULT_SIZE)
+            frame = self.frameGeometry()
+            frame.moveCenter(primary.center())
+            self.move(frame.topLeft())
+            state = state or "maximized"              # first launch
+        self._last_state = "maximized" if state == "maximized" else "normal"
+        if state == "maximized":
+            normal = self.geometry()
+            self._normal_geometry = normal
+            self.showMaximized()
+            # Restore must return to exactly this rectangle (no normal frame is shown first - no flash)
+            from . import win_chrome
+            if win_chrome.supported():
+                dpr = self.devicePixelRatioF()
+                win_chrome.set_normal_rect(int(self.winId()), round(normal.left() * dpr), round(normal.top() * dpr),
+                                           round((normal.right() + 1) * dpr), round((normal.bottom() + 1) * dpr))
+        else:
+            self._normal_geometry = self.geometry()
+            self.show()
+
+    def _save_window_state(self) -> None:
+        """The last meaningful state (never minimized / full screen) and the normal geometry - kept apart, so
+        a maximized window never overwrites the size Restore returns to."""
+        if self.isFullScreen():
+            state = "maximized" if getattr(self, "_pre_fullscreen_maximized", False) else "normal"
+        elif self.isMinimized():
+            state = getattr(self, "_last_state", "normal")
+        else:
+            state = "maximized" if self.isMaximized() else "normal"
+        if self.isMaximized() or self.isFullScreen() or self.isMinimized():
+            normal = getattr(self, "_normal_geometry", None) or self.normalGeometry()
+        else:
+            normal = self.geometry()
+        if normal.isValid() and normal.width() > 0:
+            self.settings.setValue("window/normal", normal)
+        self.settings.setValue("window/state", state)
+        self.settings.remove("window_geometry")
+
     def closeEvent(self, e):
+        self._save_window_state()
         # Help and About are top-level windows of their own: they close with the application, otherwise a visible
         # one would keep the process alive after the main window has gone
         for name in ("_help", "_about"):
@@ -1008,6 +1563,15 @@ class MainWindow(QMainWindow):
                     w.close()
             except RuntimeError:
                 pass
+        # the Analysis window has no owner (own taskbar button): it is destroyed with the main window
+        aw = self.analysis_window(create=False)
+        if aw is not None:
+            try:
+                aw.hide()
+                aw.deleteLater()
+            except RuntimeError:
+                pass
+            self._analysis_window = None
         self.shutdown()
         super().closeEvent(e)
 

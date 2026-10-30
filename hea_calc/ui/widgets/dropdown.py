@@ -157,6 +157,10 @@ class Dropdown(QAbstractButton):
         self.items: list[tuple] = []
         self.value = None
         self.invalid = False
+        self.read_only = False       # Carbon read-only: shows its value, cannot be opened or changed
+        self.chevron_inset = 16      # chevron right margin (Carbon field); 10 in a compact column heading (Figma)
+        self.text_inset = 16         # value start (8 in the pagination bar's inline select, Figma)
+        self.text_gap = 8            # text to chevron
         self._hover = False
         self._open = False
         self.setFixedHeight(32)
@@ -251,6 +255,18 @@ class Dropdown(QAbstractButton):
         self.invalid = on
         self.update()
 
+    def set_read_only(self, on: bool, description: str = "") -> None:
+        """Carbon read-only (not disabled): the value stays readable and focusable for assistive technology, the list
+        cannot be opened, there is no hover; ``description`` says why (accessible description)."""
+        if on == self.read_only and description == self.accessibleDescription():
+            return
+        self.read_only = on
+        self.setAccessibleDescription(description if on else "")
+        self.setCursor(Qt.CursorShape.ArrowCursor if on else Qt.CursorShape.PointingHandCursor)
+        if on and self.popup is not None:
+            self.popup.close()
+        self.update()
+
     # -------------------------------------------------------------- menu
     def list_options(self) -> list:
         from .listbox import Option
@@ -265,6 +281,8 @@ class Dropdown(QAbstractButton):
     def open_menu(self) -> None:
         """Open the shared Carbon list (scrollable, screen-clamped; see ``listbox.py``)."""
         from .listbox import open_list
+        if self.read_only:
+            return
         pop = open_list(self, self.list_options(), value=self.value, row_height=self.row_height,
                         max_rows=self.max_rows)
         if pop is None:
@@ -313,13 +331,22 @@ class Dropdown(QAbstractButton):
         p = QPainter(self)
         r = self.rect()
         enabled = self.isEnabled()
-        if self.inline:
+        ro = self.read_only and enabled
+        if ro:
+            # Carbon read-only field: transparent, a subtle bottom rule, a disabled-colour chevron, no hover
+            crisp.hline_bottom(p, r, t("border-subtle-01"), HAIRLINE)
+        elif self.inline:
             if enabled and (self._hover or self._open):
                 crisp.fill_rect(p, r, t("layer-hover-01"))
         else:
-            crisp.fill_rect(p, r, t("field-hover-02" if enabled and self._hover else "field-02"))
+            from PySide6.QtWidgets import QDialog
+            top = QWidget.window(self)
+            # a field on a Gray 100 / White window surface (dialogs, the separate Analysis window): field-01 level
+            dialog = isinstance(top, QDialog) or top.objectName() == "AnalysisWindow"
+            crisp.fill_rect(p, r, t(("dialog-field-hover" if dialog else "field-hover-02") if enabled and self._hover
+                                    else ("dialog-field" if dialog else "field-02")))
             crisp.hline_bottom(p, r, t("border-strong-02" if enabled else "border-disabled"), HAIRLINE)
-        x = 16.0
+        x = float(self.text_inset)
         if self.prefix:
             x += paint_html(p, QRectF(x, 0, r.width() - x - 40, r.height()), self.prefix, BODY_COMPACT_01,
                             "text-secondary" if enabled else "text-disabled") + 8
@@ -327,15 +354,16 @@ class Dropdown(QAbstractButton):
         empty = self.value is None and not isinstance(self, MultiSelect)
         color = "text-disabled" if not enabled else ("text-placeholder" if empty else
                                                      ("link-primary" if getattr(self, "link", False) else "text-primary"))
-        paint_html(p, QRectF(x, 0, r.width() - x - 40, r.height()), html, BODY_COMPACT_01, color)
+        cx = r.width() - self.chevron_inset - 16                  # the chevron's left edge
+        paint_html(p, QRectF(x, 0, max(0.0, cx - self.text_gap - x), r.height()), html, BODY_COMPACT_01, color)
         name = "chevron_down"
         p.save()
         if self._open:
-            p.translate(r.width() - 24, r.height() / 2)
+            p.translate(cx + 8, r.height() / 2)
             p.rotate(180)
-            p.translate(-(r.width() - 24), -r.height() / 2)
-        icons.paint(p, name, QRectF(r.width() - 32, (r.height() - 16) / 2, 16, 16),
-                    "icon-primary" if enabled else "icon-disabled")
+            p.translate(-(cx + 8), -r.height() / 2)
+        icons.paint(p, name, QRectF(cx, (r.height() - 16) / 2, 16, 16),
+                    "icon-primary" if enabled and not ro else "icon-disabled")
         p.restore()
         if self.invalid:
             crisp.frame(p, r, FOCUS_WIDTH, t("support-error"))
@@ -345,6 +373,18 @@ class Dropdown(QAbstractButton):
 
 
 # ==================== popover
+def popover_owner(anchor) -> QWidget | None:
+    """The top-level widget that owns a popover opened from ``anchor``, or None when the anchor cannot own one
+    (deleted, or not shown).  ``QWidget.window`` is called unbound: a subclass attribute named ``window`` (the
+    plot's zoom window once shadowed it, so ``anchor.window()`` raised "'NoneType' object is not callable")
+    can never redirect the ownership lookup."""
+    import shiboken6
+    if anchor is None or not shiboken6.isValid(anchor) or not anchor.isVisible():
+        return None
+    owner = QWidget.window(anchor)
+    return owner if owner is not None and shiboken6.isValid(owner) else None
+
+
 class Popover(QWidget):
     """Carbon popover: ``layer-02`` surface, 2 px corners (HEA tooltip radius), caret on the trigger, 16 px
     padding.  Closes on Esc, on an outside click or on the trigger; focus returns to the trigger."""
@@ -353,7 +393,10 @@ class Popover(QWidget):
 
     def __init__(self, anchor: QWidget, content: QWidget, width: int = 320, prefer: str = "bottom",
                  align: str = "start", title: str = ""):
-        super().__init__(anchor.window(), Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint
+        owner = popover_owner(anchor)
+        if owner is None:
+            raise ValueError("a popover needs a visible, live anchor")
+        super().__init__(owner, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint
                          | Qt.WindowType.NoDropShadowWindowHint)
         self.anchor = anchor
         self.setObjectName("AnaPopover")
@@ -365,7 +408,10 @@ class Popover(QWidget):
         content.setFixedWidth(width - 32)
         lay.addWidget(content)
         content.adjustSize()
-        body = QSize(width, content.sizeHint().height() + 32)
+        # the height at the content's real width: wrapping children (e.g. the inspector's model-tag FlowBox) give
+        # their sizeHint for a wider row and would be painted past the body (M7 / M8 under the action buttons)
+        h = content.heightForWidth(width - 32) if content.hasHeightForWidth() else -1
+        body = QSize(width, (h if h >= 0 else content.sizeHint().height()) + 32)
         g = anchor.mapToGlobal(QPoint(0, 0))
         screen = (QApplication.screenAt(g) or QApplication.primaryScreen()).availableGeometry()
         self.placement = place_popover(body, QRect(g, anchor.size()), screen, prefer, align)
@@ -394,15 +440,18 @@ class Popover(QWidget):
         super().closeEvent(e)
         self.closed.emit()
         a = self.anchor
-        if a is not None:
+        import shiboken6
+        if a is not None and shiboken6.isValid(a):
             a.closed_at = time.monotonic()
             a.setFocus(Qt.FocusReason.PopupFocusReason)
 
 
 def open_popover(anchor: QWidget, content: QWidget, width: int = 320, prefer: str = "bottom",
                  align: str = "start", title: str = "") -> Popover | None:
-    """Open a popover unless the trigger was just used to close one (outside click replayed)."""
-    if time.monotonic() - getattr(anchor, "closed_at", 0.0) < 0.3:
+    """Open a popover unless the trigger was just used to close one (outside click replayed).  No popover opens for
+    an anchor that is gone or hidden (it would be orphaned)."""
+    if popover_owner(anchor) is None or time.monotonic() - getattr(anchor, "closed_at", 0.0) < 0.3:
+        content.deleteLater()                 # built for this popover only; never left as a stray window
         return None
     pop = Popover(anchor, content, width, prefer, align, title)
     pop.show()
@@ -456,6 +505,8 @@ class MultiSelect(Dropdown):
 
     def open_menu(self) -> None:
         from .listbox import open_list
+        if self.read_only:
+            return
         pop = open_list(self, self.list_options(), values=self._checked_values(), multi=True,
                         row_height=self.row_height, max_rows=self.max_rows)
         if pop is None:

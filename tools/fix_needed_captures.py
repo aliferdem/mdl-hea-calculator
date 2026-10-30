@@ -119,14 +119,12 @@ def main():
         for pref in ("light", "dark", "system"):
             win.prefs.set_theme(pref)
             win._sync_theme_actions()
-            b = win.header.theme_btn
-            b.active = True
+            b = win.header.view_item                   # the Theme choices are in the title bar's View menu
             m = win.theme_menu
             m.trigger_width = 0
-            m.open_below(b, exec_=False, align_right=True)
-            m.move(m.target_below(b, True))
+            m.open_below(b, exec_=False, merge=True)
             pump()
-            composite([m], QRect(win.width() - 420, 0, 420, 260), f"theme_menu_{pref}_open")
+            composite([m], QRect(b.x(), 0, 420, 320), f"theme_menu_{pref}_open")
             m.close()
             b.active = False
             pump()
@@ -166,7 +164,9 @@ def main():
 
     # ---------------------------------------------------------------- notifications
     if want("notification"):
-        n = win.notification
+        from hea_calc.ui.widgets.common import InlineNotification
+        n = InlineNotification(win.content)      # the component (the window shows messages in the title bar)
+        n.setFixedWidth(900)
         for kind, title, body in (("info", "Title", "Message"), ("success", "Title", "Message"),
                                   ("warning", "Title", "Message"), ("error", "Title", "Message")):
             n.show_message(kind, title, body)
@@ -185,10 +185,9 @@ def main():
         pump()
         g = comp.mapTo(win, QPoint(0, 0))
         if want("range_basis"):
-            comp.unit_box.open_menu()
-            place_list(comp.unit_box.popup, comp.unit_box)
-            composite([comp.unit_box.popup], QRect(g.x(), g.y(), comp.width(), 260), "range_basis_open")
-            comp.unit_box.popup.close()
+            comp.heading.open_menu()
+            composite([comp.heading.popup], QRect(g.x(), g.y(), comp.width(), 260), "range_basis_open")
+            comp.heading.popup.close()
             pump()
             composite([], QRect(g.x(), g.y(), comp.width(), 120), "range_basis_closed")
         if want("system_size"):
@@ -282,7 +281,7 @@ def main():
             if not win.elements.table.tiles[el].isChecked():
                 win.elements.table.tiles[el].click()
         comp.set_mode(1)
-        comp.unit_box.setCurrentIndex(1)
+        comp.set_basis("at")
         for r in comp.sweep.rows.values():
             r.min.setText("2"), r.max.setText("40"), r.step.setText("2")
         sw = comp.sweep

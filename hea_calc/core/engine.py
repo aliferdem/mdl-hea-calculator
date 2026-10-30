@@ -214,9 +214,13 @@ _MIED_R_NONTRANSITION = {
     "P": 2.3, "K": 0.0, "Zn": 1.4, "Ga": 1.9, "Ge": 2.1, "As": 2.3, "Rb": 0.0, "Cd": 1.4, "In": 1.9,
     "Sn": 2.1, "Sb": 2.3, "Cs": 0.0, "Hg": 1.4, "Tl": 1.9, "Pb": 2.1, "Bi": 2.3,
 }
-# Volume-correction coefficient a (Bakker 1998, Eq. for V^{2/3} alloy).
+# Divalent d-type metals (de Boer et al. 1988, §2.3, Fig. 2.28, program Table V-3 `detr`): for the R term they sit
+# in the transition block with factor 0.4 (R = 0 with transition metals, R/P = 0.4 R_X with non-transition metals);
+# for P they stay non-transition (12.35 with a transition metal, 10.7 otherwise; Eqs. 2.35-2.36).  Audit M8-AE.
+_MIED_R_DIVALENT_D = {"Ca": 0.4, "Sr": 0.4, "Ba": 0.4}
+# Volume-correction coefficient a (de Boer et al. 1988 Eq. 2.33; Bakker 1998, Eq. for V^{2/3} alloy).
 _MIED_A_014 = {"Li", "Na", "K", "Rb", "Cs"}
-_MIED_A_010 = {"Be", "Mg", "Zn", "Cd", "Hg"}
+_MIED_A_010 = {"Be", "Mg", "Zn", "Cd", "Hg", "Ca", "Sr", "Ba"}
 _MIED_A_007 = {"Cu", "Ag", "Au", "Al", "Ga", "In", "Tl", "Sc", "Y", "La"}
 # Structural (lattice-stability) contribution applies only to two transition metals with
 # 3 <= z <= 10 (Bakker 1998, Part I §5.2 and Part II Eq. 51). Noble metals (z = 11) excluded.
@@ -469,6 +473,11 @@ class Engine:
         """Ye et al. (2015) / Mansoori et al. (1971): S_E in J mol-1 K-1, mean of xi = 0.68 and 0.74."""
         els = list(c)
         d = {el: 2.0 * radii[el] for el in els}
+        if len(set(d.values())) == 1:
+            # Identical diameters: Delta_ij = 0 so y1 = y2 = 0, and y3 = (sum c)^3 = 1, so Z is the one-component
+            # Carnahan-Starling Z and S_E = 0 exactly at any packing.  Evaluating the terms instead leaves only
+            # rounding of order 1e-14 (audit section 19).
+            return 0.0
         sum_cd3 = sum(c[el] * d[el] ** 3 for el in els)
 
         def se_kb(xi: float) -> float:
@@ -498,17 +507,19 @@ class Engine:
             el in _MIED_TRANSITION or el in _MIED_NONTRANSITION)
 
     def _pqr(self, a: str, b: str) -> tuple[float, float, float]:
+        # P from the valence classes (TM-TM 14.2, non-TM/non-TM 10.7, mixed 12.35; Ca/Sr/Ba are non-TM here).
         ta, tb = a in _MIED_TRANSITION, b in _MIED_TRANSITION
-        if ta and tb:
-            p, r_over_p = 14.2, 0.0
-        elif not ta and not tb:
-            p, r_over_p = 10.7, 0.0
-        else:
-            t, n = (a, b) if ta else (b, a)
-            if t not in _MIED_R_TRANSITION or n not in _MIED_R_NONTRANSITION:
-                raise ValueError(f"Miedema R/P factor unavailable for {a}–{b}")
-            p, r_over_p = 12.35, _MIED_R_TRANSITION[t] * _MIED_R_NONTRANSITION[n]
-        return p, 9.4 * p, p * r_over_p
+        p = 14.2 if ta and tb else 10.7 if not ta and not tb else 12.35
+        # R only between a d-type metal (transition, or divalent Ca/Sr/Ba) and a non-transition metal (Fig. 2.28).
+        da, db = ta or a in _MIED_R_DIVALENT_D, tb or b in _MIED_R_DIVALENT_D
+        if da == db:
+            return p, 9.4 * p, p * 0.0
+        d, n = (a, b) if da else (b, a)
+        r_d = _MIED_R_TRANSITION.get(d, _MIED_R_DIVALENT_D.get(d))
+        if r_d is None or n not in _MIED_R_NONTRANSITION:
+            raise ValueError(f"no Miedema R/P (hybridisation) factor for the {a}–{b} pair "
+                             "(transition / non-transition)")
+        return p, 9.4 * p, p * (r_d * _MIED_R_NONTRANSITION[n])
 
     @staticmethod
     def _volume_coefficient(el: str) -> float:
@@ -721,7 +732,9 @@ class Engine:
             m["M4"] = ModelOutcome("M4", lab, values={"lambda": lam}, caution=caution_gl)
 
         # M5 Ye et al.
-        if d["phi_ye"] is None:
+        if d["phi_ye"] is None and d.get("phi_ye_undefined"):
+            m["M5"] = ModelOutcome("M5", NA, d["phi_ye_undefined"], na_kind=NA_UNDEFINED)
+        elif d["phi_ye"] is None:
             reason = "ΔHmix unavailable (missing binary data)." if d["dhmix"] is None else "S_E could not be evaluated."
             kind = NA_MISSING_DATA if d["dhmix"] is None or d["delta"] is None else NA_UNDEFINED
             m["M5"] = ModelOutcome("M5", NA, reason, na_kind=kind)
@@ -806,8 +819,11 @@ class Engine:
                 m["M8"] = ModelOutcome("M8", NA, reason, na_kind=NA_UNDEFINED)
             else:
                 missing = d.get("king_missing") or []
-                m["M8"] = ModelOutcome("M8", NA, "Miedema parameters unavailable for "
-                                       + ", ".join(missing) + ".")
+                if missing and all(self.data.is_element(x) for x in missing):
+                    text = "Miedema parameters unavailable for " + ", ".join(missing) + "."
+                else:   # a pair-level gap reported by the Miedema evaluation itself (e.g. no R/P factor)
+                    text = "Not evaluable: " + "; ".join(missing) + "."
+                m["M8"] = ModelOutcome("M8", NA, text)
         else:
             # King Section 3.1: a solid solution iff Phi >= 1.  Nothing else.  The d <= 6.6 % screen
             # belongs to Section 3.4, which describes how candidate alloys are generated, and King
@@ -849,7 +865,8 @@ class Engine:
         """Per-model data support for one element.
 
         Returns ``{model: (status, explanation)}`` with status one of ``ok``, ``warn`` (computable with
-        supplementary data), ``pair`` (depends on the partner elements' binary data) or ``none``.
+        supplementary data), ``pair`` (depends on the partner elements' binary data or, for M8, on whether the
+        partner is a transition metal) or ``none``.  The status describes this element's own data only.
         """
         data = self.data
         out: dict[str, tuple[str, str]] = {}
@@ -863,9 +880,16 @@ class Engine:
             return ("ok", "Takeuchi & Inoue (2005) ΔHmix available") if in_mix else \
                 ("none", "Not in the Takeuchi & Inoue (2005) ΔHmix table")
 
+        has_radius = data.prop(element, "atomic_radius") is not None
+
         def gl_status(base):
             if base[0] != "ok":
                 return base
+            # M2-M5 need the element's Guo & Liu (or supplementary) radius; without one the engine returns N/A
+            # ("Atomic radius unavailable.").  Checked before the supplementary flag: the ten elements without any
+            # radius (At, Rn, Cm-Lr) are also listed as supplementary (audit section 15).
+            if not has_radius:
+                return "none", "No atomic radius in the dataset (Guo & Liu or supplementary)"
             if supp:
                 return "warn", "Atomic radius not from Guo & Liu (2011) — supplementary value"
             return base
@@ -884,13 +908,25 @@ class Engine:
             out["M7"] = ("none", "Not in the Takeuchi & Inoue (2005) ΔHmix table")
         else:
             out["M7"] = ("pair", pair_msg)
+        # M8 needs exactly what _king_descriptors uses: the Miedema parameters and classification
+        # (miedema_available) and, for a transition / non-transition pair, both elements' R/P factors
+        # (_pqr).  It needs no radius: the criterion is Phi >= 1 alone (audit F9, section 14).
         if not mied:
             out["M8"] = ("none", "Miedema parameters/classification unavailable")
-        elif not cn12:
-            out["M8"] = ("none", "No Kittel CN12 radius")
+        elif not self._r_factor_available(element):
+            partners = "transition-metal" if element in _MIED_NONTRANSITION else "non-transition"
+            out["M8"] = ("pair", f"Miedema parameters available (Bakker 1998), but no R/P factor: M8 is unavailable "
+                                 f"with {partners} partners")
         else:
             out["M8"] = ("ok", "Miedema parameters available (Bakker 1998)")
         return out
+
+    @staticmethod
+    def _r_factor_available(element: str) -> bool:
+        """Whether ``_pqr`` has the element's Miedema R/P factor (needed only for d-type / non-transition pairs)."""
+        if element in _MIED_TRANSITION:
+            return element in _MIED_R_TRANSITION
+        return element in _MIED_R_DIVALENT_D or element in _MIED_R_NONTRANSITION
 
 
 @lru_cache(maxsize=1)

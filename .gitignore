@@ -179,3 +179,14 @@ archive/
 .idea/
 # HEA Calculator: generated visual-validation screenshots
 design/screens/
+
+# Local-only material (not published)
+/archive/
+/branding/
+/design/
+/docs/analysis-redesign/
+/docs/screenshots/
+/UI_VISUAL_AUDIT.md
+.idea/
+/docs/
+/AGENTS.md

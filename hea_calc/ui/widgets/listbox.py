@@ -23,7 +23,7 @@ import time
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QPainter, QPainterPath
 from PySide6.QtWidgets import QApplication, QFrame, QScrollArea, QVBoxLayout, QWidget
 
 from .. import crisp, icons
@@ -45,14 +45,23 @@ class Option:
     section: bool = False
 
 
-def paint_shadow(p: QPainter, rect: QRect) -> None:
-    """Carbon menu elevation ``0 2px 6px 0 rgba(0,0,0,.2)``, approximated with stacked translucent rects."""
+def paint_shadow(p: QPainter, rect: QRect, *more: QRect) -> None:
+    """Carbon menu elevation ``0 2px 6px 0 rgba(0,0,0,.2)``, approximated with stacked translucent rects.
+    ``more``: further rects of the same elevated outline (a header menu merged with its trigger tab,
+    CORRECT_FILE_BUTTON): their union is shadowed as one shape, so the join carries no shadow seam."""
     p.save()
     p.setPen(Qt.PenStyle.NoPen)
     for i in range(SHADOW, 0, -1):
         a = int(0.2 * 255 * (1 - i / (SHADOW + 1)) / 3)
         p.setBrush(QColor(0, 0, 0, a))
-        p.drawRoundedRect(QRectF(rect.adjusted(-i, -i + 2, i, i + 2)), i, i)
+        if not more:
+            p.drawRoundedRect(QRectF(rect.adjusted(-i, -i + 2, i, i + 2)), i, i)
+            continue
+        path = QPainterPath()
+        path.setFillRule(Qt.FillRule.WindingFill)
+        for r in (rect, *more):
+            path.addRoundedRect(QRectF(r.adjusted(-i, -i + 2, i, i + 2)), i, i)
+        p.drawPath(path.simplified())       # one fill: overlaps are not darkened twice
     p.restore()
 
 
@@ -92,10 +101,11 @@ class _Body(QWidget):
         return QRect(0, y, self.width(), self.popup.row_h(i))
 
     def row_at(self, y: int) -> int:
-        for i in range(len(self.popup.options)):
-            r = self.row_rect(i)
-            if r.top() <= y < r.bottom() + 1:
-                return i
+        import bisect
+        ys = self.popup.row_y
+        i = bisect.bisect_right(ys, y) - 1              # row tops are sorted: O(log n) for long lists
+        if 0 <= i < len(ys) and y < ys[i] + self.popup.row_h(i):
+            return i
         return -1
 
     def mouseMoveEvent(self, e):
@@ -110,6 +120,16 @@ class _Body(QWidget):
     def leaveEvent(self, _e):
         self.hover = -1
         self.update()
+
+    def tip_at(self, pos):
+        """The option's own tooltip (``Option.tip``) - for a disabled option, why it is unavailable (e.g. "Combine
+        runs…": combined collections are not available in this version).  Answered to the application's tooltip
+        controller (widgets/tooltip.py), anchored to the row; options without a tip have none."""
+        i = self.row_at(int(pos.y()))
+        if i < 0:
+            return None
+        o = self.popup.options[i]
+        return (o.tip, self.row_rect(i)) if o.tip and not o.section else None
 
     def mouseReleaseEvent(self, e):
         if e.button() != Qt.MouseButton.LeftButton:
@@ -168,13 +188,20 @@ class ListPopup(QWidget):
     closed = Signal()
 
     def __init__(self, trigger: QWidget, options: list[Option], value=None, values=(), multi: bool = False,
-                 row_height: int = 32, max_rows: int = 10, width: int | None = None):
+                 row_height: int = 32, max_rows: int = 10, width: int | None = None,
+                 natural_width: int | None = None):
         super().__init__(trigger.window(), Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint
                          | Qt.WindowType.NoDropShadowWindowHint)
         self.setObjectName("ListPopup")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setAccessibleName(trigger.accessibleName() or "List")
+        # disabled options are skipped by the keyboard: their reasons are read with the list instead
+        from .dropdown import plain_text
+        reasons = [f"{plain_text(o.html)} is unavailable: {o.tip}" for o in options
+                   if not o.enabled and o.tip and not o.section]
+        if reasons:
+            self.setAccessibleDescription(" ".join(r if r.endswith(".") else r + "." for r in reasons))
         self.trigger = trigger
         self.options = options
         self.value = value
@@ -183,14 +210,13 @@ class ListPopup(QWidget):
         self.row_height = row_height
         self.keyboard = False
         self.row_y: list[int] = []
-        y = 0
-        for o in options:
-            self.row_y.append(y)
-            y += SECTION_H if o.section else row_height
-        self._content_h = y
-        from .dropdown import html_width
-        widest = max((html_width(o.html) for o in options if not o.section), default=0)
-        natural = int(PAD_X + (CHECK + 8 if multi else 0) + widest + CHECK_GAP + CHECK + PAD_X)
+        self._layout_rows()
+        if natural_width is None:                 # (long plain lists pass it: no rich-text measuring per option)
+            from .dropdown import html_width
+            widest = max((html_width(o.html) for o in options if not o.section), default=0)
+            natural = int(PAD_X + (CHECK + 8 if multi else 0) + widest + CHECK_GAP + CHECK + PAD_X)
+        else:
+            natural = natural_width
         self.list_width = max(trigger.width(), width or 0, min(natural, 480))
         # the active option starts on the selection (or the first selectable one)
         sel = [i for i in range(len(options)) if self.is_selected(i)]
@@ -208,9 +234,18 @@ class ListPopup(QWidget):
         self.scroll.viewport().setAutoFillBackground(False)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(SHADOW, SHADOW, SHADOW, SHADOW)
-        lay.addWidget(self.scroll)
+        lay.setSpacing(0)
+        lay.addWidget(self.scroll, 1)
         self._place(max_rows)
         self.ensure_visible(self.active)
+
+    def _layout_rows(self) -> None:
+        self.row_y = []
+        y = 0
+        for o in self.options:
+            self.row_y.append(y)
+            y += SECTION_H if o.section else self.row_height
+        self._content_h = y
 
     # -------------------------------------------------------------- model
     def row_h(self, i: int) -> int:

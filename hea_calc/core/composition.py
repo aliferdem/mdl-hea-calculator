@@ -38,6 +38,15 @@ def parse_formula(text: str, datasets: Datasets | None = None) -> dict[str, floa
     Groups multiply their normalised contents: ``(FeCo)2Ni`` = Fe1 Co1 Ni1.
     """
     data = datasets or default_datasets()
+    formula, basis = split_basis(text)
+    if basis is not None:
+        # a basis-labelled name (results label, 2026-10-28): at.% amounts are atomic as written; wt.% amounts are
+        # converted through the molar masses - never read as stoichiometry
+        amounts = parse_formula(formula, data)
+        if basis == "wt":
+            x = to_fractions(amounts, "wt", data)
+            return {el: 100.0 * v for el, v in x.items()}
+        return amounts
     s = text.strip().replace(" ", "")
     if not s:
         raise FormulaError("Empty formula.")
@@ -245,6 +254,32 @@ def percent_name(at_percent: dict[str, float], decimals: int = 2) -> str:
 
 
 _SUB = str.maketrans("0123456789.", "₀₁₂₃₄₅₆₇₈₉.")
+
+
+BASIS_LABELS = {"at": "at.%", "wt": "wt.%"}
+_BASIS_SUFFIX = re.compile(r"\s*\((at|wt)\.%\)\s*$")
+
+
+def basis_name(values: dict[str, float], basis: str, decimals: int = 4) -> str:
+    """Display label of a percentage-basis input, e.g. ``Cr12Mn20Co3Ni15Cu20Zn20Si10 (at.%)``: the entered
+    percentages in the entered element order, zero amounts omitted, at most ``decimals`` decimals (the input
+    precision) with no trailing zeros and no floating-point residue, and the basis named.  A label only - the
+    calculation always uses the canonical atomic composition, and a wt.% label is never atomic stoichiometry."""
+    if basis not in BASIS_LABELS:
+        raise ValueError(f"Not a percentage basis: {basis!r}.")
+    parts = []
+    for el, v in values.items():
+        if v is None or not math.isfinite(v) or v <= 0:
+            continue
+        s = f"{round(float(v), decimals):.{decimals}f}".rstrip("0").rstrip(".")
+        parts.append(f"{el}{s}")
+    return "".join(parts) + f" ({BASIS_LABELS[basis]})"
+
+
+def split_basis(text: str) -> tuple[str, str | None]:
+    """``("Cr12Mn20", "at")`` from ``"Cr12Mn20 (at.%)"``; ``(text, None)`` without a basis label."""
+    m = _BASIS_SUFFIX.search(text)
+    return (text[:m.start()], m.group(1)) if m else (text, None)
 
 
 def name_segments(name: str) -> list[tuple[str, bool]]:

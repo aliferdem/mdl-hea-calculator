@@ -7,8 +7,8 @@ between Composition and Collection keeps the state of both.
 
 ## Which results are analysed
 
-A collection always belongs to one **calculation run**; runs are never mixed silently. Choose the run and its
-**population**:
+A collection belongs to one **calculation run**, or to runs you combine yourself; runs are never mixed silently.
+Choose the run and its **population**:
 
 * **Full result set** — every result of the run.
 * **Filtered result set** — the results of the run that pass the results-table filter (available while a filter is
@@ -20,6 +20,28 @@ summary line states exactly what is analysed: the number of results, the run and
 The collection is fixed when you create or update it. Sorting, paging and double-clicking in the results table do
 not change it. If you change the table filter, the panel shows **Results filter changed**, and **Update collection**
 applies the change. Removed results disappear from the collection immediately.
+
+While a calculation stores results in the collection's run, the collection keeps the results it was loaded with: it
+does not rebuild itself as results arrive. A notice says that newer results are available, and **Refresh** brings
+them in when you choose. Refresh keeps the run, population, filter and restrictions.
+
+### Combining runs
+
+**Combine runs…** in the run list opens a list of the session's runs, with their type, number of results and status.
+Select two or more and choose **Combine**. The collection then analyses their results together:
+
+* Nothing is copied or merged. Every result keeps its own result and run, and the runs themselves are unchanged.
+  Choose a single run in the run list to go back to it.
+* The same composition calculated in two runs is two results, and each counts once. The collection notice says how
+  many compositions occur in more than one run.
+* Counts, statistics and model distributions use all selected runs together. Missing values are excluded and counted
+  as for one run.
+* Runs can be combined only if they were calculated with the same engine version, datasets and calculation settings.
+  A run that differs is shown but cannot be selected, and its row says why.
+* Expression variables, composition-space grid values and expression blocks belong to single runs, so they are not
+  offered as plot axes or restrictions in a combined collection.
+
+Reports of a combined collection name every contributing run.
 
 ## Tabs
 

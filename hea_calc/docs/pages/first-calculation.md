@@ -59,12 +59,13 @@ and wt.%, and the total mass divided by the number of elements in Mass.
 > these five elements is not equiatomic: it corresponds to 18.99 at.% Co and 21.53 at.% Cr, for example. Use At.
 > ratio or at.% for an equiatomic alloy.
 
-## Step 6 — Try Normalize (optional)
+## Step 6 — Try the balance element (optional)
 
-Select **at.%** under Input column and change the Ni value to 25. The footer reports **Composition sum ≠ 100%** and
-Calculate is unavailable, because at.% and wt.% values must add up to 100. Open the Calculate menu and select
-**Normalize**: the column is rescaled to 100 %, giving 19.0476 for Co, Cr, Fe and Mn and 23.8095 for Ni. Select
-**Set equal** to return to 20.0000 each, then select **At. ratio** again.
+Select **at.%** under Input column. Co, the first element, is the *balance*: its field is greyed out and always
+holds 100 minus the other elements. Change the Ni value to 25: Co becomes 15.0000 at once, and the column still sums
+to 100 %. Now change Ni to 50: the others add up to 110, Co would be −10, so the footer reports **Composition
+exceeds 100%** and Calculate is unavailable until you lower a value — nothing is rescaled for you. Select **Set
+equal** to return to 20.0000 each, then select **At. ratio** again.
 
 ## Step 7 — Calculate
 

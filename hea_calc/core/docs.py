@@ -81,7 +81,10 @@ TREE = _n(HOME, "Documentation Home",
              _n("example-expression", "Parametric Expression: AlxCoCrFeNi",
                 related=("composition-expressions", "plots-statistics"))),
           _n("data-models", "7. Data and Prediction Models",
-             _n("elemental-data", "Elemental Property Data", related=("binary-data", "model-coverage")),
+             _n("elemental-data", "Elemental Property Data", related=("element-properties", "binary-data",
+                                                                     "model-coverage")),
+             _n("element-properties", "Element Property Definitions",
+                related=("elemental-data", "model-availability", "symbols")),
              _n("binary-data", "Binary Interaction Data", related=("elemental-data", "model-coverage")),
              _n("model-coverage", "Prediction Model Coverage", related=("phase-models", "model-availability")),
              _n("phase-models", "Phase-Formation Models M1–M8", related=("model-coverage", "references")),
@@ -111,6 +114,19 @@ def _walk(node: Node, parent: str | None = None, out=None):
 ORDER: list[str] = [n.id for n, _p in _walk(TREE)]             # reading order (depth first)
 NODES: dict[str, Node] = {n.id: n for n, _p in _walk(TREE)}
 PARENT: dict[str, str | None] = {n.id: p for n, p in _walk(TREE)}
+
+
+_CALLOUT_KINDS = (("error", ("error",)),
+                  ("warning", ("common mistake", "warning", "caution", "important", "results are temporary")))
+
+
+def callout_kind(first_line: str) -> str:
+    """A ``> **Lead.**`` callout's notification kind from its bold lead (info unless it warns)."""
+    lead = first_line.strip().lstrip("*").split("**")[0].strip().rstrip(".").lower()
+    for kind, leads in _CALLOUT_KINDS:
+        if any(lead.startswith(x) for x in leads):
+            return kind
+    return "info"
 
 
 def slug(text: str) -> str:
@@ -514,9 +530,16 @@ def to_html(md: str, image_width: int = 640, lead: bool = True) -> str:
                 body.append(lines[i].strip()[1:].strip())
                 i += 1
             paras = "\n".join(body).split("\n\n")
-            inner = "".join(f"<p>{inline(' '.join(p.split(chr(10))))}</p>" for p in paras if p.strip())
-            out.append('<table class="callout" width="100%" cellspacing="0" cellpadding="0"><tr>'
-                       f'<td class="bar" width="3"></td><td class="note">{inner}</td></tr></table>')
+            paras = [p for p in paras if p.strip()]
+            inner = "".join(f'<p class="{"nlast" if j == len(paras) - 1 else "np"}">'
+                            f"{inline(' '.join(p.split(chr(10))))}</p>" for j, p in enumerate(paras))
+            kind = callout_kind(body[0] if body else "")
+            # Carbon inline notification (low contrast), the app's own anatomy (widgets/common.InlineNotification):
+            # tinted surface, 3 px status accent, 20 px filled status icon, the bold lead as the title
+            out.append(f'<table class="callout c-{kind}" width="100%" cellspacing="0" cellpadding="0"><tr>'
+                       f'<td class="bar-{kind}" width="3"></td>'
+                       f'<td class="icon" width="45" valign="top"><img src="notify:{kind}" width="20" height="20"></td>'
+                       f'<td class="note">{inner}</td></tr></table>')
             continue
         m = _ITEM.match(s)
         if m:

@@ -27,15 +27,26 @@ EQUATIONS = {
     "delta": r"$\delta=100\sqrt{\sum_i c_i\left(1-\frac{r_i}{\bar r}\right)^2},\quad \bar r=\sum_i c_i r_i$",
     "tm": r"$T_m=\sum_i c_i\,T_{m,i}$",
     "vec": r"$\mathrm{VEC}=\sum_i c_i\,\mathrm{VEC}_i$",
-    # models
-    "M1": r"$\Omega=\frac{T_m\Delta S_{\mathrm{mix}}}{|\Delta H_{\mathrm{mix}}|}\qquad \mathrm{SS:}\ \Omega\geq 1.1\ \ \mathrm{and}\ \ \delta_{\mathrm{CN12}}\leq 6.6\%$",
-    "M2": r"$\mathrm{SS:}\ \delta\leq 6.6\%,\ -11.6\leq\Delta H_{\mathrm{mix}}\leq 3.2\qquad \mathrm{MG:}\ \delta>6.4\%,\ \Delta H_{\mathrm{mix}}<-12.2$",
-    "M3": r"$\gamma=\frac{1-\sqrt{\frac{(r_S+\bar r)^2-\bar r^2}{(r_S+\bar r)^2}}}{1-\sqrt{\frac{(r_L+\bar r)^2-\bar r^2}{(r_L+\bar r)^2}}}\qquad \mathrm{SS:}\ \gamma<1.175$",
-    "M4": r"$\Lambda=\frac{\Delta S_{\mathrm{mix}}}{\delta^2}\qquad \Lambda>0.96:\ \mathrm{SS},\ \ 0.24\leq\Lambda\leq 0.96:\ \mathrm{SS{+}IM},\ \ \Lambda<0.24:\ \mathrm{IM}$",
-    "M5": r"$\phi=\frac{S_C-S_H}{|S_E|},\ \ S_H=\frac{|\Delta H_{\mathrm{mix}}|}{T_m}\qquad \mathrm{SS:}\ \phi\geq 20$",
+    # models - display-style fractions (\dfrac) and one statement per line (2026-10-28): inline \frac set numerators
+    # and denominators at 70 % and nested ones at 49 % / 34 % of the base size (M3's gamma was unreadable); the
+    # mathematics is unchanged, only its typesetting
+    "M1": [r"$\Omega=\dfrac{T_m\Delta S_{\mathrm{mix}}}{|\Delta H_{\mathrm{mix}}|}$",
+                     r"$\mathrm{SS:}\ \Omega\geq 1.1\ \ \mathrm{and}\ \ \delta_{\mathrm{CN12}}\leq 6.6\%$"],
+    "M2": [r"$\mathrm{SS:}\ \delta\leq 6.6\%,\ -11.6\leq\Delta H_{\mathrm{mix}}\leq 3.2$",
+                     r"$\mathrm{MG:}\ \delta>6.4\%,\ \Delta H_{\mathrm{mix}}<-12.2$"],
+    "M3": [r"$\gamma=\dfrac{1-\sqrt{\dfrac{(r_S+\bar r)^2-\bar r^2}{(r_S+\bar r)^2}}}"
+                     r"{1-\sqrt{\dfrac{(r_L+\bar r)^2-\bar r^2}{(r_L+\bar r)^2}}}$",
+                     r"$\mathrm{SS:}\ \gamma<1.175$"],
+    "M4": [r"$\Lambda=\dfrac{\Delta S_{\mathrm{mix}}}{\delta^2}$",
+                     r"$\Lambda>0.96:\ \mathrm{SS},\ \ 0.24\leq\Lambda\leq 0.96:\ \mathrm{SS{+}IM},\ \ \Lambda<0.24:\ \mathrm{IM}$"],
+    "M5": [r"$\phi=\dfrac{S_C-S_H}{|S_E|},\ \ S_H=\dfrac{|\Delta H_{\mathrm{mix}}|}{T_m}$",
+                     r"$\mathrm{SS:}\ \phi\geq 20$"],
     "M6": r"$-T\,\Delta S_{\mathrm{mix}}<\Delta H_{f}(i,j)<37\ \mathrm{meV\,atom^{-1}}\quad \forall\,i,j$",
-    "M7": r"$k_1^{\mathrm{cr}}(T)=1+(1-k_2)\frac{T\Delta S_{\mathrm{mix}}}{|\Delta H_{\mathrm{mix}}|},\ \ k_1=\frac{\Delta H_{\mathrm{IM}}}{\Delta H_{\mathrm{mix}}}\qquad \mathrm{SS:}\ k_1<k_1^{\mathrm{cr}}$",
-    "M8": r"$\Phi=\frac{\Delta G_{\mathrm{ss}}}{-|\Delta G_{\max}|},\ \ \Delta G_{\mathrm{ss}}=\Delta H_{\mathrm{ss}}-T_m\Delta S_{\mathrm{mix}}\qquad \mathrm{SS:}\ \Phi\geq 1,\ \delta_{\mathrm{CN12}}\leq 6.6\%$",
+    "M7": [r"$k_1^{\mathrm{cr}}(T)=1+(1-k_2)\dfrac{T\Delta S_{\mathrm{mix}}}{|\Delta H_{\mathrm{mix}}|}$",
+                     r"$k_1=\dfrac{\Delta H_{\mathrm{IM}}}{\Delta H_{\mathrm{mix}}}$",
+                     r"$\mathrm{SS:}\ k_1<k_1^{\mathrm{cr}}$"],
+    "M8": [r"$\Phi=\dfrac{\Delta G_{\mathrm{ss}}}{-|\Delta G_{\max}|},\ \ \Delta G_{\mathrm{ss}}=\Delta H_{\mathrm{ss}}-T_m\Delta S_{\mathrm{mix}}$",
+                     r"$\mathrm{SS:}\ \Phi\geq 1,\ \delta_{\mathrm{CN12}}\leq 6.6\%$"],
 }
 
 
@@ -57,5 +68,18 @@ def render(key: str, tex: str, size: float = 13.0) -> Path:
 
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
-    for k, tex in EQUATIONS.items():
-        print(render(k, tex))
+    import sys
+    keys = sys.argv[1:] or list(EQUATIONS)
+    for k in keys:
+        tex = EQUATIONS[k]
+        if isinstance(tex, list):
+            # one SVG per statement (<key>_1.svg, <key>_2.svg, ...): the widget stacks them (widgets/equation.py)
+            (OUT / f"{k}.svg").unlink(missing_ok=True)
+            for old in OUT.glob(f"{k}_*.svg"):
+                old.unlink()
+            for i, line in enumerate(tex, 1):
+                print(render(f"{k}_{i}", line))
+        else:
+            for old in OUT.glob(f"{k}_*.svg"):
+                old.unlink()
+            print(render(k, tex))

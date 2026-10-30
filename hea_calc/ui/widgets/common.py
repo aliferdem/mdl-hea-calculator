@@ -68,17 +68,19 @@ def refresh_style(w: QWidget) -> None:
 
 
 class Panel(QFrame):
-    """Layer-01 container with a 16 px semibold title at the Figma position (20, 20)."""
+    """Layer-01 container with the Figma panel header: 40 px, a body-compact-01 title at x = 16 and the panel's
+    40 × 40 collapse button on the right edge (``collapse_btn``; ``collapsible=False`` leaves it out)."""
 
-    def __init__(self, title: str = "", parent=None):
+    def __init__(self, title: str = "", parent=None, collapsible: bool = True):
         super().__init__(parent)
+        from ..theme import PANEL_HEADER_HEIGHT
         self.setObjectName("Panel")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.root = QVBoxLayout(self)
         self.root.setContentsMargins(0, 0, 0, 0)
         self.root.setSpacing(0)
         self.title_row = QHBoxLayout()
-        self.title_row.setContentsMargins(PANEL_PADDING_X, 0, PANEL_PADDING_X, 0)
+        self.title_row.setContentsMargins(PANEL_PADDING_X, 0, 0, 0)
         self.title_row.setSpacing(4)
         self.title = QLabel(title)
         self.title.setObjectName("PanelTitle")
@@ -87,8 +89,13 @@ class Panel(QFrame):
         self.title_row.addWidget(self.title)
         self.title_row.addWidget(self.title_suffix)
         self.title_row.addStretch(1)
+        self.collapse_btn = None
+        if collapsible and title:
+            from .status_tag import HeaderIconButton
+            self.collapse_btn = HeaderIconButton("panel_collapse", f"Collapse {title}")
+            self.title_row.addWidget(self.collapse_btn)
         holder = QWidget()
-        holder.setFixedHeight(56)
+        holder.setFixedHeight(PANEL_HEADER_HEIGHT)
         holder.setLayout(self.title_row)
         self.title_holder = holder
         self.root.addWidget(holder)
@@ -171,20 +178,34 @@ class Illustration(QWidget):
         p.end()
 
 
+# Empty states (2026-10-28): the illustration / title / body group is centred vertically in the region it is
+# given, optically - 45 % of the free height above it, 55 % below - with at least ``EMPTY_MIN_TOP`` above it, so
+# it follows the panel's height and never clips.
+EMPTY_ABOVE, EMPTY_BELOW = 9, 11          # stretch factors: 9 / 20 = 45 % of the free space above the group
+EMPTY_MIN_TOP = 16
+
+
+def empty_top(free: int, minimum: int = EMPTY_MIN_TOP) -> int:
+    """Top offset of an empty-state group in a region with ``free`` px to spare (painted empty states): 45 % of the
+    free height, never less than ``minimum`` (so a region at its natural height keeps the design's offset)."""
+    return max(minimum, round(free * EMPTY_ABOVE / (EMPTY_ABOVE + EMPTY_BELOW)))
+
+
 class EmptyState(QWidget):
     """Carbon empty state: illustration, title, body.
 
-    Geometry is the Figma one: the artwork sits at the panel's content margin, 24 px below it the
-    title (20 px), directly under it the body (14 px).  Both are left-aligned, as in the design -
-    Carbon's centred variant is not used anywhere in this app.
+    The artwork sits at the panel's content margin, 24 px below it the title (20 px), directly under it the body
+    (14 px).  Both are left-aligned, as in the design - Carbon's centred variant is not used anywhere in this
+    app.  The group is centred vertically (optically, see ``EMPTY_ABOVE``) in the region.
     """
 
     def __init__(self, title: str, body: str, art: str | None = None, margin_x: int = 40,
-                 margin_top: int = 40, parent=None):
+                 margin_top: int = EMPTY_MIN_TOP, parent=None):
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(margin_x, margin_top, 20, 0)
         lay.setSpacing(0)
+        lay.addStretch(EMPTY_ABOVE)
         if art:
             lay.addWidget(Illustration(art), 0, Qt.AlignmentFlag.AlignLeft)
             lay.addSpacing(24)
@@ -194,7 +215,7 @@ class EmptyState(QWidget):
         bd.setWordWrap(True)
         lay.addWidget(tt)
         lay.addWidget(bd)
-        lay.addStretch(1)
+        lay.addStretch(EMPTY_BELOW)
 
 
 class MenuButton(QPushButton):
@@ -653,6 +674,13 @@ class IconContentSwitcher(QFrame):
         p.end()
 
 
+def tag_width(label: str, font_px: int = 12) -> float:
+    """Width :func:`paint_tag` gives ``label`` (text + 8 px padding on each side)."""
+    f = font(LABEL_01)
+    f.setPixelSize(font_px)
+    return QFontMetrics(f).horizontalAdvance(label) + 16
+
+
 def paint_tag(p: QPainter, rect: QRectF, label: str, *, height: float = 18.0, font_px: int = 12,
               align_left: bool = False) -> float:
     """Paint a read-only Carbon tag (pill) for a scientific result class centred in ``rect``.
@@ -774,8 +802,20 @@ class InlineNotification(QFrame):
         self.title.setVisible(bool(title))
         self.button.setText(action)
         self.button.setVisible(bool(action))
-        self.show()
+        if self.parentWidget() is None:
+            # Not placed yet (built, filled, then added to a layout): showing a parentless widget creates a native
+            # top-level window for a moment - the small window that flashed open and shut in Model details.  It is
+            # shown when it gets its parent instead.
+            self._show_when_parented = True
+        else:
+            self.show()
         self.update()
+
+    def event(self, e):
+        if e.type() == QEvent.Type.ParentChange and getattr(self, "_show_when_parented", False)                 and self.parentWidget() is not None:
+            self._show_when_parented = False
+            self.show()
+        return super().event(e)
 
     def dismiss(self):
         self.hide()
@@ -825,3 +865,174 @@ def install_wheel_guard(w: QWidget) -> None:
         _WHEEL_FILTER = _WheelFilter()
     w.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
     w.installEventFilter(_WHEEL_FILTER)
+
+
+# ====================================================================================== vertical tabs
+from ..theme import HAIRLINE  # noqa: E402 (vertical tabs only)
+class VerticalTab(QAbstractButton):
+    """One Carbon vertical tab, lg (48 px): the label (body-compact-01) on the left and, on the same row, a result-class
+    tag right-aligned (8 px from the label at the least, 16 px padding); a label that cannot fit beside the tag is
+    elided - never overlapped - and the accessible name keeps it in full.
+
+    Carbon v11 Tabs specification (vertical): unselected - ``$layer`` surface, 1 px ``$border-subtle`` bottom, right
+    and left edges, ``$text-secondary`` label; selected - ``$layer`` surface, 1 px ``$border-subtle`` bottom, 3 px
+    ``$border-interactive`` left indicator, no right edge (the tab opens into its panel), ``$text-primary`` label;
+    hover - ``$layer-hover``, ``$text-primary``; focus - the 2 px ``$focus`` frame; 16 px label padding.  ``layer``
+    is the contextual layer the tabs sit on: by default resolved from the host surface (ui/surface.py) - ``01`` in a
+    region of the expanded workspace, ``02`` in a region of the docked panel."""
+
+    HEIGHT = 48
+    INDICATOR = 3
+    TAG_GAP = 8
+
+    def __init__(self, text: str, tag: str = "", layer: str | None = None, parent=None):
+        super().__init__(parent)
+        self.setText(text)
+        self.tag = tag
+        self.layer = layer
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.setFixedHeight(self.HEIGHT)
+        self._hover = False
+        self._sync_name()
+
+    def _sync_name(self) -> None:
+        self.setAccessibleName(self.text() + (f", prediction {self.tag}" if self.tag else ""))
+
+    def set_tag(self, tag: str) -> None:
+        self.tag = tag
+        self._sync_name()
+        self.update()
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+        super().leaveEvent(e)
+
+    def paintEvent(self, _e):
+        from .. import crisp
+        from ..theme import FOCUS_WIDTH
+        p = QPainter(self)
+        r = self.rect()
+        on = self.isChecked()
+        hover = self._hover and self.isEnabled() and not on
+        layer = self.layer or contextual_layer(self)
+        crisp.fill_rect(p, r, t(f"layer-hover-{layer}" if hover else f"layer-{layer}"))
+        edge = t(f"border-subtle-{layer}")
+        crisp.hline_bottom(p, r, edge, HAIRLINE)
+        if on:
+            crisp.fill_rect(p, QRectF(0, 0, self.INDICATOR, r.height()), t("border-interactive"))
+        else:
+            crisp.vline_left(p, r, edge, HAIRLINE)
+            crisp.vline_right(p, r, edge, HAIRLINE)
+        text = "text-primary" if (on or hover) else ("text-secondary" if self.isEnabled() else "text-on-color-disabled")
+        p.setFont(font(BODY_COMPACT_01))
+        p.setPen(QColor(t(text)))
+        x = 16
+        tw = tag_width(self.tag) if self.tag else 0.0
+        tag_x = r.width() - x - tw
+        room = (tag_x - self.TAG_GAP if self.tag else r.width() - x) - x
+        f = font(BODY_COMPACT_01)
+        text = QFontMetrics(f).elidedText(self.text(), Qt.TextElideMode.ElideRight, max(0, int(room)))
+        p.drawText(QRectF(x, 0, max(0.0, room), r.height()),
+                   int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), text)
+        if self.tag:
+            paint_tag(p, QRectF(tag_x, 0, tw, r.height()), self.tag, align_left=True)
+        if self.hasFocus():
+            crisp.frame(p, r, FOCUS_WIDTH, t("focus"))
+        p.end()
+
+
+class VerticalTabs(QWidget):
+    """Carbon vertical tabs: the tab list on the left of its panel, with the tablist's *extended background* (its
+    right edge continues under the last tab).  One tab in the Tab sequence (the selected one); Up / Down, Home / End
+    move the selection (automatic activation, like the app's line tabs).  ``changed(index)`` on every user choice;
+    :meth:`set_index` selects without emitting."""
+
+    changed = Signal(int)
+
+    def __init__(self, labels: list[str], width: int = 280, layer: str | None = None, accessible: str = "",
+                 parent=None):
+        super().__init__(parent)
+        self.layer = layer
+        self.setFixedWidth(width)
+        self.setAccessibleName(accessible or "Tabs")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self.group = QButtonGroup(self)
+        self.group.setExclusive(True)
+        self.tabs: list[VerticalTab] = []
+        for i, text in enumerate(labels):
+            b = VerticalTab(text, layer=layer)
+            self.group.addButton(b, i)
+            b.installEventFilter(self)
+            lay.addWidget(b)
+            self.tabs.append(b)
+        lay.addStretch(1)
+        if self.tabs:
+            self.tabs[0].setChecked(True)
+        self.group.idClicked.connect(self._chosen)
+        self._sync_focus_policy()
+
+    @property
+    def index(self) -> int:
+        return self.group.checkedId()
+
+    def set_index(self, i: int) -> None:
+        if 0 <= i < len(self.tabs) and i != self.index:
+            self.tabs[i].setChecked(True)
+            self._sync_focus_policy()
+            for b in self.tabs:
+                b.update()
+
+    def set_tags(self, tags: list[str]) -> None:
+        for b, tag in zip(self.tabs, tags):
+            b.set_tag(tag)
+
+    def _chosen(self, i: int) -> None:
+        self._sync_focus_policy()
+        for b in self.tabs:
+            b.update()
+        self.changed.emit(i)
+
+    def _sync_focus_policy(self) -> None:
+        """Roving Tab stop: only the selected tab is reached with Tab; arrows move within the list."""
+        for i, b in enumerate(self.tabs):
+            b.setFocusPolicy(Qt.FocusPolicy.TabFocus if i == self.index else Qt.FocusPolicy.ClickFocus)
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.Type.KeyPress and obj in self.tabs:
+            i = self.tabs.index(obj)
+            j = {Qt.Key.Key_Up: i - 1, Qt.Key.Key_Down: i + 1, Qt.Key.Key_Home: 0,
+                 Qt.Key.Key_End: len(self.tabs) - 1}.get(ev.key())
+            if j is not None:
+                j = max(0, min(len(self.tabs) - 1, j))
+                if j != i:
+                    self.tabs[j].setChecked(True)
+                    self.tabs[j].setFocus(Qt.FocusReason.TabFocusReason)
+                    self._chosen(j)
+                return True
+        return super().eventFilter(obj, ev)
+
+    def paintEvent(self, _e):
+        """The extended background under the tabs: the tablist surface with its right edge."""
+        from .. import crisp
+        p = QPainter(self)
+        r = self.rect()
+        layer = self.layer or contextual_layer(self)
+        crisp.fill_rect(p, r, t(f"layer-{layer}"))
+        crisp.vline_right(p, r, t(f"border-subtle-{layer}"), HAIRLINE)
+        p.end()
+
+
+def contextual_layer(widget) -> str:
+    """``"01"`` / ``"02"``: the Carbon layer of the surface ``widget`` sits on (ui/surface.py)."""
+    from ..surface import surface_level
+    return f"{max(1, min(2, surface_level(widget))):02d}"

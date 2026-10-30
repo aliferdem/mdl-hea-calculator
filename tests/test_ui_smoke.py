@@ -111,24 +111,25 @@ def test_representation_switch_preserves_composition(win):
     assert s.composition()[0] == "Al0.5CoCrFeNi"
 
 
-def test_set_equal_and_normalize(win):
+def test_set_equal_and_balance_element(win):
+    """2026-10-27: Normalize was removed from the UI (the balance element replaces it in at.% / wt.%)."""
     click_elements(win, "Fe", "Co", "Ni", "Cr")
     s = win.composition.single
     s.radio_group.button(2).click()  # at.%
     menu_action(win, "Set equal")[1]()                 # Calculate menu (Figma split button)
     assert all(v == pytest.approx(25.0) for v in s.values.values())
-    s.rows["Fe"].fields["at"].setText("50")
-    s._edited("Fe", "at")
-    # at.% no longer sums to 100: the footer says so and Calculate waits for Normalize
+    # Fe (first committed) is the balance: 100 - the others, live
+    s.rows["Co"].fields["at"].setText("40")
+    s._edited("Co", "at")
+    assert s.values["Fe"] == pytest.approx(10.0) and win.composition.calc_btn.isEnabled()
+    # the others above 100 %: invalid, nothing clamped or rescaled, Calculate blocked
+    s.rows["Ni"].fields["at"].setText("50")
+    s._edited("Ni", "at")
     st = win.composition.footer.status.status
     assert st.kind == "error" and "100%" in st.text and not win.composition.calc_btn.isEnabled()
-    assert menu_action(win, "Normalize")[2]
-    menu_action(win, "Normalize")[1]()
-    assert sum(s.values.values()) == pytest.approx(100.0)
-    assert s.values["Fe"] == pytest.approx(50 / 125 * 100)
-    assert win.composition.calc_btn.isEnabled()
-    s.radio_group.button(1).click()  # ratio: normalize disabled
-    assert not menu_action(win, "Normalize")[2]
+    assert s.values["Co"] == 40.0 and s.values["Ni"] == 50.0 and s.values["Cr"] == pytest.approx(25.0)
+    assert s.values["Fe"] is None and s.rows["Fe"].fields["at"].text() == "-15.0000"
+    assert not any(label == "Normalize" for label, *_ in win.composition.footer.calc.menu_items)
     s.radio_group.button(0).click()  # element column: set equal disabled
     assert not menu_action(win, "Set equal")[2]
 
@@ -147,7 +148,7 @@ def test_invalid_input_blocks_calculation(win):
     win.composition.calc_btn.click()
     win.composition.calculate()                        # even a direct request is refused
     assert len(win.table.model.rows) == n
-    assert win.notification.isVisible()
+    assert win.progress.message is not None and win.progress.message[0] == "error"
 
 
 def test_element_column_rename(win):
@@ -181,7 +182,7 @@ def test_sweep_and_pagination(win, app):
     click_elements(win, "Al", "Ti", "V")
     win.composition.set_mode(1)
     sw = win.composition.sweep
-    win.composition.unit_box.setCurrentIndex(1)  # at.%
+    win.composition.set_basis("at")  # at.%
     for row in sw.rows.values():
         row.min.setText("0")
         row.max.setText("100")
@@ -231,8 +232,8 @@ def test_expression_mode(win, app):
     e = win.composition.expr
     assert not win.composition.calc_btn.isEnabled()
     # inline syntax: the range is a line of the same block - no Min / Max / Step fields
-    e.edit.setPlainText("(FeCoNi)1-xAlx\n0 <= x <= 0.5, step=0.1")
-    assert not win.composition.calc_btn.isEnabled(), "draft: Calculate waits for Parse"
+    e.set_text("(FeCoNi)1-xAlx\n0 <= x <= 0.5, step=0.1")
+    assert win.composition.calc_btn.text() == "Parse expression", "draft: Calculate waits for Parse"
     assert e.parse()
     assert not hasattr(e, "var_rows")
     assert set(win.elements.table.selected()) == {"Fe", "Co", "Ni", "Al"}
@@ -253,14 +254,14 @@ def test_expression_mode(win, app):
 def test_expression_blocks_in_ui(win, app):
     win.composition.set_mode(2)
     e = win.composition.expr
-    e.edit.setPlainText("CoCrFeNi\n\nAl{x}CoCrFeNi\n0.5 <= x <= 1, step=0.5")
+    e.set_text("CoCrFeNi\n\nAl{x}CoCrFeNi\n0.5 <= x <= 1, step=0.5")
     assert e.parse()
     settle_counts(win, app)
     win.composition.calc_btn.click()
     wait_worker(win, app)
     assert [r.name for r in win.table.model.rows] == ["CoCrFeNi", "Al0.5CoCrFeNi", "AlCoCrFeNi"]
-    e.edit.setPlainText("FeCo\n\nXq")
-    assert not e.parse() and e.edit.property("invalid")
+    e.set_text("FeCo\n\nXq")
+    assert not e.parse() and e.state() == "error" and e.edit.diagnostics
 
 
 def test_copy_filter_columns_delete(win, app):
@@ -361,8 +362,8 @@ def test_button_sizes_follow_the_carbon_size_property(win, app):
 
     Regression: the selector used to be the Qt property ``size``, which QWidget already declares
     as a read-only QSize, so ``setProperty("size", "md")`` failed silently and every md button
-    rendered at the 32 px sm height.  The current Figma Composition setup footer is 32 px with sm buttons
-    (Calculate 141 × 32, flush with the panel edge), so this is measurable against the design.
+    rendered at the 32 px sm height.  The final Figma Composition setup footer is 40 px with md buttons
+    (Calculate 141 × 40 + a 40 px chevron, flush with the panel edge), so this is measurable against the design.
     """
     from hea_calc.ui.theme import BUTTON_HEIGHT, CONTROL_HEIGHT
     from hea_calc.ui.widgets.common import button
@@ -371,18 +372,21 @@ def test_button_sizes_follow_the_carbon_size_property(win, app):
     probe.show()
     app.processEvents()
     assert (probe.minimumHeight(), probe.maximumHeight()) == (BUTTON_HEIGHT, BUTTON_HEIGHT)
-    sm = [win.composition.clear_btn, win.composition.calc_btn, win.table.export_btn]
-    for b in sm:
-        assert b.property("btnsize") == "sm", b
-        assert (b.minimumHeight(), b.maximumHeight()) == (CONTROL_HEIGHT, CONTROL_HEIGHT), b
-    # the rendered footer matches the component: 32 px, Calculate 141 px wide, the split ends at the panel edge
+    for b in (win.composition.clear_btn, win.composition.calc_btn):
+        assert b.property("btnsize") == "md", b
+        assert (b.minimumHeight(), b.maximumHeight()) == (BUTTON_HEIGHT, BUTTON_HEIGHT), b
+    b = win.table.export_btn
+    # the Results toolbar is 40 px in the final Figma Data table (447:65142): Export is md, 123 x 40
+    assert b.property("btnsize") == "md" and (b.minimumHeight(), b.maximumHeight()) == (BUTTON_HEIGHT, BUTTON_HEIGHT)
+    assert CONTROL_HEIGHT == 32
+    # the rendered footer matches the component: 40 px under a 1 px rule, Calculate 141 px wide
     app.processEvents()
     comp = win.composition
-    assert comp.footer.height() == CONTROL_HEIGHT == comp.calc_btn.height()
+    assert comp.footer.height() == BUTTON_HEIGHT + 1 and comp.calc_btn.height() == BUTTON_HEIGHT
     assert comp.width() == 457 and comp.calc_btn.width() == 141
     right = comp.footer.calc.mapTo(comp, comp.footer.calc.rect().topRight()).x()
     assert right == comp.width() - 1
-    assert comp.footer.mapTo(comp, comp.footer.rect().topLeft()).y() == 465 - 32
+    assert comp.footer.mapTo(comp, comp.footer.rect().topLeft()).y() == 490 - 41      # Figma: rule at y 449
 
 
 def test_empty_states_use_the_exported_illustrations(win, app):
@@ -524,6 +528,13 @@ def test_element_tiles_have_no_tooltip_and_the_right_selected_border(win, app):
     app.processEvents()
 
 
+def _one_result(win, app):
+    """Toolbar actions are disabled on an empty table (Carbon disabled state); give it a result."""
+    comp = {"Co": 1, "Ni": 1}
+    win.calculate("single", ["CoNi"], [comp], [{}])
+    app.processEvents()
+
+
 def test_icon_only_buttons_centre_their_icon(win, app):
     """Every icon-only button centres its icon horizontally and vertically.
 
@@ -535,6 +546,7 @@ def test_icon_only_buttons_centre_their_icon(win, app):
     from hea_calc.ui.widgets.common import IconButton  # noqa: E402
 
     from collections import Counter
+    _one_result(win, app)
 
     def hx(c):
         return f"#{c.red():02x}{c.green():02x}{c.blue():02x}"
@@ -550,8 +562,7 @@ def test_icon_only_buttons_centre_their_icon(win, app):
                 (min(ys) + max(ys) + 1) / 2 - btn.height() / 2)
 
     buttons = [win.table.delete_btn, win.table.filter_btn, win.table.columns_btn,
-               win.table.pagination.prev_btn, win.table.pagination.next_btn,
-               win.composition.expr.edit.parse_btn]
+               win.table.pagination.prev_btn, win.table.pagination.next_btn]
     buttons += win.findChildren(IconButton)
     assert len(buttons) >= 8, "the audit must cover every icon-only button"
     for b in buttons:
@@ -572,51 +583,12 @@ def test_icon_only_buttons_centre_their_icon(win, app):
     assert abs(dx) <= 0.5 and abs(dy) <= 0.5, (dx, dy)
 
 
-def test_content_switcher_surfaces_outline_and_icon_tokens(win, app):
-    """Segment surfaces, the 1 px group outline and the icon tokens, per the reference."""
-    from hea_calc.ui.theme import THEME, t
-
-    sw = win.composition.switcher
-    assert (sw.width(), sw.height()) == (96, 32)
-    assert [i.width() for i in sw.items] == [32, 32, 32], "contiguous 32 px segments, no gaps"
-    app.processEvents()
-    img = sw.grab().toImage().convertToFormat(QImage.Format_RGB32)
-
-    def hx(x, y):
-        return "#" + img.pixelColor(x, y).name().lstrip("#")
-
-    assert t("switcher-selected") == "#404040" and hx(16, 16) == "#404040", "selected surface"
-    assert t("switcher-unselected") == "#212121" and hx(34, 16) == "#212121", "unselected surface"
-    assert t("border-strong-02") == "#8d8d8d"
-    assert hx(48, 0) == "#8d8d8d" and hx(48, 31) == "#8d8d8d", "1 px outline, top and bottom"
-    assert hx(95, 16) == "#8d8d8d", "1 px outline, right edge"
-    # the selected frame is 1 px of border-inverse over the selected surface
-    assert hx(0, 16) == "#f4f4f4" and hx(31, 16) == "#f4f4f4"
-
-    # icon tokens: bright when selected or hovered, dim otherwise.  Measured on the frame's grab,
-    # which is what the window actually shows (an item's own grab leaves the surface transparent).
-    assert t("icon-primary") == "#f4f4f4" and t("icon-secondary") == "#c6c6c6"
-
-    def icon_peak(index):
-        frame = sw.grab().toImage().convertToFormat(QImage.Format.Format_RGB32)
-        x0 = index * 32 + 8
-        return max((frame.pixelColor(x, y).red() for y in range(8, 24) for x in range(x0, x0 + 16)),
-                   default=0)
-
-    sw.items[2]._hover = True
-    sw.update()
-    app.processEvents()
-    assert icon_peak(2) > 200, "a hovered segment shows the bright icon"
-    sw.items[2]._hover = False
-    sw.update()
-    app.processEvents()
-    assert 150 < icon_peak(2) < 215, f"an unselected segment's icon is #c6c6c6-ish ({icon_peak(2)})"
-    THEME.set_theme("light")
-    app.processEvents()
-    from hea_calc.ui.theme import LIGHT
-    assert LIGHT["icon-primary"] == "#161616" and LIGHT["icon-secondary"] == "#525252"
-    THEME.set_theme("dark")
-    app.processEvents()
+def test_composition_mode_is_the_heading_dropdown_not_a_switcher(win, app):
+    """The final Figma Composition setup has no mode content switcher: the panel title is the mode dropdown."""
+    comp = win.composition
+    assert not hasattr(comp, "switcher")
+    assert comp.heading.height() == 40 and comp.heading.x() == 0
+    assert comp.heading.width() == 16 + comp.heading.text_width() + 8 + 16 + 16
 
 
 def test_mode_single_icon_follows_the_icon_token(win):
@@ -644,15 +616,16 @@ def test_results_toolbar_has_no_copy_button(win):
     assert menu is not None
     labels = [a.text() for a in menu.actions() if a.text() and a.isVisible()]
     assert "Copy table to clipboard" in labels, labels
-    # and the File menu still offers it
-    file_actions = [a.text() for a in win.file_menu.actions()]
-    assert "Copy table" in file_actions, file_actions
+    # and the Edit menu offers it (Copy belongs to Edit - the window-chrome branch's grouping)
+    edit_actions = [a.text() for a in win.edit_menu.actions()]
+    assert "Copy table" in edit_actions, edit_actions
 
 
-def test_export_button_label_and_chevron(win):
+def test_export_button_label_and_chevron(win, app):
     """Label on the padding grid *and* the design's chevron, both measured in reference 21."""
+    _one_result(win, app)
     b = win.table.export_btn
-    assert (b.width(), b.height()) == (123, 32)
+    assert (b.width(), b.height()) == (123, 40)                 # Figma Data table toolbar: 40 px
     img = b.grab().toImage().convertToFormat(QImage.Format.Format_RGB32)
     bg = img.pixelColor(1, 16).name().lstrip("#").upper()
     pts = [(x, y) for y in range(img.height()) for x in range(img.width())

@@ -64,16 +64,33 @@ class WorkspaceTitle(QWidget):
         self.setAccessibleName("Analysis workspace")
 
 
+WORKSPACE_MIN_WIDTH = 1000   # the main window's expanded page: never narrower (it scrolls only vertically)
+PAGE_MARGIN_X = 20
+
+
+def wide_layout_min() -> int:
+    """Narrowest width at which the workspace layout is readable (its Overview: the fixed Composition and Models
+    regions, one Descriptors column, gaps and page margins).  The Analysis window switches to it from here."""
+    from .composition_view import overview_wide_min
+    return max(WORKSPACE_MIN_WIDTH, overview_wide_min() + 2 * PAGE_MARGIN_X)
+
+
 class AnalysisWorkspace(QWidget):
     back_requested = Signal()
 
-    def __init__(self, controller, parent=None):
+    def __init__(self, controller, parent=None, external: bool = False, docked: bool = False):
+        """``external``: the wide layout of the separate Analysis window (analysis/window.py) - the same workspace,
+        without *Back to calculation* (the window is not a page of the calculation window), on the window's
+        surface.  ``docked`` (with ``external``): the wide layout of the main window's docked Analysis slot
+        (``AnalysisDock``) - it keeps the panel's *Collapse Analysis* button."""
         super().__init__(parent)
         self.c = controller
+        self.external = external
+        self.docked = docked
         self.setObjectName("AnaWorkspace")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 24, 20, 24)
+        root.setContentsMargins(PAGE_MARGIN_X, 24, PAGE_MARGIN_X, 24)
         root.setSpacing(20)
         # ---- header (48)
         head = QWidget()
@@ -88,8 +105,10 @@ class AnalysisWorkspace(QWidget):
         hl.addWidget(self.switcher)
         hl.addSpacing(32)
         self.tab_stack = QStackedWidget()
-        # the tabs sit on the page background; when the header is tight they become scrollable (§21)
-        surface = ("background", "background-hover", "layer-active-01")
+        # the tabs sit on the page background - the docked panel's layer-01 in the wide docked layout; when the
+        # header is tight they become scrollable (§21)
+        surface = (("layer-01", "layer-hover-01", "layer-active-01") if docked else
+                   ("shell" if external else "background", "background-hover", "layer-active-01"))
         self.comp_tabs = LineTabs(list(S.COMP_TAB_LABELS), surface=surface)
         self.coll_tabs = LineTabs(list(S.COLL_TAB_LABELS), surface=surface)
         self.tab_stack.addWidget(self.comp_tabs)
@@ -105,11 +124,24 @@ class AnalysisWorkspace(QWidget):
         self.identity_slot.addWidget(self.identity)
         hl.addLayout(self.identity_slot)
         hl.addSpacing(8)
+        # docked (the main window's Analysis slot in its wide layout): the panel's own header actions, in the
+        # compact panel's order - Collapse Analysis, Expand analysis (the dedicated expanded workspace: a wide
+        # docked layout is not that workspace), then Options
+        self.collapse_btn = self.expand_btn = None
+        if docked:
+            from ..widgets.status_tag import HeaderIconButton
+            self.collapse_btn = HeaderIconButton("panel_collapse", "Collapse Analysis")
+            hl.addWidget(self.collapse_btn)
+            self.expand_btn = HeaderIconButton("maximize", "Expand analysis (Ctrl+Shift+E)")
+            self.expand_btn.setAccessibleName("Expand analysis")
+            hl.addWidget(self.expand_btn)
         self.overflow_btn = IconButton("overflow_menu_vertical", "Options")
         hl.addWidget(self.overflow_btn)
         hl.addSpacing(8)
         self.back = BackButton()
         hl.addWidget(self.back)
+        if external:
+            self.back.hide()
         root.addWidget(head)
         self.head = head
         self.identity_row = QWidget()
@@ -128,9 +160,11 @@ class AnalysisWorkspace(QWidget):
         for content in (self.composition, self.composition_details):
             content.batch_mass = controller.batch_mass
             controller.batch_mass_changed.connect(content.set_batch_mass)
-        # Model details selection list (6.png): compact 40 px rows, the selected model filled; no chevron - choosing
-        # a model shows its details beside the list, it does not navigate
-        self.model_list = DataTable([("Model", None)], [], 40, activatable=True, header=False, chevron=False)
+        # Model details: Carbon vertical tabs M1-M8 (2026-10-28; formerly a separate list panel beside the details
+        # panel) - one Models region, the selected model's details in the tab panel
+        from ..widgets.common import VerticalTabs
+        self.model_tabs = VerticalTabs([f"{k} {MD.MODELS[k].short}" for k in MODEL_KEYS], width=280,
+                                       accessible="Models")
         self._build_comp_pages()
         self.collection = CollectionContent(controller, "W")
         self.body.addWidget(self.comp_body)
@@ -143,7 +177,7 @@ class AnalysisWorkspace(QWidget):
         for content in (self.composition, self.composition_details):
             content.open_tab.connect(lambda tab: self.c.apply(S.set_tab, tab))
             content.model_selected.connect(lambda m: self.c.apply(S.select_model, m))
-        self.model_list.activated.connect(lambda i: self.c.apply(S.select_model, MODEL_KEYS[i]))
+        self.model_tabs.changed.connect(lambda i: self.c.apply(S.select_model, MODEL_KEYS[i]))
         self.back.clicked.connect(self.back_requested.emit)
         self.overflow_btn.clicked.connect(self.open_overflow)
         controller.state_changed.connect(self._sync)
@@ -159,8 +193,10 @@ class AnalysisWorkspace(QWidget):
     def header_needs(self) -> int:
         """Width the one-row header needs with every tab visible and the identity text beside them."""
         tabs = self.tab_stack.currentWidget()
+        back = 0 if self.external else self.back.width()
+        collapse = sum(b.width() for b in (self.collapse_btn, self.expand_btn) if b is not None)
         return (self.title.sizeHint().width() + 36 + self.switcher.width() + 32 + tabs.natural + 24
-                + self.identity.sizeHint().width() + 8 + self.overflow_btn.width() + 8 + self.back.width())
+                + self.identity.sizeHint().width() + 8 + self.overflow_btn.width() + 8 + back + collapse)
 
     def _reflow_header(self) -> None:
         wrap = bool(self.identity.text()) and self.header_needs() > self.head.width()
@@ -183,19 +219,21 @@ class AnalysisWorkspace(QWidget):
     def _build_comp_pages(self) -> None:
         # overview / descriptors / models share one CompositionContent (W layouts); model details adds the list
         self.comp_body.addWidget(self.composition)
+        # one region (layer-01): the tab list flush with its left edge, the tab panel (the model's details) beside it
         md = QWidget()
+        md.setObjectName("AnaRegion")
+        md.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        md.setAccessibleName("Models")
         ml = QHBoxLayout(md)
         ml.setContentsMargins(0, 0, 0, 0)
-        ml.setSpacing(20)
-        lst = _Region()
-        lst.setFixedWidth(280)
-        lst.add(label("Models", "heading02"))
-        lst.add(self.model_list)
-        lst.lay.addStretch(1)
-        ml.addWidget(lst)
-        reg = _Region()
-        reg.add(self.composition_details, 1)
-        ml.addWidget(reg, 1)
+        ml.setSpacing(0)
+        ml.addWidget(self.model_tabs)
+        panel = QWidget()
+        pl = QVBoxLayout(panel)
+        pl.setContentsMargins(20, 20, 20, 20)
+        pl.addWidget(self.composition_details, 1)
+        ml.addWidget(panel, 1)
+        self.model_region = md
         self.comp_body.addWidget(md)
 
     # ------------------------------------------------------------------ state -> view
@@ -214,8 +252,7 @@ class AnalysisWorkspace(QWidget):
         self.composition.set_model(new.model)
         self.composition_details.set_model(new.model)
         self.composition.set_search(new.descriptor_search, new.full_precision)
-        self.model_list.selected = MODEL_KEYS.index(new.model)
-        self.model_list.update()
+        self.model_tabs.set_index(MODEL_KEYS.index(new.model))
         if ctx == 1 and (old is None or old.context != new.context):
             self.c.ensure_scope()
         if old is not None and (old.active != new.active or old.active_gone != new.active_gone):
@@ -247,20 +284,12 @@ class AnalysisWorkspace(QWidget):
             self.composition.set_empty("No composition selected",
                                        "Double-click a row in the results table to analyse that composition here.")
             self.composition_details.set_empty("No composition selected", "")
-            self.model_list.set_rows([])
+            self.model_tabs.set_tags([""] * len(MODEL_KEYS))
         else:
             info = self.c.run_info(self.c.record.run_id) if self.c.record is not None else None
             self.composition.set_result(row, info, self.c.record)
             self.composition_details.set_result(row, info, self.c.record)
-            rows = []
-            for k in MODEL_KEYS:
-                o = row.result.models[k]
-                rows.append([Cell(f"<b>{k}</b> &nbsp;<span style='font-size:12px'>{MD.MODELS[k].short}</span>",
-                                  tag=None)])
-                rows[-1].append(Cell(tag=o.label))
-            self.model_list.columns = [("Model", None), ("", 96)]
-            self.model_list.show_header = False
-            self.model_list.set_rows(rows)
+            self.model_tabs.set_tags([row.result.models[k].label for k in MODEL_KEYS])
         self._identity()
 
     def _identity(self):
@@ -274,9 +303,10 @@ class AnalysisWorkspace(QWidget):
             if row is None:
                 self.identity.setText("")
                 return
-            from ...core.family import family_key
-            run = f" · Run {self.c.record.run_id}" if self.c.record is not None else ""
-            self.identity.setText(rich(f"{CMP.name_html(row.name)} · {family_key(row.result.composition)}{run}"))
+            from .composition_view import identity_line
+            info = self.c.run_info(self.c.record.run_id) if self.c.record is not None else None
+            origin = identity_line(info)
+            self.identity.setText(rich(f"{CMP.name_html(row.name)}" + (f" · {origin}" if origin else "")))
         else:
             sc = st.scope
             if sc is None:
@@ -284,7 +314,7 @@ class AnalysisWorkspace(QWidget):
                 return
             info = self.c.run_info(sc.run_id)
             n = st.resolved.n if st.resolved else 0
-            text = f"Run {sc.run_id} · {mode_name(info.mode if info else '')} · {BASE_LABELS[sc.base]} · " \
+            text = f"Run {sc.run_id} ({mode_name(info.mode if info else '')}), {BASE_LABELS[sc.base]}, " \
                    f"{n:,} of {self.c.run_count(sc.run_id):,} results"
             if info is not None and info.status == "running":
                 text += " (calculating)"
@@ -299,4 +329,88 @@ class AnalysisWorkspace(QWidget):
         self.title.setFocus(Qt.FocusReason.OtherFocusReason)
 
 
-_ = (QFont, ROW_SM)
+class AnalysisDock(QStackedWidget):
+    """The main window's Analysis slot (upper row): two layouts of the one Analysis, like the separate Analysis
+    window - the compact :class:`~.panel.AnalysisPanel` and, when the slot is as wide as the workspace layout needs
+    (``wide_layout_min``: e.g. Elements and Composition setup collapsed on a wide window), that workspace's layout
+    in its own vertical scroll.  Decided by the width the slot actually gets, in both directions; panel collapse
+    states, the in-window expanded workspace and the controller state are never touched - the views share the
+    controller, so the active result, context, tabs and model selection carry over.  The workspace is created on
+    first use; only the layout on screen renders (``layout_changed`` lets the window re-sync suspension)."""
+
+    layout_changed = Signal(bool)
+
+    def __init__(self, panel, controller, parent=None):
+        super().__init__(parent)
+        self.setObjectName("AnaDock")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # docked Analysis is a layer-01 panel in BOTH layouts: the wide one is still this panel, not a standalone
+        # shell (ui/surface.py; the stylesheet paints #AnaDock and its workspace layer-01, its regions layer-02)
+        self.setProperty("carbon_layer", 1)
+        self.panel = panel
+        self.c = controller
+        self.addWidget(panel)
+        self.workspace = None
+        self.workspace_scroll = None
+        self.wide = False
+
+    def content_width(self) -> int:
+        return self.contentsRect().width()
+
+    def _ensure_workspace(self):
+        if self.workspace is None:
+            from PySide6.QtWidgets import QFrame, QScrollArea
+            from ..widgets.scroll import thin_scrollbars
+            self.workspace = AnalysisWorkspace(self.c, external=True, docked=True)
+            sa = QScrollArea()
+            sa.setObjectName("AnaDockScroll")
+            sa.setWidgetResizable(True)
+            sa.setFrameShape(QFrame.Shape.NoFrame)
+            sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)     # wide only when it fits
+            thin_scrollbars(sa)
+            sa.setWidget(self.workspace)
+            sa.viewport().setAutoFillBackground(False)
+            self.workspace_scroll = sa
+            self.addWidget(sa)
+        return self.workspace
+
+    def choose_layout(self) -> None:
+        wide = self.content_width() >= wide_layout_min()
+        if wide == self.wide and self.currentIndex() == (1 if wide else 0):
+            return
+        fw = self.focusWidget()
+        had_focus = fw is not None and self.isAncestorOf(fw)
+        self.wide = wide
+        if wide:
+            self._ensure_workspace()
+            self.setCurrentWidget(self.workspace_scroll)
+        else:
+            self.setCurrentWidget(self.panel)
+        if had_focus:
+            if wide:
+                self.workspace.focus_title()
+            else:
+                self.panel.setFocus(Qt.FocusReason.OtherFocusReason)
+        self.layout_changed.emit(wide)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.choose_layout()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self.choose_layout()
+
+    def current_view(self):
+        return self.workspace if self.wide else self.panel
+
+    @property
+    def collapse_btns(self) -> list:
+        """Both layouts' Collapse Analysis buttons (UpperPanels points them up / left with the layout)."""
+        btns = [self.panel.collapse_btn]
+        if self.workspace is not None and self.workspace.collapse_btn is not None:
+            btns.append(self.workspace.collapse_btn)
+        return btns
+
+
+_ = (QFont, ROW_SM, Cell, DataTable, _Region)

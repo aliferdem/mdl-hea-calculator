@@ -102,7 +102,7 @@ class AboutWindow(QDialog):
                                  "<span style='font-weight:600'>HEA Calculator</span>", "AboutTitle")
         lay.addWidget(self.title)
         lay.addSpacing(8)
-        self.version = self._label(f"Version {html.escape(__version__)} · Calculation engine "
+        self.version = self._label(f"Version {html.escape(__version__)}, calculation engine "
                                    f"{html.escape(engine_version())}", "AboutMeta")
         lay.addWidget(self.version)
         lay.addSpacing(32)
@@ -120,12 +120,18 @@ class AboutWindow(QDialog):
             lay.addWidget(lab)
             self.sections[heading] = lab
 
-        section("Development", f"{html.escape(AUTHOR)} · Metals Development Laboratory, METU")
+        section("Development", f"{html.escape(AUTHOR)}<br>Metals Development Laboratory, METU")
+        # contact and source code (2026-10-28): the address is a mailto link and selectable text (Copy in its menu);
+        # the repository appears only once its verified URL is set (references.REPOSITORY_URL)
+        contact = f"Email: {_link('mailto:' + R.CONTACT_EMAIL, R.CONTACT_EMAIL)}"
+        if R.REPOSITORY_URL:
+            contact += f"<br>Source code: {_link(R.REPOSITORY_URL, R.REPOSITORY_URL)}"
+        section("Contact", contact)
         o = R.ORIGINAL_SOFTWARE
         section("Original software",
                 f"HEA Calculator is derived from {o['name']}, the open-source program created by "
                 f"{html.escape(o['author'])}. Copyright in the original {o['name']} remains with its author.<br>"
-                f"{_link(o['repository'], 'HEACalculator on GitHub')} · "
+                f"{_link(o['repository'], 'HEACalculator on GitHub')}<br>"
                 f"{_link('https://doi.org/' + o['doi'], 'Cite HEACalculator (Zenodo)')}")
         refs = []
         for i, r in enumerate(R.REFERENCES, 1):
@@ -184,7 +190,7 @@ class AboutWindow(QDialog):
     def _apply_style(self, *_):
         k = THEME.tokens
         self.setStyleSheet(
-            f"#AboutWindow, #AboutBody, #AboutScroll {{ background: {k['layer-01']}; border: none; }}"
+            f"#AboutWindow, #AboutBody, #AboutScroll {{ background: {k['shell']}; border: none; }}"
             f"QLabel {{ font-family: '{FONT_FAMILY}'; background: transparent; }}"
             f"#AboutTitle {{ font-size: 32px; color: {k['text-primary']}; }}"
             f"#AboutMeta {{ font-size: 12px; color: {k['text-secondary']}; letter-spacing: 0.32px; }}"
@@ -195,10 +201,9 @@ class AboutWindow(QDialog):
         for lab in self.labels:
             text = lab.text()
             if "<a " in text:
-                # QLabel ignores QSS for anchors: colour them from the token
-                import re
-                text = re.sub(r"<a (style='[^']*' )?href=", f"<a style='color:{link}; text-decoration:none' href=",
-                              text)
+                # QLabel ignores QSS for anchors (and the windows11 accent wins over the palette): inline colour
+                from .theme import style_links
+                text = style_links(text, link)
                 lab.setText(text)
 
     def text(self) -> str:

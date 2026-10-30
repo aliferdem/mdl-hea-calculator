@@ -85,13 +85,15 @@ def collection(win, app, run, tab="overview"):
 # ====================================================================== embedded shell
 def test_embedded_geometry_and_regions(win, app):
     p = win.analysis
-    assert (p.width(), p.height()) == (805, 465) and p.size_class == "M"
-    assert p.switcher.width() == 224 and p.switcher.height() == 32
+    # Figma Analysis 494:69395 / Main window 501:39126: 829 x 490, 40 px header with the 232 px switcher
+    assert (p.width(), p.height()) == (829, 490) and p.size_class == "M"
+    assert p.switcher.width() == 232 and p.switcher.height() == 32
     assert p.context_stack.height() == 40 and p.tab_stack.height() == 32
-    head_bottom = p.switcher.mapTo(p, QPoint(0, 0)).y() + 32
-    assert head_bottom <= 56
-    assert p.tab_stack.mapTo(p, QPoint(0, 0)).y() == 96, "header 56 + context bar 40"
-    assert p.content_stack.mapTo(p, QPoint(0, 0)).y() == 128
+    # Figma (Mode=Composition): the switcher's box is y = 12 .. 44, overlapping the context bar's empty top 4 px
+    assert p.switcher.mapTo(p, QPoint(0, 0)).y() == 12
+    assert p.overflow_btn.mapTo(p, QPoint(0, 0)).x() + 40 == p.width(), "header buttons flush right"
+    assert p.tab_stack.mapTo(p, QPoint(0, 0)).y() == 80, "header 40 + context bar 40"
+    assert p.content_stack.mapTo(p, QPoint(0, 0)).y() == 112
 
 
 def test_empty_states_and_disabled_controls(win, app):
@@ -300,7 +302,7 @@ def test_line_and_heatmap_for_expressions(win, app):
     c = win.analysis_ctl
     assert c.state.plot.type == LINE
     plot = win.analysis.collection.plot
-    assert plot.spec.kind == "line" and plot.spec.tag == "All 41 points · ordered by x"
+    assert plot.spec.kind == "line" and plot.spec.tag == "All 41 points, ordered by x"
     xs = plot.spec.data["x"]
     assert xs == sorted(xs) and len(xs) == 41
     e2 = add_run(win, app, samples.e2_recipe())
@@ -334,12 +336,24 @@ def test_sampled_and_binned_disclosure(win, app, monkeypatch):
     c.apply(S.set_plot, c.state.plot.with_(representation=SAMPLED))
     settle(win, app)
     spec = win.analysis.collection.plot.spec
-    assert spec.data["representation"] == SAMPLED and spec.hollow
-    assert spec.tag.startswith("Sample · ") and spec.tag.endswith("of 341 points")
+    assert spec.data["representation"] == SAMPLED
+    # filled markers, as RAW (no rings): the centre of a drawn point is its category colour
+    plot = win.analysis.collection.plot
+    plot.grab()
+    settle(win, app)
+    img = plot.grab().toImage()
+    dpr = img.devicePixelRatio()
+    cols = {c.lower() for c, _t, _k in plot._legend_items()} or {None}
+    filled = 0
+    for sx, sy, _k in (plot._screen or [])[:200]:
+        px = img.pixelColor(int(sx * dpr), int(sy * dpr)).name()
+        filled += px in cols
+    assert filled >= 20, "sampled points are filled discs in their category colour"
+    assert spec.tag.startswith("Sample: ") and spec.tag.endswith("of 341 points")
     c.apply(S.set_plot, c.state.plot.with_(representation=BINNED, bins=50))
     settle(win, app)
     spec = win.analysis.collection.plot.spec
-    assert spec.kind == "binned" and spec.tag == "Binned · 50 × 50 cells · 341 results"
+    assert spec.kind == "binned" and spec.tag == "Binned: 50 × 50 cells, 341 results"
     assert sum(cell[2] for cell in spec.data["cells"]) == 341
     _ = queries
 
@@ -418,8 +432,8 @@ def test_plot_pans_by_middle_or_right_drag(win, app, button):
     _mouse(app, plot, QEvent.Type.MouseButtonPress, start, b, b)
     _mouse(app, plot, QEvent.Type.MouseMove, (start[0] + 60, start[1] - 30), Qt.MouseButton.NoButton, b)
     _mouse(app, plot, QEvent.Type.MouseButtonRelease, (start[0] + 60, start[1] - 30), b, Qt.MouseButton.NoButton)
-    assert plot.window is not None
-    x0, x1, y0, y1 = plot.window
+    assert plot.view_window is not None
+    x0, x1, y0, y1 = plot.view_window
     assert x0 < lim[0] and x1 < lim[1], "dragging right moves the window to lower x"
     assert y0 < lim[2] and y1 < lim[3], "dragging up moves the window to lower y"
     assert abs((x1 - x0) - (lim[1] - lim[0])) < 1e-9, "pan keeps the zoom"
@@ -466,10 +480,10 @@ def test_expand_and_back_preserve_state_and_focus(win, app):
     assert win.pages.currentIndex() == 0 and not c.state.expanded
     # (offscreen windows are never active, so ask the window rather than the application)
     assert win.focusWidget() is win.analysis.expand_btn, "focus returns to Expand analysis"
-    win._expand_shortcut.activated.emit()
+    win.expand_action.trigger()      # Ctrl+Shift+E (View > Expand analysis)
     pump(app)
     assert win.pages.currentIndex() == 1
-    win._expand_shortcut.activated.emit()
+    win.expand_action.trigger()      # Ctrl+Shift+E (View > Expand analysis)
     pump(app)
     assert win.pages.currentIndex() == 0
 
@@ -524,14 +538,14 @@ def test_model_details_list_and_mse_a_reference(win, app):
     c.apply(S.set_tab, "model_details")
     win.set_expanded(True)
     settle(win, app)
-    lst = win.workspace.model_list
-    assert lst.row_height == 40 and not lst.chevron and not lst.show_header
-    parent = lst.parentWidget()
-    assert lst.geometry().right() <= parent.width() - 20, "the list keeps the region padding"
+    # 2026-10-28 (C5): Carbon vertical tabs in one Models region (formerly a 40 px list in a separate panel); 48 px single-row tabs (UI regression pass, item 8)
+    tabs = win.workspace.model_tabs
+    assert len(tabs.tabs) == 8 and all(b.height() == 48 for b in tabs.tabs)  # one row since the UI regression pass
+    assert tabs.parentWidget() is win.workspace.model_region and tabs.x() == 0, "flush with the region's left edge"
     for k in MODEL_KEYS:
         c.apply(S.select_model, k)
         settle(win, app)
-        assert lst.selected == MODEL_KEYS.index(k)
+        assert tabs.index == MODEL_KEYS.index(k)
         refs = [lab for lab in win.workspace.composition_details.findChildren(QLabel)
                 if lab.objectName() == "ModelReference"]
         assert len(refs) == 1

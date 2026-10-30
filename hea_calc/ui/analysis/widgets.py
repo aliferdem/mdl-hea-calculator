@@ -23,7 +23,7 @@ import time
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QFontMetricsF, QPainter, QPainterPath
-from PySide6.QtWidgets import (QAbstractButton, QHBoxLayout, QLabel, QSizePolicy, QStackedWidget, QVBoxLayout,
+from PySide6.QtWidgets import (QAbstractButton, QHBoxLayout, QLabel, QSizePolicy, QStackedLayout, QVBoxLayout,
                                QWidget)
 
 from .. import crisp, icons
@@ -35,6 +35,7 @@ from ..widgets.dropdown import (Dropdown, MultiSelect, Popover, RichMenu, html_w
                                 open_popover, paint_html, plain_text, rich, text_doc)
 from ..widgets.scroll import inner_scroll_area
 from ..widgets.tooltip import CARET_W, InfoButton
+from ..surface import ctx
 
 ROW_XS, ROW_SM = 24, 32
 
@@ -51,6 +52,13 @@ def label(text: str, role: str = "body", wrap: bool = False, selectable: bool = 
     return lab
 
 
+def _floating_regions(k: dict) -> str:
+    """The floating window's shell equals layer-01 in the light theme: its regions are then layer-02 (ui/surface.py)."""
+    if k['shell'].lower() == k['layer-01'].lower():
+        return f"#AnalysisWindow #AnaRegion, #AnalysisWindow #AnaRail {{ background: {k['layer-02']}; }}" + chr(10)
+    return ""
+
+
 def stylesheet_rules(k: dict) -> str:
     """Analysis rules appended to the window stylesheet (theme tokens only)."""
     return f"""
@@ -62,8 +70,17 @@ def stylesheet_rules(k: dict) -> str:
 #AnaHeading02 {{ color: {k['text-primary']}; font-size: 16px; font-weight: 600; }}
 #AnaTitle {{ color: {k['text-primary']}; font-size: 20px; }}
 #AnaWorkspace {{ background: {k['background']}; }}
+/* the separate Analysis window: its whole surface is the shell (Gray 100 #161616 / White #ffffff); the light
+   theme's `background` is Gray 10 #f4f4f4, which made the window grey; the panel's components keep their layers */
+#AnalysisWindow, #AnalysisWindow #Panel {{ background: {k['shell']}; }}
+/* its wide layout (the expanded workspace, analysis/window.py) on the same window surface */
+#AnalysisWindow #AnaWorkspace, #AnalysisWindow QScrollArea#AnaWindowScroll {{ background: {k['shell']}; border: none; }}
 #AnaRail, #AnaRegion {{ background: {k['layer-01']}; }}
-#AnaPopover {{ background: transparent; }}
+/* docked Analysis (ui/surface.py): a layer-01 panel in the compact AND the wide layout - the wide layout is not a
+   standalone workspace shell - so its regions are the next layer, layer-02 */
+#AnaDock, #AnaDock #AnaWorkspace, #AnaDock QScrollArea#AnaDockScroll {{ background: {k['layer-01']}; border: none; }}
+#AnaDock #AnaRegion, #AnaDock #AnaRail {{ background: {k['layer-02']}; }}
+{_floating_regions(k)}#AnaPopover {{ background: transparent; }}
 #AnaNotification {{ background: {k['layer-02']}; border-left: 3px solid {k['support-info']}; }}
 #AnaNotification[kind="warning"] {{ border-left: 3px solid {k['support-warning']}; }}
 #AnaNotification[kind="error"] {{ border-left: 3px solid {k['support-error']}; }}
@@ -222,8 +239,16 @@ class SectionHeading(QWidget):
         lay.addWidget(self.title)
         lay.addStretch(1)
         self.summary = label(summary, "label")
-        lay.addWidget(self.summary)                 # parent first: a parentless setVisible(True) opens a window
+        # the summary yields to the title: elided (full text in its Tooltip) instead of widening the column -
+        # a long "8 of 8, 2 SS, 1 SS+IM, ..." no longer pushed the L layout past the window edge
+        from PySide6.QtWidgets import QSizePolicy
+        self.summary.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.summary.setMinimumWidth(0)
+        self._summary_full = summary
+        lay.addWidget(self.summary, 1)              # parent first: a parentless setVisible(True) opens a window
+        lay.setStretch(1, 0)
         self.summary.setVisible(bool(summary))
+        self.summary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.link = None
         if link:
             self.link = button(link, "ghost", "sm")
@@ -234,8 +259,29 @@ class SectionHeading(QWidget):
         self.setFixedHeight(24)
 
     def set_summary(self, text: str) -> None:
+        self._summary_full = text
         self.summary.setText(rich(text))
         self.summary.setVisible(bool(text))
+        self._elide()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._elide()
+
+    def _elide(self) -> None:
+        full = getattr(self, "_summary_full", "")
+        if not full:
+            return
+        from PySide6.QtGui import QFontMetrics
+        plain = plain_text(full)
+        fm = QFontMetrics(self.summary.font())
+        w = self.summary.width()
+        if w > 0 and fm.horizontalAdvance(plain) > w:
+            self.summary.setText(fm.elidedText(plain, Qt.TextElideMode.ElideRight, w))
+            self.summary.setToolTip(plain)
+        else:
+            self.summary.setText(rich(full))
+            self.summary.setToolTip("")
 
 
 # ====================================================================== status icon
@@ -296,12 +342,13 @@ class Cell:
     """A table cell: rich text (``html``), a tag (``tag``), a status icon (``status``) or a bar
     (``bar`` = fraction 0..1).  ``align`` left/right/center; ``tip`` a Tooltip."""
 
-    __slots__ = ("html", "tag", "status", "bar", "align", "tip", "color")
+    __slots__ = ("html", "tag", "status", "bar", "align", "tip", "color", "skeleton")
 
     def __init__(self, html: str = "", tag: str | None = None, status: str | None = None, bar: float | None = None,
-                 align: str = "left", tip: str = "", color: str = ""):
+                 align: str = "left", tip: str = "", color: str = "", skeleton: bool = False):
         self.html, self.tag, self.status, self.bar, self.align, self.tip, self.color = (
             html, tag, status, bar, align, tip, color)
+        self.skeleton = skeleton                 # Carbon skeleton text: the value is still being calculated
 
 
 def C(x, **kw) -> Cell:
@@ -359,7 +406,7 @@ class DataTable(QWidget):
             return 16 + QFontMetrics(f).horizontalAdvance(cell.tag) + 16 + (20 if cell.status else 0) + 8
         if cell.status and not cell.html:
             return 16 + 16 + 8
-        if cell.bar is not None:
+        if cell.bar is not None or cell.skeleton:
             return 64
         if not cell.html:
             return 0
@@ -507,22 +554,22 @@ class DataTable(QWidget):
         w = self.width()
         cols = self.column_rects()
         if self.show_header:
-            crisp.fill_rect(p, QRectF(0, 0, w, ROW_SM), t("header-row"))
+            crisp.fill_rect(p, QRectF(0, 0, w, ROW_SM), ctx(self, "header-row"))
             for (x, cw), c in zip(cols, self.columns):
                 al = c[2] if len(c) > 2 else "left"
                 self._text(p, QRectF(x, 0, cw, ROW_SM), c[0], al, HEADING_COMPACT_01, "text-primary")
         for i, gy in self.group_y.items():
             r = QRectF(0, gy, w, ROW_SM)
-            crisp.hline_bottom(p, r, t("row-border"), HAIRLINE)
+            crisp.hline_bottom(p, r, ctx(self, "row-border"), HAIRLINE)
             paint_html(p, QRectF(16, gy, w - 32, ROW_SM), self.groups[i], HEADING_COMPACT_01, "text-primary")
         for i, row in enumerate(self.rows):
             y = self.row_y[i]
             r = QRectF(0, y, w, self.row_height)
             if i == self.selected:
-                crisp.fill_rect(p, r, t("layer-selected-01"))
+                crisp.fill_rect(p, r, ctx(self, "layer-selected-01"))
             elif i == self.hover:
-                crisp.fill_rect(p, r, t("row-hover"))
-            crisp.hline_bottom(p, r, t("row-border"), HAIRLINE)
+                crisp.fill_rect(p, r, ctx(self, "row-hover"))
+            crisp.hline_bottom(p, r, ctx(self, "row-border"), HAIRLINE)
             for (x, cw), cell, c in zip(cols, row, self.columns):
                 self._cell(p, QRectF(x, y, cw, self.row_height), cell)
             keyboard = self.hasFocus() and self.focus_visible and i == self.focus_row
@@ -549,7 +596,7 @@ class DataTable(QWidget):
 
     def _is_text(self, i: int, ci: int) -> bool:
         cell = self.rows[i][ci]
-        return bool(cell.html) and not cell.tag and cell.bar is None
+        return bool(cell.html) and not cell.tag and cell.bar is None and not cell.skeleton
 
     def display_html(self, i: int, ci: int) -> str:
         """What row ``i`` / column ``ci`` paints: its text, or the truncated text when it overflows."""
@@ -578,9 +625,14 @@ class DataTable(QWidget):
         if cell.status and not cell.html:
             paint_status(p, QRectF(rect.x() + 16, rect.y(), 16, rect.height()), cell.status)
             return
+        if cell.skeleton:                        # Carbon skeleton text (layer-hover-01, no text)
+            wd = min(72.0, max(16.0, rect.width() - 32))
+            x = rect.right() - 16 - wd if cell.align == "right" else rect.x() + 16
+            crisp.fill_rect(p, QRectF(x, rect.center().y() - 4, wd, 8), ctx(self, "layer-hover-01"))
+            return
         if cell.bar is not None:
             track = QRectF(rect.x() + 16, rect.center().y() - 4, rect.width() - 32, 8)
-            crisp.fill_rect(p, track, t("layer-hover-01"))
+            crisp.fill_rect(p, track, ctx(self, "layer-hover-01"))
             crisp.fill_rect(p, QRectF(track.x(), track.y(), track.width() * max(0.0, min(1.0, cell.bar)), 8),
                             cell.color or t("border-strong-01"))
             return
@@ -711,7 +763,7 @@ class _KVRow(QWidget):
 
     def paintEvent(self, _e):
         p = QPainter(self)
-        crisp.hline_bottom(p, self.rect(), t("border-subtle-01"), HAIRLINE)
+        crisp.hline_bottom(p, self.rect(), ctx(self, "border-subtle-01"), HAIRLINE)
         p.end()
 
 
@@ -808,7 +860,7 @@ class Skeleton(QWidget):
         from PySide6.QtGui import QLinearGradient
         p = QPainter(self)
         r = QRectF(self.rect())
-        base = QColor(t("layer-hover-01"))
+        base = QColor(ctx(self, "layer-hover-01"))
         p.fillRect(r, base)
         g = QLinearGradient(r.left() + (self.phase - 0.4) * r.width(), 0, r.left() + self.phase * r.width(), 0)
         hi = QColor(t("layer-02"))
@@ -826,12 +878,14 @@ class EmptyBlock(QWidget):
     action = Signal(str)
 
     def __init__(self, title: str, body: str, art: str | None = "document", buttons=(), centred: bool = False,
-                 margin_x: int = 44, margin_top: int = 24, parent=None):
+                 margin_x: int = 44, margin_top: int = 16, parent=None):
         super().__init__(parent)
-        from ..widgets.common import Illustration
+        from ..widgets.common import EMPTY_ABOVE, EMPTY_BELOW, Illustration
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0 if centred else margin_x, margin_top, 0, 0)
         outer.setSpacing(0)
+        # centred vertically in the region, optically (45 % of the free height above: widgets.common.EMPTY_ABOVE)
+        outer.addStretch(EMPTY_ABOVE)
         col = QWidget()
         lay = QVBoxLayout(col)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -867,18 +921,16 @@ class EmptyBlock(QWidget):
             row.addStretch(1)
             lay.addLayout(row)
         if centred:
-            outer.addStretch(1)
             col.setMaximumWidth(480)
             row_ = QHBoxLayout()
             row_.addStretch(1)
             row_.addWidget(col, 4)
             row_.addStretch(1)
             outer.addLayout(row_)
-            outer.addStretch(2)
         else:
             col.setMaximumWidth(460)
             outer.addWidget(col)
-            outer.addStretch(1)
+        outer.addStretch(EMPTY_BELOW)
 
 
 def hstrip(table: QWidget) -> QWidget:
@@ -895,21 +947,79 @@ def hstrip(table: QWidget) -> QWidget:
     return sa
 
 
-class CurrentStack(QStackedWidget):
-    """A stacked widget sized by its *current* page (QStackedWidget reports the largest page), so a page
-    that grows makes the enclosing scroll page taller and a short page does not inherit a tall neighbour."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.currentChanged.connect(lambda _i: self.updateGeometry())
+class _CurrentPageLayout(QStackedLayout):
+    """A stacked layout measured by its current page only.  QStackedLayout reports the largest size hint and
+    the *largest height-for-width of all pages*; QWidgetItem asks a widget's layout for height-for-width directly
+    (bypassing the widget's virtual), so overriding the widget alone is not enough: a visited Statistics page made
+    every other expanded tab - and the expanding plot - as tall as itself (visual QA F-01)."""
 
     def sizeHint(self):
         w = self.currentWidget()
         return w.sizeHint() if w is not None else super().sizeHint()
 
-    def minimumSizeHint(self):
+    def minimumSize(self):
         w = self.currentWidget()
-        return w.minimumSizeHint() if w is not None else super().minimumSizeHint()
+        if w is None:
+            return super().minimumSize()
+        return w.minimumSizeHint().expandedTo(w.minimumSize())
+
+    def hasHeightForWidth(self):
+        w = self.currentWidget()
+        return w.hasHeightForWidth() if w is not None else False
+
+    def heightForWidth(self, width):
+        w = self.currentWidget()
+        return w.heightForWidth(width) if w is not None else -1
+
+
+class CurrentStack(QWidget):
+    """A stacked widget sized by its *current* page (QStackedWidget reports the largest page), so a page
+    that grows makes the enclosing scroll page taller and a short page does not inherit a tall neighbour.
+    The QStackedWidget API used in the app (addWidget, setCurrentIndex, currentIndex, currentWidget, widget,
+    count, indexOf, currentChanged) is kept."""
+
+    currentChanged = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._stack = _CurrentPageLayout(self)
+        self._stack.setContentsMargins(0, 0, 0, 0)
+        self._stack.currentChanged.connect(self._changed)
+
+    def _changed(self, i: int) -> None:
+        self._stack.invalidate()
+        self.updateGeometry()
+        self.currentChanged.emit(i)
+
+    def addWidget(self, w: QWidget) -> int:
+        return self._stack.addWidget(w)
+
+    def insertWidget(self, i: int, w: QWidget) -> int:
+        return self._stack.insertWidget(i, w)
+
+    def removeWidget(self, w: QWidget) -> None:
+        self._stack.removeWidget(w)
+
+    def setCurrentIndex(self, i: int) -> None:
+        self._stack.setCurrentIndex(i)
+
+    def setCurrentWidget(self, w: QWidget) -> None:
+        self._stack.setCurrentWidget(w)
+
+    def currentIndex(self) -> int:
+        return self._stack.currentIndex()
+
+    def currentWidget(self):
+        return self._stack.currentWidget()
+
+    def widget(self, i: int):
+        return self._stack.widget(i)
+
+    def indexOf(self, w: QWidget) -> int:
+        return self._stack.indexOf(w)
+
+    def count(self) -> int:
+        return self._stack.count()
 
 
 def _scroll_safe() -> int:
@@ -953,7 +1063,7 @@ class Divider(QWidget):
 
     def paintEvent(self, _e):
         p = QPainter(self)
-        crisp.fill_rect(p, QRectF(self.rect()), t("border-subtle-01"))
+        crisp.fill_rect(p, QRectF(self.rect()), ctx(self, "border-subtle-01"))
         p.end()
 
 

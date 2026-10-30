@@ -24,6 +24,7 @@ from ...core.analysis.metrics import (DESCRIPTORS, DESCRIPTORS_LIST, GROUPS, KEY
 from ...core.engine import MODEL_KEYS, MODELS, NA, STATUS_DATA_SUSPECT, STATUS_EXTRAPOLATED, TROPAREVSKY_UPPER_MEV
 from ...core.family import family_key
 from .. import crisp, icons
+from ..surface import ctx
 from ..theme import BODY_COMPACT_01, HAIRLINE, LABEL_01, font, t
 from ..widgets.common import IconButton, TagLabel
 from ..widgets.common import retire
@@ -34,7 +35,7 @@ from .widgets import (ROW_SM, ROW_XS, ActionableNotification, Cell, DataTable, D
 
 PAGES = ("overview", "descriptors", "models", "model_details")
 MODE_NAMES = {"single": "Single composition", "sweep": "Composition space", "expression": "Composition expression",
-              "import": "Imported compositions", "recalc": "Recalculation"}
+              "import": "Imported compositions", "recalc": "Recalculation", "combined": "Combined runs"}
 
 
 def mode_name(mode: str | None) -> str:
@@ -79,6 +80,13 @@ def kv_value(d: dict, key: str, full: bool = False) -> tuple[str, str]:
         return ("Undefined" if und else "N/A"), (und or "Not available (missing data)")
     text = format_value(key, v, full)
     return text, f"{text} ({full_precision(v)} exactly as calculated)" if isinstance(v, float) else text
+
+
+def identity_line(info) -> str:
+    """"<calculation mode> · Run <n>" of a result's run, or "" when the run is unknown."""
+    if info is None:
+        return ""
+    return f"{mode_name(info.mode)} · Run {info.run_id}"
 
 
 class _Anchor(QWidget):
@@ -138,7 +146,7 @@ class PairWindow(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         axis_y = 44
         a, b = self._x(self.lower), self._x(self.upper)
-        crisp.fill_rect(p, QRectF(a, axis_y - 8, b - a, 16), t("layer-hover-01"))
+        crisp.fill_rect(p, QRectF(a, axis_y - 8, b - a, 16), ctx(self, "layer-hover-01"))
         crisp.hline(p, 12, self.width() - 12, axis_y, t("border-strong-01"), HAIRLINE)
         p.setFont(font(LABEL_01))
         for v, txt in ((self.lower, f"{format_value('hf_lower', self.lower)} <"), (self.upper, f"< {self.upper:g}")):
@@ -431,7 +439,8 @@ class CompositionContent(CurrentStack):
                 (f"Mass ({format_mass(self.batch_mass)} g batch)", None, "right")]
         rows = [[el, Cell(f"{reps['at'][el]:.2f}", align="right"), Cell(f"{reps['ratio'][el]:.3f}", align="right"),
                  Cell(f"{reps['wt'][el]:.2f}", align="right"),
-                 Cell(f"{reps['mass'][el]:.4f}", align="right", tip=f"{reps['mass'][el]:.6g} g")]
+                 Cell(f"{reps['mass'][el]:.4f}", align="right")]      # no Tooltip: the value and its unit (in the
+                # column heading) are on screen; a truncated value still shows its full text (DataTable overflow)
                 for el in res.composition]
         return DataTable(cols, rows, ROW_SM if ws else ROW_XS)
 
@@ -488,16 +497,12 @@ class CompositionContent(CurrentStack):
                 parts.append("calculated " + info.created.replace("T", " ")[:16])
             if info.engine_version:
                 parts.append(f"engine {info.engine_version}")
-        return " · ".join(parts)
+        return ", ".join(parts)
 
     def identity_text(self) -> str:
-        res = self.row.result
-        fam = family_key(res.composition) or ""
-        n = len([x for x in res.composition.values() if x > 0])
-        parts = [fam, f"{n} elements"]
-        if self.info is not None:
-            parts += [f"Run {self.info.run_id}", mode_name(self.info.mode)]
-        return " · ".join(parts)
+        """The composition's origin - "Composition space · Run 1".  The alloy is the title's tag and its family and
+        element count are in Overview, so they are not repeated here (Analysis metadata clean-up, 2026-10-25)."""
+        return identity_line(self.info)
 
     # -------------------------------------------------------------- Overview
     def _overview(self) -> QWidget:
@@ -532,7 +537,7 @@ class CompositionContent(CurrentStack):
         ml.setContentsMargins(0, 0, 0, 0)
         ml.setSpacing(8)
         n_eval, summary = MD.summary_line({k: res.models[k].label for k in MODEL_KEYS})
-        ml.addWidget(SectionHeading("Model predictions", f"{n_eval} of 8 evaluated" + (f" · {summary}" if summary else "")))
+        ml.addWidget(SectionHeading("Model predictions", f"{n_eval} of 8 evaluated" + (f", {summary}" if summary else "")))
         per_row = 4 if cls in ("S",) else 8
         strip = ModelStrip(res.models, per_row=per_row, cell_w=96 if cls == "S" else 88)
         strip.activated.connect(self._model_from_strip)
@@ -556,7 +561,7 @@ class CompositionContent(CurrentStack):
             rl.setSpacing(16)
             strip_l = ModelStrip(res.models, per_row=4, cell_w=88)
             strip_l.activated.connect(self._model_from_strip)
-            rl.addWidget(SectionHeading("Model predictions", f"{n_eval} of 8 · {summary}" if summary else f"{n_eval} of 8"))
+            rl.addWidget(SectionHeading("Model predictions", f"{n_eval} of 8, {summary}" if summary else f"{n_eval} of 8"))
             rl.addWidget(strip_l)
             rl.addWidget(quality)
             rl.addStretch(1)
@@ -591,7 +596,7 @@ class CompositionContent(CurrentStack):
         host = QWidget()
         row = QHBoxLayout(host)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(20)
+        row.setSpacing(REGION_GAP)
         # Composition panel (440)
         comp, cl = self._region("Composition (normalised)")
         cl.addWidget(self.composition_table(ws=True))
@@ -607,15 +612,18 @@ class CompositionContent(CurrentStack):
         cs.addStretch(1)
         cl.addLayout(cs)
         cl.addStretch(1)
-        comp.setFixedWidth(440)
+        comp.setFixedWidth(COMP_REGION_W)
         row.addWidget(comp)
-        # Descriptors panel (two columns of groups)
+        # Descriptors panel (two columns of groups, stacked when the region is narrower than two key-value columns:
+        # side by side below that they overlapped - the region is what is left beside the fixed 440 + 520 regions)
         desc, dl = self._region("Descriptors")
-        cols = QHBoxLayout()
-        cols.setSpacing(24)
+        columns = []
         for groups in (GROUPS[:3], GROUPS[3:6]):
-            col = QVBoxLayout()
+            col_w = QWidget()
+            col = QVBoxLayout(col_w)
+            col.setContentsMargins(0, 0, 0, 0)
             col.setSpacing(4)
+            columns.append(col_w)
             for g in groups:
                 col.addWidget(label(g, "heading"))
                 rows = []
@@ -631,15 +639,14 @@ class CompositionContent(CurrentStack):
                 col.addWidget(KVRows(rows, label_w=200, value_w=80, unit_w=90))
                 col.addSpacing(12)
             col.addStretch(1)
-            cols.addLayout(col, 1)
-        dl.addLayout(cols)
+        dl.addWidget(_ReflowColumns(columns, DESC_COL_GAP, kv_row_min()))
         dl.addStretch(1)
         sa_d = scroll_wrap(desc)
         row.addWidget(sa_d, 1)
         # Models & provenance (520)
         mp, ml = self._region()
         n_eval, summary = MD.summary_line({k: res.models[k].label for k in MODEL_KEYS})
-        ml.addWidget(SectionHeading("Model predictions", f"{n_eval} of 8 evaluated · {summary}"))
+        ml.addWidget(SectionHeading("Model predictions", f"{n_eval} of 8 evaluated, {summary}"))
         table = self._models_table(("model", "predstatus", "value"))
         ml.addWidget(table)
         ml.addWidget(label("Data quality", "heading"))
@@ -650,7 +657,7 @@ class CompositionContent(CurrentStack):
             ml.addWidget(label(line, "label", wrap=True))
         ml.addStretch(1)
         sa_m = scroll_wrap(mp)
-        sa_m.setFixedWidth(520)
+        sa_m.setFixedWidth(MODELS_REGION_W)
         row.addWidget(sa_m)
         return host
 
@@ -659,9 +666,9 @@ class CompositionContent(CurrentStack):
         res = self.row.result
         out = []
         if info is not None:
-            out.append(f"Run {info.run_id} · {mode_name(info.mode)} · calculated "
+            out.append(f"Run {info.run_id} ({mode_name(info.mode)}), calculated "
                        f"{(info.created or '').replace('T', ' ')[:16]}")
-            out.append(f"Engine {info.engine_version or '—'} · app {info.app_version or '—'}")
+            out.append(f"Engine {info.engine_version or '—'}, app {info.app_version or '—'}")
         if res.temperature is not None:
             out.append(f"M6/M7 temperature {res.temperature:.1f} K ({_html.escape(res.temperature_source or '')})")
         if info is not None and info.dataset_ids:
@@ -818,7 +825,7 @@ class CompositionContent(CurrentStack):
                     cells.append(Cell(_html.escape(MODELS[k].short) + f" ({MD.YEARS[k]})", color="text-secondary"))
             rows.append(cells)
             # S hides the threshold column, so its row Tooltip carries it; wider tables show everything already
-            tips.append(f"{MD.title(k)} · threshold: {plain_text(MD.threshold_text(k, d))}" if cls == "S" else "")
+            tips.append(f"{MD.title(k)}. Threshold: {plain_text(MD.threshold_text(k, d))}" if cls == "S" else "")
         table = DataTable(cols, rows, ROW_SM, activatable=True, row_tips=tips)
         status_col = list(columns).index("status") if "status" in columns else -1
         combined_col = list(columns).index("predstatus") if "predstatus" in columns else -1
@@ -858,8 +865,8 @@ class CompositionContent(CurrentStack):
         head = QHBoxLayout()
         n_eval, summary = MD.summary_line({k: res.models[k].label for k in MODEL_KEYS})
         n_na = 8 - n_eval
-        text = f"<b>{n_eval} of 8</b> models evaluated" + (f" · {summary}" if summary and not n_na else "") + \
-            (f" · {n_na} not available" if n_na else "")
+        text = f"<b>{n_eval} of 8</b> models evaluated" + (f", {summary}" if summary and not n_na else "") + \
+            (f", {n_na} not available" if n_na else "")
         head.addWidget(label(text, "body"))
         head.addStretch(1)
         if cls != "S":
@@ -941,7 +948,9 @@ class CompositionContent(CurrentStack):
         ll.addSpacing(8)
         ll.addWidget(label("Criterion", "heading"))
         from ..widgets.equation import Equation
-        ll.addWidget(Equation(k, 1.4 if cls == "W" else 1.0))
+        # one statement per line (widgets/equation.py): readable at 1.25 / 1.5 of the design size, never shrunk below
+        # MIN_SCALE of it - display-style fractions keep numerators and denominators at the full size
+        ll.addWidget(Equation(k, 1.5 if cls == "W" else 1.25))
         ll.addWidget(label(_html.escape(MODELS[k].criterion), "label", wrap=True))
         ll.addSpacing(8)
         ll.addWidget(label("Evaluated values", "heading"))
@@ -1023,9 +1032,49 @@ class CompositionContent(CurrentStack):
             row.addWidget(left, 450 if cls != "W" else 980)
             row.addWidget(right, 291 if cls != "W" else 580)
             lay.addLayout(row)
+        lay.addSpacing(8)
+        lay.addWidget(self._figure_section(k, d))
         lay.addStretch(1)
         ol.addWidget(sa, 1)
         return outer
+
+    def _figure_section(self, k: str, d: dict) -> QWidget:
+        """Model figure (2026-10-28): the model's published tabulated data or an illustrative criterion chart
+        (``core/analysis/model_figures``), with this composition marked, its caption and source, and Export."""
+        from ...core.analysis.model_figures import figure
+        from .model_figure import ModelFigureWidget
+        fig = figure(k)
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+        head = QHBoxLayout()
+        head.addWidget(label("Model figure", "heading"))
+        head.addWidget(label("Published tabulated data" if fig.provenance == "publication" else
+                             "Illustrative criterion chart", "secondary"))
+        head.addStretch(1)
+        cur = {"x": d.get(fig.x_key) if fig.x_key else None, "y": d.get(fig.y_key) if fig.y_key else None}
+        chart = ModelFigureWidget(fig, cur)
+        exp = IconButton("download", "Export figure (PNG or SVG)")
+        exp.setFixedSize(32, 32)
+        exp.clicked.connect(lambda: self._export_figure(chart))
+        head.addWidget(exp)
+        lay.addLayout(head)
+        lay.addWidget(label(f"<b>{_html.escape(fig.title)}</b>", "body"))
+        lay.addWidget(chart)
+        lay.addWidget(label(_html.escape(fig.caption), "secondary", wrap=True))
+        src = label("Source: " + _html.escape(fig.source), "secondary", wrap=True, selectable=True)
+        src.setObjectName("ModelFigureSource")
+        lay.addWidget(src)
+        self.figure_widget = chart
+        return w
+
+    def _export_figure(self, chart) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getSaveFileName(self, "Export model figure", f"{chart.fig.model}_figure.png",
+                                              "PNG image (*.png);;SVG image (*.svg)")
+        if path:
+            chart.export(path)
 
     def _step_model(self, step: int) -> None:
         i = MODEL_KEYS.index(self.model)
@@ -1038,6 +1087,56 @@ class CompositionContent(CurrentStack):
 def scroll_wrap(w: QWidget):
     """Workspace regions do not scroll by themselves (one outer workspace scroll, §20)."""
     return w
+
+
+# Workspace Overview geometry (frames 18-31): the fixed Composition and Models regions, the region padding and gaps
+COMP_REGION_W = 440
+MODELS_REGION_W = 520
+REGION_PAD = 20
+REGION_GAP = 20
+DESC_COL_GAP = 24
+
+
+def kv_row_min(label_w: int = 200, value_w: int = 80, unit_w: int = 90, info: bool = True) -> int:
+    """Narrowest key-value row (``_KVRow``): label (min 120 px), value, 8 px, unit, the 24 px info trigger."""
+    return min(label_w, 120) + value_w + 8 + unit_w + (24 if info else 0)
+
+
+def overview_wide_min() -> int:
+    """The narrowest the workspace Overview is readable: its fixed regions, the gaps and one Descriptors column
+    with the region's padding (the two columns stack below two columns' width)."""
+    return COMP_REGION_W + MODELS_REGION_W + 2 * REGION_GAP + kv_row_min() + 2 * REGION_PAD
+
+
+class _ReflowColumns(QWidget):
+    """Two content columns side by side when both fit at their minimum width, one above the other otherwise."""
+
+    def __init__(self, columns, spacing: int, col_min: int, parent=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QBoxLayout
+        self.col_min, self.spacing_ = col_min, spacing
+        self.box = QBoxLayout(QBoxLayout.Direction.LeftToRight, self)
+        self.box.setContentsMargins(0, 0, 0, 0)
+        self.box.setSpacing(spacing)
+        self.box.setSizeConstraint(QBoxLayout.SizeConstraint.SetNoConstraint)
+        for c in columns:
+            self.box.addWidget(c, 1)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+
+    def side_by_side(self, width: int) -> bool:
+        return width >= 2 * self.col_min + self.spacing_
+
+    def minimumSizeHint(self) -> QSize:            # noqa: N802 - Qt API; one column is enough (stacked)
+        return QSize(self.col_min, super().minimumSizeHint().height())
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        from PySide6.QtWidgets import QBoxLayout
+        want = QBoxLayout.Direction.LeftToRight if self.side_by_side(self.width()) else \
+            QBoxLayout.Direction.TopToBottom
+        if self.box.direction() != want:
+            self.box.setDirection(want)
+            self.updateGeometry()
 
 
 _ = (BODY_COMPACT_01, paint_html, QGridLayout)

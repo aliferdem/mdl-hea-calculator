@@ -57,7 +57,7 @@ def size_class_for(width: int) -> str:
 
 class CompositionBar(QWidget):
     """Composition context bar: identity line + "Calculated with T = … K for M6, M7" (Toggletip ANA-PROVENANCE).
-    At S: two lines (alloy name heading / family · elements)."""
+    At S: two lines (alloy name heading / family, elements)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -96,9 +96,10 @@ class AnalysisPanel(QFrame):
 
     expand_requested = Signal()
 
-    def __init__(self, controller, parent=None):
+    def __init__(self, controller, parent=None, external: bool = False):
         super().__init__(parent)
         self.c = controller
+        self.external = external              # the view in the separate Analysis window (analysis/window.py)
         self.setObjectName("Panel")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumWidth(DETAILS_PANEL_MIN)
@@ -106,11 +107,14 @@ class AnalysisPanel(QFrame):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        # ---- header 56
+        # ---- header (Figma Analysis 494:69395: 40 px; title at x = 16, the 232 px switcher, 16 px, then the
+        # collapse, expand and options buttons, 40 x 40 each, flush with the right edge)
+        from ..theme import PANEL_HEADER_HEIGHT
+        from ..widgets.status_tag import HeaderIconButton
         head = QWidget()
-        head.setFixedHeight(56)
+        head.setFixedHeight(PANEL_HEADER_HEIGHT)
         hl = QHBoxLayout(head)
-        hl.setContentsMargins(PANEL_PADDING_X, 0, PANEL_PADDING_X, 0)
+        hl.setContentsMargins(PANEL_PADDING_X, 0, 0, 0)
         hl.setSpacing(0)
         self.title = label("Analysis", "heading02")
         self.title.setObjectName("PanelTitle")
@@ -120,15 +124,27 @@ class AnalysisPanel(QFrame):
         self.suffix.setObjectName("PanelTitleSuffix")
         hl.addWidget(self.suffix)
         hl.addStretch(1)
-        self.switcher = ContentSwitcher(["Composition", "Collection"])
-        hl.addWidget(self.switcher)
-        hl.addSpacing(12)
-        self.expand_btn = IconButton("maximize", "Expand analysis (Ctrl+Shift+E)")
+        self.switcher = ContentSwitcher(["Composition", "Collection"], segment=116)    # Figma: 232 x 32
+        # Figma (Analysis 494:69395, Mode=Composition): the switcher's box is x = right - 356, y = 12 .. 44 - lower
+        # than the 40 px header row (it overlaps the context bar's empty top 4 px), 4 px from the collapse button.
+        # It is a child of the panel placed by _place_switcher (a header child would be clipped at 40 px); the
+        # header reserves its width.
+        self.switcher.setParent(self)
+        self._switcher_slot = QWidget()
+        self._switcher_slot.setFixedSize(232, 32)
+        hl.addWidget(self._switcher_slot)
+        hl.addSpacing(4)
+        self.collapse_btn = HeaderIconButton("panel_collapse", "Collapse Analysis")
+        hl.addWidget(self.collapse_btn)
+        self.expand_btn = HeaderIconButton("maximize", "Expand analysis (Ctrl+Shift+E)")
         self.expand_btn.setAccessibleName("Expand analysis")
         hl.addWidget(self.expand_btn)
-        hl.addSpacing(4)
-        self.overflow_btn = IconButton("overflow_menu_vertical", "Options")
+        self.overflow_btn = HeaderIconButton("overflow_menu_vertical", "Options")
         hl.addWidget(self.overflow_btn)
+        if external:
+            # the window is resized / maximised instead; collapsing a window's only content means nothing
+            self.collapse_btn.hide()
+            self.expand_btn.hide()
         root.addWidget(head)
         # ---- context bar
         self.context_stack = QStackedWidget()
@@ -172,6 +188,8 @@ class AnalysisPanel(QFrame):
         controller.composition_changed.connect(self._composition_signal)
         self._rendered_key = None
         self._has_results = False
+        self.suspended = False                # see set_suspended
+        self._dirty = False
         self._sync(None, controller.state)
         self._composition_changed()
 
@@ -217,6 +235,8 @@ class AnalysisPanel(QFrame):
     # ------------------------------------------------------------------ sizing
     def resizeEvent(self, e):
         super().resizeEvent(e)
+        self.layout().activate()
+        self._place_switcher()
         if getattr(self, "accent", None) is not None:
             self.accent.setGeometry(0, 0, self.width(), 3)
         cls = size_class_for(self.width())
@@ -233,8 +253,46 @@ class AnalysisPanel(QFrame):
     def sizeHint(self) -> QSize:
         return QSize(805, 465)
 
+    SWITCHER_TOP = 12
+
+    def _place_switcher(self) -> None:
+        slot = self._switcher_slot
+        if slot.isVisible():
+            x = slot.mapTo(self, slot.rect().topLeft()).x()
+            self.switcher.setGeometry(x, self.SWITCHER_TOP, slot.width(), slot.height())
+            self.switcher.show()
+            self.switcher.raise_()
+        else:
+            self.switcher.hide()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self, self._place_switcher)      # dropped if the panel is deleted first
+
+    # ------------------------------------------------------------------ suspension
+    def set_suspended(self, on: bool) -> None:
+        """Nobody is looking at this view: the other Analysis view (the separate window, or the embedded panel)
+        is the one in use, or this view's window is minimised or hidden.  While suspended the panel follows no
+        state change and renders nothing - no tab builds, composition renders, data fills or plot images - so the
+        work is never done twice; the queries are the controller's and are shared anyway.  On resume the panel
+        catches up once with the current state (from the controller's cached answers)."""
+        on = bool(on)
+        if on == self.suspended:
+            return
+        self.suspended = on
+        self.collection.set_suspended(on)
+        if not on and self._dirty:
+            self._dirty = False
+            self._sync(None, self.c.state)
+            if self._composition_key() != self._rendered_key:
+                self._composition_changed()
+
     # ------------------------------------------------------------------ state -> view
     def _state_changed(self, old, new):
+        if self.suspended:
+            self._dirty = True
+            return
         self._sync(old, new)
 
     def _sync(self, old, new: S.AnalysisState):
@@ -273,10 +331,17 @@ class AnalysisPanel(QFrame):
         return id(self.c.row), self.c.state.active, self.c.state.active_gone
 
     def _composition_signal(self):
+        if self.suspended:
+            self._dirty = True
+            return
         if self._composition_key() != self._rendered_key:
             self._composition_changed()
 
     def _composition_changed(self):
+        if self.suspended:
+            self._dirty = True
+            self._rendered_key = None              # re-rendered on resume
+            return
         self._rendered_key = self._composition_key()
         st = self.c.state
         row = self.row
@@ -310,9 +375,6 @@ class AnalysisPanel(QFrame):
         prov = provenance_html(res, info)
         compact = self.size_class == "S"
         ident = self.composition.identity_text()
-        if compact:
-            from ...core.family import family_key
-            ident = f"{family_key(res.composition)} · {len(res.composition)} elements"
         self.comp_bar.set_content(name_html, ident, temp, prov, compact)
         self.context_stack.setFixedHeight(48 if compact and self.c.state.context == S.COMPOSITION else 40)
         self._sync_enabled()
@@ -352,9 +414,10 @@ def overflow_menu(parent, c) -> CarbonMenu:
         menu.add_action("Show full precision", lambda: c.apply(S.update, full_precision=not st.full_precision),
                         checkable=True, checked=st.full_precision)
         menu.addSeparator()
-        nw = menu.add_action("Open in new window", None, enabled=False)
-        nw.setToolTip("Not available in this version")
-        menu.addSeparator()
+        if not getattr(parent, "external", False):
+            # the separate Analysis window (the same state, its own window); not offered inside that window
+            menu.add_action("Open in new window", lambda: c.window_requested.emit(), icon="launch")
+            menu.addSeparator()
         menu.add_action("Help: Prediction model coverage", lambda: c.help_requested.emit("models"))
     else:
         has = st.resolved is not None and st.resolved.n > 0

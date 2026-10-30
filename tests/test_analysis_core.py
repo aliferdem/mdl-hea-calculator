@@ -67,6 +67,66 @@ def world(tmp_path_factory, engine):
     repo.close()
 
 
+# ---------------------------------------------------------------- radius-dependent expectations, independent of the engine
+# delta (Guo & Liu / Yang & Zhang form), Lambda (Singh 2014) and the M4 class written out here with the printed Guo & Liu
+# (2011) Table 1 radii (audit section 20), on the recipes' own compositions; quantiles by the normative type-7 rule
+# (stats.py) and bins by queries.histogram's rule.  These replaced numbers pinned from the pre-F2 sample data.
+def _printed_radii() -> dict:
+    import json
+    from conftest import REF
+    return json.loads((REF / "guo_liu_2011_table1.json").read_text(encoding="utf-8"))["radius_pm"]
+
+
+def _delta_pct(comp: dict, r: dict) -> tuple[float, dict]:
+    tot = sum(v for v in comp.values() if v > 0)
+    c = {e: v / tot for e, v in comp.items() if v > 0}
+    rbar = sum(x * r[e] for e, x in c.items())
+    return 100.0 * math.sqrt(sum(x * (1.0 - r[e] / rbar) ** 2 for e, x in c.items())), c
+
+
+def _mcsl_se_over_kb(c: dict, r: dict, xi: float) -> float:
+    """Ye et al., Intermetallics 59 (2015) Appendix (Mansoori et al. 1971): S_E / k_B at packing fraction xi."""
+    d = {e: 2.0 * r[e] for e in c}
+    s3 = sum(c[e] * d[e] ** 3 for e in c)
+    f = {e: c[e] * d[e] ** 3 / s3 for e in c}
+    y3 = sum(f[e] ** (2 / 3) * c[e] ** (1 / 3) for e in c) ** 3
+    k = sum(f[e] / d[e] for e in c)
+    y1 = y2 = 0.0
+    for a, b in __import__("itertools").combinations(list(c), 2):
+        dij = math.sqrt(f[a] * f[b]) * (d[a] - d[b]) ** 2 / (d[a] * d[b]) * math.sqrt(c[a] * c[b])
+        y1 += dij * (d[a] + d[b]) / math.sqrt(d[a] * d[b])
+        y2 += dij * math.sqrt(d[a] * d[b]) * k
+    z = (1 + xi + xi ** 2 - 3 * xi * (y1 + y2 * xi) - xi ** 3 * y3) / (1 - xi) ** 3
+    f_ex = (-1.5 * (1 - y1 + y2 + y3) + (3 * y2 + 2 * y3) / (1 - xi) + 1.5 * (1 - y1 - y2 - y3 / 3) / (1 - xi) ** 2
+            + (y3 - 1) * math.log(1 - xi))
+    return f_ex - math.log(z) - (3 - 2 * xi) / (1 - xi) ** 2 + 3 + math.log((1 + xi + xi ** 2 - xi ** 3) / (1 - xi) ** 3)
+
+
+def _independent_c1():
+    """delta, the M4 class (Singh: SS if Lambda > 0.96, SS+IM if >= 0.24) and the M5 class (Ye, main text: SS if
+    phi = (S_c - S_H)/|S_E| >= 20, S_E the mean over xi = 0.68 / 0.74, S_H = |dH_mix|/T_m with the Takeuchi-Inoue
+    pairs and the rule-of-mixtures T_m of the dataset) for every C1 composition."""
+    from collections import Counter
+    from hea_calc.core.data import Datasets
+    from hea_calc.core.engine import R
+    data = Datasets()
+    r = _printed_radii()
+    deltas, m4, m5, by_family = [], Counter(), Counter(), {}
+    for comp in samples.c1_recipe().materialise()["comps"]:
+        d, c = _delta_pct(comp, r)
+        sc = -R * sum(x * math.log(x) for x in c.values())
+        lam = sc / d ** 2
+        m4["SS" if lam > 0.96 else ("SS+IM" if lam >= 0.24 else "IM")] += 1
+        els = list(c)
+        dh = sum(4 * c[a] * c[b] * data.mixing_enthalpy(a, b) for i, a in enumerate(els) for b in els[i + 1:])
+        tm = sum(c[e] * data.prop(e, "melting_point") for e in els)
+        se = R * 0.5 * (_mcsl_se_over_kb(c, r, 0.68) + _mcsl_se_over_kb(c, r, 0.74))
+        m5["SS" if (sc - abs(dh) * 1000.0 / tm) / abs(se) >= 20.0 else "MP"] += 1
+        deltas.append(d)
+        by_family.setdefault("-".join(sorted(c)), []).append(d)
+    return sorted(deltas), dict(m4), {k: sorted(v) for k, v in by_family.items()}, dict(m5)
+
+
 def sq(world, scope):
     return ScopeQuery(world["con"], scope, world["repo"].get_run(scope.run_id))
 
@@ -88,7 +148,9 @@ def test_c1_statistics_match_sample_data(world):
     assert (round(h["mean"], 2), round(h["sd"], 2), round(h["min"], 2), round(h["q1"], 2), round(h["median"], 2),
             round(h["q3"], 2), round(h["max"], 2)) == (-10.16, 3.00, -14.28, -12.78, -10.76, -7.77, -3.75)
     d = m["delta"]
-    assert (round(d["median"], 2), round(d["q1"], 2), round(d["q3"], 2)) == (5.28, 4.34, 5.82)
+    deltas, _m4, _fam, _m5 = _independent_c1()
+    for k, pq in (("q1", 0.25), ("median", 0.5), ("q3", 0.75)):
+        assert d[k] == pytest.approx(quantile_type7(deltas, pq), abs=1e-9), k
     assert (round(m["phi_king"]["median"], 2), round(m["omega"]["q3"], 2)) == (0.26, 3.18)
     assert all(v["n_valid"] == 341 and v["n_missing"] == 0 for v in m.values())
 
@@ -170,8 +232,8 @@ def test_approximate_quartiles_are_disclosed_and_within_one_bin(world):
 
 def test_c1_model_distributions_and_denominators(world):
     d = sq(world, CollectionScope(world["c1"])).distribution()["models"]
-    expect = {"M1": {"SS": 341}, "M2": {"SS": 203, "MP": 138}, "M3": {"SS": 341}, "M4": {"SS": 54, "SS+IM": 287},
-              "M5": {"SS": 69, "MP": 272}, "M6": {"SS": 11, "IM": 330}, "M7": {"SS": 43, "IM": 298},
+    expect = {"M1": {"SS": 341}, "M2": {"SS": 203, "MP": 138}, "M3": {"SS": 341}, "M4": _independent_c1()[1],
+              "M5": _independent_c1()[3], "M6": {"SS": 11, "IM": 330}, "M7": {"SS": 43, "IM": 298},
               "M8": {"SS": 12, "MP": 329}}
     for k, classes in expect.items():
         assert d[k]["classes"] == classes, k
@@ -184,13 +246,21 @@ def test_c1_histogram_and_box_plot(world):
     q = sq(world, CollectionScope(world["c1"]))
     h = q.histogram("delta")
     assert h["width"] == 0.5 and h["edges"][0] == 0.0
-    assert h["counts"] == [1, 0, 1, 2, 5, 11, 19, 25, 33, 46, 59, 94, 45] and sum(h["counts"]) == 341
+    deltas, _m4, fam, _m5 = _independent_c1()
+    expect = [0] * len(h["counts"])
+    for v in deltas:                                   # queries.histogram: floor((v - start) / width), clipped
+        expect[min(max(int((v - h["edges"][0]) / h["width"]), 0), len(expect) - 1)] += 1
+    assert h["counts"] == expect and sum(h["counts"]) == 341
+    assert h["edges"][-1] > deltas[-1] >= h["edges"][-2]
     box = q.statistics(["delta"], group="family")["metrics"]["delta"]
     a = box["Al-Co-Cr-Fe-Ni"]
     assert a["n_valid"] == 30
-    assert (round(a["min"], 2), round(a["q1"], 2), round(a["median"], 2), round(a["q3"], 2), round(a["max"], 2)) \
-        == (1.66, 4.27, 5.35, 5.97, 6.35)
-    assert box["Co-Cr-Fe-Ni"]["median"] == pytest.approx(0.2977, abs=1e-4)
+    ref = fam["Al-Co-Cr-Fe-Ni"]
+    assert len(ref) == 30
+    assert (a["min"], a["max"]) == pytest.approx((ref[0], ref[-1]), abs=1e-9)
+    for k, pq in (("q1", 0.25), ("median", 0.5), ("q3", 0.75)):
+        assert a[k] == pytest.approx(quantile_type7(ref, pq), abs=1e-9), k
+    assert box["Co-Cr-Fe-Ni"]["median"] == pytest.approx(fam["Co-Cr-Fe-Ni"][0], abs=1e-9)    # one alloy
 
 
 def test_nice_bin_width():
@@ -301,10 +371,10 @@ def test_scatter_raw_and_sampled_disclosure(world):
     assert smp["category_counts"] == {"SS": 203, "MP": 138}        # legend counts refer to the population
     again = q.points("delta", "dhmix", "model:M2", budget=100, sample_target=100)
     assert list(again["ids"]) == list(smp["ids"])                  # fixed seed: reproducible
-    assert representation_text(SAMPLED, shown=20000, population=1039776) == "Sample · 20,000 of 1,039,776 points"
+    assert representation_text(SAMPLED, shown=20000, population=1039776) == "Sample: 20,000 of 1,039,776 points"
     assert representation_text(RAW, shown=341) == "All 341 points"
     assert representation_text(BINNED, bins=(200, 200), population=1039776) == \
-        "Binned · 200 × 200 cells · 1,039,776 results"
+        "Binned: 200 × 200 cells, 1,039,776 results"
 
 
 def test_binned_counts_are_complete(world):
@@ -319,8 +389,10 @@ def test_line_series_is_ordered_and_heatmap_complete(world):
     assert s["y"]["vec"][0] == pytest.approx(8.25) and s["y"]["vec"][-1] == pytest.approx(6.5)
     g = sq(world, CollectionScope(world["e2"])).grid("var:x", "var:y", "delta")
     assert g["complete"] and len(g["xs"]) == len(g["ys"]) == 11 and g["missing_cells"] == 0
-    assert g["cells"][(0.0, 0.0)][0] == pytest.approx(0.2977, abs=1e-4)
-    assert round(g["cells"][(0.5, 0.3)][0], 2) == 5.74
+    r = _printed_radii()
+    assert g["cells"][(0.0, 0.0)][0] == pytest.approx(_delta_pct({"Co": 1, "Cr": 1, "Fe": 1, "Ni": 1}, r)[0], rel=1e-9)
+    assert g["cells"][(0.5, 0.3)][0] == pytest.approx(
+        _delta_pct({"Al": 0.5, "Ti": 0.3, "Co": 1, "Cr": 1, "Fe": 1, "Ni": 1}, r)[0], rel=1e-9)
     gm = sq(world, CollectionScope(world["e2"])).grid("var:x", "var:y", "model:M2")
     counts = {}
     for v, _rid, _name in gm["cells"].values():

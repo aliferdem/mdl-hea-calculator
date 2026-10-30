@@ -197,13 +197,14 @@ def test_inline_notification_anatomy(app, kind):
 
 # ====================================================================== header (CORRECT_THEME_BUTTON, §9)
 @pytest.mark.parametrize("pref, icon", [("light", "brightness_contrast"), ("dark", "asleep"),
-                                        ("system", "contrast")])
+                                        ("system", "screen")])
 def test_theme_button_shows_the_selected_preference(win, app, pref, icon):
     win.prefs.set_theme(pref)
     win._sync_theme_actions()
     pump(app)
-    assert win.header.theme_btn.icon_name == icon
-    checked = [a.text() for a in win.theme_menu.actions() if a.isCheckable() and a.isChecked()]
+    assert win.header.theme_preference == pref                 # the choice lives in View > Theme now
+    assert next(a for a in win.theme_actions.actions() if a.data() == pref).property("trailing_icon") == icon
+    checked = [a.text() for a in win.theme_actions.actions() if a.isChecked()]
     assert checked == [{"light": "Light", "dark": "Dark", "system": "System default"}[pref]]
 
 
@@ -246,7 +247,7 @@ def test_elements_and_composition_keep_fixed_geometry(app, width):
     pump(app)
     try:
         assert w.elements.title.text() == "Elements"
-        assert (w.elements.width(), w.composition.width()) == (578, 457)
+        assert (w.elements.width(), w.composition.width()) == (570, 457)
         tiles = w.elements.table.tiles
         assert {(t_.width(), t_.height()) for t_ in tiles.values()} == {(28, 28)} and TILE_SIZE == 28
         assert tiles["He"].x() - tiles["H"].x() == 17 * (28 + TILE_GAP), "30 px pitch"
@@ -254,10 +255,10 @@ def test_elements_and_composition_keep_fixed_geometry(app, width):
         assert img.pixelColor(0, 14).name() == t("border-subtle-02").lower(), "bordered tile"
         top = w.top_row
         if top.stacked:
-            assert w.composition.geometry().left() == 578 + PANEL_GAP
+            assert w.composition.geometry().left() == 570 + PANEL_GAP
             assert w.details.height() == ANALYSIS_STACKED_HEIGHT and w.details.width() == top.width()
-        else:
-            assert width >= 1920 and w.details.width() >= 805
+        else:                    # wide while Analysis keeps its 454 px minimum (829 is only its preference)
+            assert width >= 1545 and w.details.width() == width - 32 - 570 - 457 - 2 * PANEL_GAP >= 454
     finally:
         w.close()
 
@@ -372,7 +373,7 @@ def test_tight_expanded_workspace_reflows_and_scrolls_once(win, app):
     assert vbars == [], "no region scrolls by itself"
     outer = win.workspace_scroll.verticalScrollBar()
     assert outer.maximum() > 0, "the page is taller than the window: the one outer scroll owns it"
-    assert ws.collection.ws_viz.height() >= 420
+    assert ws.collection.STATS_VIZ_MIN <= ws.collection.ws_viz.height() <= ws.collection.STATS_VIZ_MAX
     c.apply(S.set_tab, "plots")
     for _ in range(8):
         c.wait_idle(30)
@@ -454,7 +455,7 @@ def _start_sweep(win, app, lo, hi, step):
             win.elements.table.tiles[el].click()
     comp = win.composition
     comp.set_mode(1)
-    comp.unit_box.setCurrentIndex(1)
+    comp.set_basis("at")
     for r in comp.sweep.rows.values():
         r.min.setText(str(lo)), r.max.setText(str(hi)), r.step.setText(str(step))
     sw = comp.sweep
@@ -489,13 +490,12 @@ def test_header_calculating_then_success_without_notification(win, app):
     assert p.isVisible() and p.label.text().startswith("Calculating…") and p.label.text().endswith("%")
     assert p.detail.text().startswith("(") and "/94,381)" in p.detail.text()
     assert line.isVisible() and line.kind == "progress" and line.height() == 4
-    g = win.header.geometry()
-    assert (line.geometry().top(), line.width()) == (g.bottom() + 1, line.parentWidget().width()), \
-        "the line sits on the header's bottom edge, across the window"
+    assert line.parentWidget() is win.header and (line.y(), line.width()) == (32, win.header.width()), \
+        "the 4 px line sits directly under the 32 px title bar, across the window (Figma Title bar 572:52862)"
     assert win.header.height() == head_h, "header geometry stays stable"
     comp = win.composition
     assert not comp.calc_btn.isVisible() or not comp.calc_btn.isEnabled()
-    assert not comp.unit_box.isEnabled(), "inputs are read-only while calculating (§52)"
+    assert not comp.heading.isEnabled(), "inputs are read-only while calculating (§52)"
     assert comp.status() is None or comp.status().kind != "ready", "never 'Ready' while a run is going"
     win.cancel_calculation()
     _wait(app, lambda: win.worker is None)
@@ -503,12 +503,12 @@ def test_header_calculating_then_success_without_notification(win, app):
     assert "calculated before cancellation" in p.detail.text()
     _start_sweep(win, app, 10, 30, 10)                      # 51 compositions: to completion
     _wait(app, lambda: win.worker is None and win.progress.result is not None)
-    assert p.label.text() == "Calculation succeeded" and p.detail.text() == "51 compositions calculated successfully"
+    assert p.label.text() == "Calculation completed" and p.detail.text() == "51 compositions calculated successfully"
     assert line.kind == "success" and line.isVisible()
     img = line.grab().toImage()
     assert img.pixelColor(line.width() // 2, 1).name() == t("support-success").lower()
-    assert not win.notification.isVisible(), "§14: no success notification above the results"
-    assert comp.calc_btn.isEnabled() and comp.unit_box.isEnabled()
+    assert win.progress.message is None, "§14: no success notification above the results"
+    assert comp.calc_btn.isEnabled() and comp.heading.isEnabled()
 
 
 def test_header_failure_state(win, app):
@@ -519,6 +519,7 @@ def test_header_failure_state(win, app):
     pump(app)
     assert win.progress.label.text() == "Calculation failed" and win.progress_line.kind == "error"
     assert win.progress.detail.text() == "An error interrupted the calculation before completion."
+    assert win.progress.detail.toolTip() == "boom" and win.progress.message is None
 
 
 # ====================================================================== double-click acknowledgement (§38)
@@ -549,7 +550,7 @@ def test_row_double_click_is_acknowledged_transiently(win, app):
         time.sleep(0.01)
     assert view.flash_row == -1 and view.flash_level == 0, "feedback, not state: the row returns to hover-only"
     assert not acc.isVisible()
-    assert view.selectionMode() == view.SelectionMode.NoSelection and not win.notification.isVisible()
+    assert view.selectionMode() == view.SelectionMode.NoSelection and win.progress.message is None
 
 
 def test_menus_never_elide_their_items(win, app):

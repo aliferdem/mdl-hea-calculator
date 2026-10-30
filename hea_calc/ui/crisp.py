@@ -157,6 +157,22 @@ def hline_bottom(painter: QPainter, rect: QRectF | QRect, color, width: float = 
         p.fillRect(QRect(d.x(), d.y() + d.height() - t, d.width(), t), QColor(color))
 
 
+def vline_left(painter: QPainter, rect: QRectF | QRect, color, width: float = 1.0) -> None:
+    """Rule along the inside left edge of ``rect``."""
+    d = device_rect(painter, rect)
+    t = device_px(painter, width)
+    with _DeviceSpace(painter) as p:
+        p.fillRect(QRect(d.x(), d.y(), t, d.height()), QColor(color))
+
+
+def vline_right(painter: QPainter, rect: QRectF | QRect, color, width: float = 1.0) -> None:
+    """Rule along the inside right edge of ``rect``."""
+    d = device_rect(painter, rect)
+    t = device_px(painter, width)
+    with _DeviceSpace(painter) as p:
+        p.fillRect(QRect(d.x() + d.width() - t, d.y(), t, d.height()), QColor(color))
+
+
 def vline(painter: QPainter, x: float, y0: float, y1: float, color, width: float = 1.0) -> None:
     """Vertical rule whose *left* edge is at logical ``x``."""
     m = painter.deviceTransform()

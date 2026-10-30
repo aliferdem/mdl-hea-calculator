@@ -133,12 +133,28 @@ def _expression_plan(recipe, path: str, block: int):         # pragma: no cover 
     return recipe.plan(path, block, _CANCEL.is_set)
 
 
+def _expression_space(key, recipe):                        # pragma: no cover - runs in a child
+    """The job's ExpressionSpace in this worker, built (and its blocks compiled) once per job, not per chunk."""
+    st = _job_state(key)
+    sp = st.get("space")
+    if sp is None:
+        sp = st["space"] = recipe.space
+    return sp
+
+
 def _expression_chunk(key, recipe, path: str, k: int, block: int, options: dict,
                       deliver=None) -> dict:                  # pragma: no cover - runs in a child
     with open(path, "rb") as fh:
         fh.seek(k * (block // 8))
         bits = fh.read(block // 8)
-    comps, names, envs, blocks = recipe.take(bits, k, block)
+    comps, names, envs, blocks = recipe.take(bits, k, block, _expression_space(key, recipe))
+    return _deliver(calculate_recipe_chunk(_ENGINE, recipe, comps, names, envs, blocks, "expression", options,
+                                           _CANCEL.is_set), deliver)
+
+
+def _expression_direct_chunk(key, recipe, k: int, block: int, options: dict,
+                             deliver=None) -> dict:           # pragma: no cover - runs in a child
+    comps, names, envs, blocks = recipe.take_valid(k, block, _expression_space(key, recipe))
     return _deliver(calculate_recipe_chunk(_ENGINE, recipe, comps, names, envs, blocks, "expression", options,
                                            _CANCEL.is_set), deliver)
 
@@ -565,7 +581,28 @@ class CalculationJob:
         except Exception:                          # noqa: BLE001 - pool shutting down
             pass
 
+    def _run_expression_direct(self, pool, key, recipe, options) -> None:
+        """No duplicates (known from the editor's count of this document): no serial plan - the combination ranges
+        are calculated as they are submitted, each worker keeping the valid combinations of its range.  Same
+        compositions, same order as the plan path.  The range size follows the valid fraction so a chunk holds
+        about ``MAX_CHUNK`` compositions even when most combinations are skipped."""
+        valid, _skipped, _dups, combos, _by = recipe.counts
+        self.plan_counts = recipe.plan_counts()
+        self.total = valid
+        frac = valid / combos if combos else 1.0
+        target = min(MAX_CHUNK, max(MIN_CHUNK, valid // (self._service.workers * 6) or MIN_CHUNK))
+        block = int(min(16 * PLAN_BLOCK, max(PLAN_BLOCK // 4, target / max(frac, 1e-6))))
+        block = max(8, block - block % 8)
+        ranges = -(-combos // block)
+        tasks = (lambda i, k=k: pool.submit(_expression_direct_chunk, key, recipe, k, block, options,
+                                            self._deliver_arg(i))
+                 for k in range(ranges))
+        self._collect(tasks)
+
     def _run_expression(self, pool, key, recipe, options) -> None:
+        if not recipe.dedupe:
+            self._run_expression_direct(pool, key, recipe, options)
+            return
         block = PLAN_BLOCK
         path = os.path.join(self._service.scratch_dir, f"plan-{os.getpid()}-{self.id}-{int(time.time() * 1000)}.bin")
         combos = recipe.estimate()

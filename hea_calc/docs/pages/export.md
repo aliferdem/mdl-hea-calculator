@@ -16,7 +16,7 @@ current sort order. Results are deleted when the calculator closes, so export wh
 | **Copy table to clipboard** | All filtered rows with the visible columns and displayed (rounded) values, tab-separated for a spreadsheet |
 | **Copy visible rows** | The rows of the current page only |
 
-**File › Copy table** (Ctrl+Shift+C) is the same as **Copy table to clipboard**.
+**Edit › Copy table** (Ctrl+Shift+C) is the same as **Copy table to clipboard**.
 
 ### What an exported file contains
 
@@ -39,7 +39,7 @@ criteria, the M6/M7 temperature and the export scope. CSV files are UTF-8.
 |---|---|
 | Composition › **Options** | **Export composition report…** (PDF), **Print composition report…**, **Copy values** |
 | Collection › **Options** | **Export analysis report…** (PDF), **Export statistics (CSV)…**, **Export plotted data (CSV)…**, **Export plot (SVG)…**, **Export plot (PNG)…** |
-| Row menu › **Open details in new window** | **Export report…** in the Alloy details window |
+| The **Analysis window** › **Options** | The same commands as Composition or Collection above |
 
 Reports always use a light, printable layout, whichever theme the calculator uses. The composition report includes
 the composition table with the Mass column for the current total mass.

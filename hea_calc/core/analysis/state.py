@@ -10,7 +10,9 @@ variable changes unless the event's rule lists it:
 4. (removed with the Results checkbox column: there is no checked set)
 5. results removed => the active composition is marked removed if it was one of them; the selection and
    inspector lose them; statistics become stale (data version);
-6. rows committed to the scope's run => statistics stale (data version);
+6. rows committed to the scope's run => the collection is marked as having newer results (``newer_results``);
+   it keeps its snapshot - nothing is re-queried until the user refreshes it (2026-10-28; formerly a throttled
+   automatic re-query every 2 s while the run streamed);
 7. context / tab switches, expand / back => view changes only;
 8. update collection => re-resolved scope; plot configuration kept; surviving selection kept;
 9. "Analyse composition" on a plot point => active := id and context := composition (only this action).
@@ -61,6 +63,7 @@ class AnalysisState:
     full_precision: bool = False
     expanded: bool = False
     data_version: int = 0
+    newer_results: bool = False                # rows arrived for the collection's run since it was loaded
 
     @property
     def scope(self):
@@ -122,6 +125,13 @@ def results_removed(s: AnalysisState, ids) -> AnalysisState:
                    data_version=s.data_version + 1)
 
 
+def active_restored(s: AnalysisState) -> AnalysisState:
+    """Edit > Undo brought the removed active result back (2026-10-28): it is the active composition again."""
+    if s.active is None or s.active_gone != REMOVED:
+        return s
+    return replace(s, active_gone=None, data_version=s.data_version + 1)
+
+
 def table_cleared(s: AnalysisState, recalculated: bool = False, runs_removed=()) -> AnalysisState:
     """Clear table / recalculation: the active result and the collection's run disappear (S-35, S-40, S-41)."""
     gone = RECALCULATED if recalculated else REMOVED
@@ -131,16 +141,22 @@ def table_cleared(s: AnalysisState, recalculated: bool = False, runs_removed=())
 
 
 def run_committed(s: AnalysisState, run_id: int) -> AnalysisState:
-    """Rule 6: new rows of the collection's (running) run make statistics stale."""
-    if s.resolved is not None and s.scope.run_id == run_id:
-        return replace(s, data_version=s.data_version + 1)
+    """Rule 6: new rows of the collection's (running) run: the collection has newer results available; its
+    snapshot is unchanged (no new data version, nothing re-queried) until :func:`refresh_collection`."""
+    if s.resolved is not None and s.scope.run_id == run_id and not s.newer_results:
+        return replace(s, newer_results=True)
     return s
+
+
+def refresh_collection(s: AnalysisState) -> AnalysisState:
+    """The user's Refresh: the same scope, the stored data as it is now (new data version)."""
+    return replace(s, newer_results=False, data_version=s.data_version + 1)
 
 
 def update_collection(s: AnalysisState, resolved: ResolvedScope, surviving=None) -> AnalysisState:
     """Rule 8: a newly resolved scope; plot configuration kept, surviving selection kept."""
     sel = s.selection if surviving is None else frozenset(i for i in s.selection if i in set(surviving))
-    return replace(s, resolved=resolved, stale=None, scope_gone=False, selection=sel,
+    return replace(s, resolved=resolved, stale=None, scope_gone=False, selection=sel, newer_results=False,
                    inspector=s.inspector if s.inspector in sel or surviving is None else None)
 
 

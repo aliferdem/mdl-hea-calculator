@@ -57,11 +57,15 @@ def win(app):
 
 
 def expected_ids(view, filters=(), sort=None, desc=False):
-    """The order computed independently, straight from the dataset."""
+    """The order computed independently, straight from the dataset (the results table shows the newest result
+    first when no column is sorted)."""
     where, params = filter_sql(filters)
-    return [r[0] for r in view.repo.con.execute(
+    ids = [r[0] for r in view.repo.con.execute(
         f"SELECT result_id FROM results WHERE result_id BETWEEN ? AND ?{where} ORDER BY {order_sql(sort, desc)}",
         (view.lo, view.hi, *params))]
+    if sort is None and view.reversed_order:
+        ids.reverse()
+    return ids
 
 
 def assert_pages(view, expected, size=100):
@@ -218,7 +222,7 @@ def run_sweep(win, app):
     for el in ("Fe", "Co", "Ni", "Cr", "Mn"):
         win.elements.table.tiles[el].click()
     win.composition.set_mode(1)
-    win.composition.unit_box.setCurrentIndex(1)
+    win.composition.set_basis("at")
     for r in win.composition.sweep.rows.values():
         r.min.setText("2"), r.max.setText("32"), r.step.setText("2")       # 31 076 alloys
     from conftest import settle_composition

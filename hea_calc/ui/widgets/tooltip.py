@@ -51,7 +51,10 @@ from ..theme import BODY_COMPACT_01, FOCUS_WIDTH, THEME, TOOLTIP_RADIUS, font, t
 CARET_W, CARET_H = 12, 6
 CARET_GAP = 4
 START_CARET_INSET = 22      # start-aligned body: caret centre 22 px from its edge (Group 241.png, 66/3)
-ENTER_DELAY_MS = 100
+# Hover tooltips wait 400 ms (cancelled when the pointer leaves first), so sweeping the pointer across a column of
+# controls - the Composition space locks - does not open a tooltip on every one.  Keyboard focus shows at once;
+# toggletips (click) are not delayed.
+ENTER_DELAY_MS = 400
 LEAVE_DELAY_MS = 0          # no linger: hide as soon as the pointer leaves the trigger
 
 
@@ -286,7 +289,8 @@ def _has_cell_tips(obj) -> bool:
 class ToolTipController(QObject):
     """Application-wide event filter that shows :class:`CarbonToolTip` instead of Qt's tooltip.
 
-    * plain widgets with ``toolTip()``: Enter starts the 100 ms enter delay, Leave hides at once (no linger);
+    * plain widgets with ``toolTip()``: Enter starts the 400 ms enter delay, Leave cancels it or hides at once (no
+      linger); a click or wheel on the trigger cancels a pending tooltip and hides a shown one;
       keyboard focus (Tab / Backtab / Shortcut) shows it at once, focus-out hides it;
     * item views and headers: the per-cell / per-section tooltip, anchored to that cell, refreshed
       as the pointer moves to another cell; painted widgets with cells answer the same way through
@@ -384,8 +388,12 @@ class ToolTipController(QObject):
         elif et == QEvent.Type.KeyPress:
             if ev.key() == Qt.Key.Key_Escape and self.visible():
                 self.hide()
-        elif et in (QEvent.Type.MouseButtonPress, QEvent.Type.Wheel) and self.visible() and obj is not self._source:
-            self.hide()
+        elif et in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick, QEvent.Type.Wheel):
+            if self._pending is not None:
+                self._enter.stop()              # clicked / scrolled before the delay ran out: no tooltip
+                self._pending = None
+            if self.visible() and not self._focus_shown:
+                self.hide()                     # the pointer acted: the hover tip (now possibly outdated) goes
         elif et == QEvent.Type.Hide and obj is self._source:
             self.hide()
         return False
@@ -522,7 +530,10 @@ class Toggletip(QWidget):
         self.move(self.placement.pos)
 
     def _text(self, html: str, width: int) -> QLabel:
-        lab = QLabel(html)
+        from ..theme import style_links
+        # Carbon link on the inverse surface: link-inverse at rest; hover link-inverse-hover + underline; no
+        # visited colour (inline anchor colours: the windows11 accent never leaks in - theme.style_links)
+        lab = QLabel(style_links(html, t("link-inverse")))
         lab.setObjectName("ToggletipText")
         lab.setTextFormat(Qt.TextFormat.RichText)
         lab.setWordWrap(True)
@@ -535,8 +546,21 @@ class Toggletip(QWidget):
         lab.setPalette(pal)
         lab.setOpenExternalLinks(False)
         lab.linkActivated.connect(self._link)
+        lab.setProperty("source_html", html)
+        lab.linkHovered.connect(self._hover_link)
         lab.setFixedWidth(width)
         return lab
+
+    def _hover_link(self, href: str) -> None:
+        """Carbon link hover: link-inverse-hover + underline.  QLabel also reports the end of a hover while it is
+        hidden or torn down (the toggletip closes on a click) - re-rendering then would touch a dying widget."""
+        import shiboken6
+        from ..theme import style_links
+        lab = self.sender()
+        if lab is None or not shiboken6.isValid(lab) or not lab.isVisible() or not self.isVisible():
+            return
+        html = lab.property("source_html") or ""
+        lab.setText(style_links(html, t("link-inverse-hover"), True) if href else style_links(html, t("link-inverse")))
 
     def _link(self, href: str) -> None:
         cb = self.on_link

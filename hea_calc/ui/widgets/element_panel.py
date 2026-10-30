@@ -16,7 +16,7 @@ from ..crisp import device_inset
 from ..responsive import distribute
 from ..theme import (BODY_COMPACT_01, BORDER_SELECTED, ELEMENT_PANEL_WIDTH, FOCUS_WIDTH, LABEL_01, PANEL_PADDING_X,
                      THEME, TILE_GAP, TILE_SIZE, font, t)
-from .common import Divider, InfoButton, Panel
+from .common import Divider, InfoButton, Panel, refresh_style
 
 # Figma places La and Ac at the start of the f-block rows (row 8/9, column 2).
 _DISPLAY_POSITION = {"La": (8, 2), "Ac": (9, 2)}
@@ -47,10 +47,23 @@ class ElementTile(QAbstractButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAccessibleName(symbol)
         self._hover = False
+        self.read_only = False
         self.setFont(font(BODY_COMPACT_01))
 
     def sizeHint(self):
         return QSize(self.width(), self.height())
+
+    def set_read_only(self, on: bool) -> None:
+        """State = Calculating (visual QA F-02): the setup of the running batch is frozen.  The tile keeps its
+        look and still reports hover / focus (element inspection, CORRECT_CALCULATING_STATE), but no mouse,
+        Space or Enter path can change its selection, and it shows no hover / pressed affordance."""
+        self.read_only = bool(on)
+        self.setCursor(Qt.CursorShape.ArrowCursor if on else Qt.CursorShape.PointingHandCursor)
+        self.update()
+
+    def nextCheckState(self):
+        if not self.read_only:
+            super().nextCheckState()
 
     def enterEvent(self, e):
         self._hover = True
@@ -71,9 +84,9 @@ class ElementTile(QAbstractButton):
         # depending on the tile's fractional physical offset.
         p = QPainter(self)
         r = self.rect()
-        if self.isDown():
+        if self.isDown() and not self.read_only:
             bg = t("layer-active-02")
-        elif self._hover:
+        elif self._hover and not self.read_only:
             bg = t("layer-hover-02")
         else:
             bg = t("layer-02")
@@ -140,6 +153,10 @@ class PeriodicTable(QWidget):
     def update_all(self, *_):
         for tile in self.tiles.values():
             tile.update()
+
+    def set_read_only(self, on: bool) -> None:
+        for tile in self.tiles.values():
+            tile.set_read_only(on)
 
     def set_selected(self, element: str, selected: bool) -> None:
         tile = self.tiles.get(element)
@@ -275,8 +292,10 @@ class ModelSupport(QWidget):
         grid.setVerticalSpacing(2)
         grid.setContentsMargins(0, 0, 0, 0)
         self.icons: dict[str, _StatusIcon] = {}
+        self.model_labels: list[QLabel] = []
         for i, key in enumerate(MODEL_KEYS):
             m = QLabel(key)
+            self.model_labels.append(m)
             m.setFixedWidth(20)
             m.setAlignment(Qt.AlignmentFlag.AlignCenter)
             m.setToolTip(MODELS[key].title)
@@ -292,6 +311,11 @@ class ModelSupport(QWidget):
         for ic in self.icons.values():
             ic.update()
 
+    def group_span(self) -> tuple[int, int]:
+        """Left and right x (in this widget) of the M1-M8 labels and indicators: the visible group."""
+        ws = self.model_labels + list(self.icons.values())
+        return min(w.x() for w in ws), max(w.geometry().right() + 1 for w in ws)
+
     def show_element(self, element: str | None):
         if not element:
             for ic in self.icons.values():
@@ -302,31 +326,58 @@ class ModelSupport(QWidget):
             self.icons[key].set_status(status, f"{MODELS[key].title}\n{element}: {text}")
 
 
-class ElementInfo(QWidget):
-    """Figma 220:28174 — element identity line and four property groups separated by dividers."""
+def properties_help_html() -> list:
+    """Toggletip of the element properties: what the values are and the page that defines each of them."""
+    return ["Values of the element under the pointer, from the calculator's elemental dataset; a dash means no "
+            "value (never zero). Each symbol's tooltip gives its name and unit. r and r<sub>CN12</sub> are "
+            "two different radius sets, each used by its own models.",
+            "<a href='help://element-properties'>Property definitions and sources</a>"]
 
+
+class ElementInfo(QWidget):
+    """Figma 220:28174 — element identity line and four property groups separated by dividers.
+
+    Groups by scientific category (each key a symbol; its Tooltip gives the full name, unit and data source):
+    thermophysical (ρ, Tm, Vm) | atomic (atomic mass, the two radius sets) | electronic (VEC and the Miedema
+    φ* and n_ws) | elastic (K, G).  ``r`` is the Guo & Liu (2011, Table 1) radius used by M2-M5 (δ, γ, S_E);
+    ``r_CN12`` the Kittel CN12 metallic radius used for δ_CN12 by M1 (M8 uses no radius) - two datasets, shown side
+    by side, never merged.
+    Formatting only: every value is the dataset value (moduli are stored in 10^10 Pa and shown in GPa)."""
+
+    # (key html, property, value format, scale, tooltip)
     GROUPS = [
-        [("ρ", "density", "{:.2f} g cm<sup>−3</sup>", 1.0), ("T<sub>m</sub>", "melting_point", "{:.0f} K", 1.0),
-         ("VEC", "nvalence", "{:g}", 1.0)],
-        [("At. mass", "atomic_weight", "{:.3f} u", 1.0), ("At. radius", "atomic_radius", "{:.2f} pm", 1.0),
-         ("V<sub>m</sub>", "molar_volume", "{:.2f} cm³ mol<sup>−1</sup>", 1.0)],
-        [("K", "bulk_modulus", "{:.1f} GPa", 10.0), ("G", "shear_modulus", "{:.1f} GPa", 10.0),
-         ("φ", "work_function_phi", "{:.2f} V", 1.0)],
-        [("n<sub>ws</sub>", "n_ws", "{:.2f}", 1.0), ("r<sub>CN12</sub>", "atomic_radius_cn12", "{:.0f} pm", 1.0)],
+        [("ρ", "density", "{:.2f} g cm<sup>−3</sup>", 1.0, "Density (g cm⁻³)"),
+         ("T<sub>m</sub>", "melting_point", "{:.0f} K", 1.0, "Melting point (K)"),
+         ("V<sub>m</sub>", "molar_volume", "{:.2f} cm³ mol<sup>−1</sup>", 1.0,
+          "Molar volume (cm³ mol⁻¹), the Miedema V")],
+        [("m<sub>a</sub>", "atomic_weight", "{:.3f} u", 1.0, "Atomic mass (u = g mol⁻¹)"),
+         # display precision = the source's printed precision: Guo & Liu print 0.001 Å (0.1 pm), Kittel 0.01 Å (1 pm)
+         ("r", "atomic_radius", "{:.1f} pm", 1.0,
+          "Atomic radius (pm), given to 0.1 pm; the radius set used by M2–M5 (δ, γ, Λ, S_E)"),
+         ("r<sub>CN12</sub>", "atomic_radius_cn12", "{:.0f} pm", 1.0,
+          "Metallic radius for coordination number 12 (pm) — a different radius set; used for δ by M1 "
+          "(M8 uses no radius)")],
+        [("VEC", "nvalence", "{:g}", 1.0, "Valence electron count (s + d electrons)"),
+         ("φ*", "work_function_phi", "{:.2f} V", 1.0, "Miedema electronegativity parameter φ* (V)"),
+         ("n<sub>ws</sub>", "n_ws", "{:.2f} d.u.", 1.0,
+          "Miedema electron density at the Wigner–Seitz cell boundary (density units)")],
+        [("K", "bulk_modulus", "{:.1f} GPa", 10.0, "Bulk modulus (GPa)"),
+         ("G", "shear_modulus", "{:.1f} GPa", 10.0, "Shear modulus (GPa)")],
     ]
-    KEY_WIDTHS = (35, 68, 22, 31)
-    GROUP_WIDTHS = (125, 177, 107, 85)    # design (596 px panel)
+    KEY_GAP = 8                           # key column to value column
     GROUP_GAP = 20                        # after each divider; compresses to GROUP_GAP_MIN
     GROUP_GAP_MIN = 10
-    # widest value each group must show without clipping (12 px Plex), used as the group minimum
-    WORST_VALUES = ("22.59 g cm-3", "10.00 cm3 mol-1 *", "450.0 GPa", "190 pm")
 
     def __init__(self, datasets: Datasets, parent=None):
         super().__init__(parent)
         self.data = datasets
+        self._measure()
+        # Identity line, then the four property groups filling the rest of the area
+        # down to a 16 px bottom padding (the rows share the height; the group dividers span all rows).  Formerly
+        # the rows were 18 px with a stretch under them (~38 px unused) and 44 px dividers beside 54 px groups.
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(20, 11, 20, 0)
-        lay.setSpacing(13)
+        lay.setContentsMargins(PANEL_PADDING_X, self.TOP_PAD, PANEL_PADDING_X, self.BOTTOM_PAD)
+        lay.setSpacing(0)
         ident = QHBoxLayout()
         ident.setSpacing(0)
         self.name = QLabel()
@@ -344,17 +395,24 @@ class ElementInfo(QWidget):
             w.setTextFormat(Qt.TextFormat.RichText)
             ident.addWidget(w)
         ident.addStretch(1)
+        # what the values are: a Toggletip with the Documentation page that defines every property shown
+        self.info_btn = InfoButton(properties_help_html, title="Element properties", width=308)
+        ident.addWidget(self.info_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         lay.addLayout(ident)
+        lay.addSpacing(self.IDENT_GAP)        # no rule between identity and grid (removed 2026-10-27)
         row = QHBoxLayout()
         row.setSpacing(0)
         self.values: dict[str, QLabel] = {}
+        self.keys: dict[str, QLabel] = {}
         self.group_wraps: list[QWidget] = []
         self.group_gaps: list[QSpacerItem] = []
+        self.group_dividers: list[QWidget] = []
+        rows = max(len(g) for g in self.GROUPS)
         for gi, group in enumerate(self.GROUPS):
             if gi:
-                d = Divider(vertical=True)
-                d.setFixedHeight(44)
-                row.addWidget(d, 0, Qt.AlignmentFlag.AlignTop)
+                d = Divider(vertical=True)    # full height of the property rows
+                row.addWidget(d)
+                self.group_dividers.append(d)
                 gap = QSpacerItem(self.GROUP_GAP, 1, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
                 row.addSpacerItem(gap)
                 self.group_gaps.append(gap)
@@ -362,41 +420,85 @@ class ElementInfo(QWidget):
             g.setContentsMargins(0, 0, 0, 0)
             g.setHorizontalSpacing(0)
             g.setVerticalSpacing(0)
-            for ri, (key_html, prop, fmt, scale) in enumerate(group):
+            for ri, (key_html, prop, fmt, scale, tip) in enumerate(group):
+                # the tooltip belongs to the symbol only: a label sized to its text inside the key column, so the
+                # hover area is the symbol and the tooltip caret points at it (not at the column's centre)
                 k = QLabel(key_html)
                 k.setObjectName("KeyValueKey")
                 k.setTextFormat(Qt.TextFormat.RichText)
-                k.setFixedSize(self.KEY_WIDTHS[gi], 18)
+                k.setMinimumHeight(self.ROW_MIN)
+                k.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                k.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+                k.setToolTip(tip)
+                kcol = QWidget()
+                kcol.setFixedWidth(self.KEY_WIDTHS[gi])
+                kl = QHBoxLayout(kcol)
+                kl.setContentsMargins(0, 0, 0, 0)
+                kl.setSpacing(0)
+                kl.addWidget(k)
+                kl.addStretch(1)
                 v = QLabel("—")
                 v.setObjectName("KeyValueValue")
                 v.setTextFormat(Qt.TextFormat.RichText)
-                v.setFixedHeight(18)
-                g.addWidget(k, ri, 0)
+                v.setMinimumHeight(self.ROW_MIN)
+                v.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                g.addWidget(kcol, ri, 0)
                 g.addWidget(v, ri, 1)
+                self.keys[prop] = k
                 self.values[prop] = (v, fmt, scale)
+            for ri in range(rows):                # every group has the same row pitch (rows align across groups)
+                g.setRowStretch(ri, 1)
+                g.setRowMinimumHeight(ri, self.ROW_MIN)
             wrap = QWidget()
             wrap.setLayout(g)
             wrap.setFixedWidth(self.GROUP_WIDTHS[gi])
-            row.addWidget(wrap, 0, Qt.AlignmentFlag.AlignTop)
+            row.addWidget(wrap)
             self.group_wraps.append(wrap)
         row.addStretch(1)
-        lay.addLayout(row)
-        lay.addStretch(1)
+        lay.addLayout(row, 1)
         self.show_element(None)
 
+    TOP_PAD = 12
+    BOTTOM_PAD = 16                       # kept visible under the last row
+    IDENT_GAP = 20                        # identity line to the property grid
+    ROW_MIN = 18
+
+    def _value_html(self, el: str, prop: str, fmt: str, scale: float) -> str:
+        val = self.data.prop(el, prop)
+        if val is None:
+            return "—"
+        text = fmt.format(val * scale)
+        if prop == "atomic_radius" and self.data.radius_is_supplementary(el):
+            text += " *"
+        return text
+
+    def _measure(self) -> None:
+        """Key and group widths from the text they hold: the widest key of a group plus ``KEY_GAP``; the widest
+        value any element of the dataset gives in that group (so no value is ever clipped)."""
+        from .dropdown import html_width
+        els = list(self.data.elements)
+        keys, groups = [], []
+        for group in self.GROUPS:
+            kw = max(html_width(f"<b>{k}</b>", LABEL_01) for k, *_r in group)
+            vw = max(html_width(self._value_html(el, prop, fmt, sc), LABEL_01)
+                     for el in els for _k, prop, fmt, sc, _t in group)
+            keys.append(int(kw + 0.999) + self.KEY_GAP)
+            groups.append(keys[-1] + int(vw + 0.999) + 4)
+        self.KEY_WIDTHS = tuple(keys)
+        self.GROUP_WIDTHS = tuple(groups)
+
     def group_minimums(self) -> list[int]:
-        fm = QFontMetrics(font(LABEL_01))
-        return [k + fm.horizontalAdvance(v) + 4 for k, v in zip(self.KEY_WIDTHS, self.WORST_VALUES)]
+        return list(self.GROUP_WIDTHS)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self.fit_groups()
 
     def fit_groups(self):
-        """Design widths at 596 px; on a narrower panel the gaps after the dividers shrink first
-        (20 -> 10 px), then the groups compress proportionally down to their content."""
+        """Measured group widths with 20 px gaps after the dividers; on a narrower panel the gaps shrink first
+        (20 -> 10 px).  Groups never go below their content (``group_minimums``)."""
         n_gaps = len(self.group_gaps)
-        avail = self.width() - 40 - n_gaps                     # 20 px margins, 1 px dividers
+        avail = self.width() - 2 * PANEL_PADDING_X - n_gaps    # the layout's 16 px margins, 1 px dividers
         design = sum(self.GROUP_WIDTHS) + self.GROUP_GAP * n_gaps
         gap = self.GROUP_GAP if avail >= design else max(
             self.GROUP_GAP_MIN, self.GROUP_GAP - -(-(design - avail) // max(1, n_gaps)))
@@ -412,6 +514,8 @@ class ElementInfo(QWidget):
             # design/screenshots/03: the hint owns the whole identity row while nothing is
             # selected, so it is never elided against the Z / category fields.
             self.name.setText("Hover over an element to see its properties")
+            self.name.setProperty("hint", True)
+            refresh_style(self.name)
             # sizeHint is measured before the stylesheet font applies, so allow a margin.
             self.name.setFixedWidth(self.name.sizeHint().width() + 24)
             self.z.setVisible(False)
@@ -421,19 +525,23 @@ class ElementInfo(QWidget):
             return
         self.z.setVisible(True)
         self.cat.setVisible(True)
+        if self.name.property("hint"):
+            self.name.setProperty("hint", False)
+            refresh_style(self.name)
         self.name.setFixedWidth(self.name_min_width)
         self.name.setText(f"{el} <b>{self.data.name(el)}</b>")
         z = int(self.data.prop(el, "atomic_number") or 0)
         self.z.setText(f"Z <b>{z}</b>")
         self.cat.setText(self.data.category(el))
+        tips = {prop: tip for group in self.GROUPS for _k, prop, _f, _s, tip in group}
         for prop, (v, fmt, scale) in self.values.items():
-            val = self.data.prop(el, prop)
-            v.setText("—" if val is None else fmt.format(val * scale))
-            if prop == "atomic_radius" and val is not None and self.data.radius_is_supplementary(el):
-                v.setText(fmt.format(val) + " *")
-                v.setToolTip("Not in Guo & Liu (2011) Table 1 — supplementary value")
+            v.setText(self._value_html(el, prop, fmt, scale))
+            if prop == "atomic_radius" and self.data.prop(el, prop) is not None \
+                    and self.data.radius_is_supplementary(el):
+                self.keys[prop].setToolTip(f"{el}: supplementary radius (*) - not in the source table of this radius set; M2–M5 results that use it "
+                    "are flagged")
             else:
-                v.setToolTip("")
+                self.keys[prop].setToolTip(tips[prop])
 
 
 class ElementPanel(Panel):
@@ -444,15 +552,16 @@ class ElementPanel(Panel):
         super().__init__("Elements", parent)
         self.engine = engine
         self.data = engine.data
-        self.title_holder.setFixedHeight(49)
+        # Figma Elements (570 x 490): the tiles start 16 px under the 40 px header, at x = 16; the divider is at
+        # y = 355 and the element properties follow it
         body = QWidget()
-        body.setFixedHeight(287)
+        body.setFixedHeight(16 + 278)
         self.table = PeriodicTable(self.data, body)
-        self.table.move(20, 0)
+        self.table.move(PANEL_PADDING_X, 16)
         self.support = ModelSupport(engine, body)
-        self.support.move(114, 6)
+        self.support.move(103, 15)
         self.root.addWidget(body)
-        self.root.addSpacing(19)
+        self.root.addSpacing(21)
         self.root.addWidget(Divider())
         self.info = ElementInfo(self.data)
         self.root.addWidget(self.info, 1)
@@ -464,10 +573,15 @@ class ElementPanel(Panel):
         self.relayout()
 
     def relayout(self):
-        """Model-support block in the gap of the first three periods (columns 2-11)."""
-        pitch = self.table.pitch
-        x = min(3 * pitch + 1, 12 * pitch - TILE_GAP - self.support.width())
-        self.support.move(PANEL_PADDING_X + max(2 * pitch, x), 6)
+        """Model-support block in the gap of the first three periods: its M1-M8 group centred between the Be and B
+        tiles, measured on the tiles and the indicator labels (2026-10-28; formerly M1 at Figma's x = 103)."""
+        self.support.layout().activate()
+        be, b = self.table.tiles["Be"], self.table.tiles["B"]
+        gap_l = be.mapTo(self.table, be.rect().topLeft()).x() + be.width()
+        gap_r = b.mapTo(self.table, b.rect().topLeft()).x()
+        g_l, g_r = self.support.group_span()
+        x = round((gap_l + gap_r) / 2 - (g_l + g_r) / 2)
+        self.support.move(self.table.x() + x, 15)
 
     def _preview(self, el: str):
         self.support.show_element(el)
@@ -488,15 +602,24 @@ class ElementPanel(Panel):
         self.element_toggled.emit(el, checked)
         self.selection_changed.emit(self.table.selected())
 
+    def set_read_only(self, on: bool) -> None:
+        """Freeze the element selection while a calculation runs, like the composition fields."""
+        self.table.set_read_only(on)
+
     def set_selected(self, elements: list[str]):
+        """The committed selection (from the composition).  The details show the last committed element; an empty
+        selection (Clear) returns them to the empty state - unless the pointer is hovering a tile, whose preview stays
+        until it leaves the table (hover is a preview, never the committed state)."""
         current = set(self.table.selected())
         for el in current - set(elements):
             self.table.set_selected(el, False)
         for el in elements:
             self.table.set_selected(el, True)
-        if elements:
-            self._sticky = elements[-1]
-            self.leave_preview()
+        sticky = elements[-1] if elements else None
+        if sticky != self._sticky or not elements:
+            self._sticky = sticky
+            if not self.table.underMouse():
+                self.leave_preview()
 
     def clear(self):
         self.set_selected([])

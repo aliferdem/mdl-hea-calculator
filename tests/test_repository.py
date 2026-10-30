@@ -337,6 +337,28 @@ def test_stale_sessions_are_removed_and_a_corrupt_one_does_not_matter(engine, tm
         repo.close()
 
 
+def test_a_session_being_created_by_another_instance_is_never_removed(tmp_path):
+    """Race seen when two instances start together: a new session folder holds only ``owner.pid`` until its
+    database opens, and Windows' open-file guard does not protect it - the owner's liveness and a short grace
+    period do."""
+    import time as _t
+    from hea_calc.core.repository import SESSION_GRACE_S
+    root = tmp_path / "s"
+    live = root / "session-live"                     # another, running instance (this process)
+    live.mkdir(parents=True)
+    (live / "owner.pid").write_text(f"{os.getpid()} {_t.time():.0f}")
+    fresh = root / "session-fresh"                   # a dead pid but created a moment ago
+    fresh.mkdir()
+    (fresh / "owner.pid").write_text(f"999999 {_t.time():.0f}")
+    nofile = root / "session-nofile"                 # mkdir done, owner.pid not written yet
+    nofile.mkdir()
+    old = root / "session-old"                       # a crashed session from long ago
+    old.mkdir()
+    (old / "owner.pid").write_text(f"999999 {_t.time() - SESSION_GRACE_S - 5:.0f}")
+    assert cleanup_stale_sessions(root) == 1
+    assert live.exists() and fresh.exists() and nofile.exists() and not old.exists()
+
+
 # =========================================================================== provenance / plots
 def run_job(svc, repo, engine, recipe, options=None):
     meta = recipe.run_meta()
@@ -376,7 +398,8 @@ def test_expression_variables_and_blocks_survive_calculation(engine, tmp_path, p
         assert [r.variables for r in recs] == ref.variables
         info = repo.get_run(run)
         assert [b["expression"] for b in info.source["blocks"]] == ["(FeCoNi)1-xAlx", "Cr{y}Fe{z}Ni"]
-        assert info.source["ranges"]["y"] == [0.1, 0.5, 0.1]
+        assert info.source["ranges"]["y"] == {"min": 0.1, "max": 0.5, "step": 0.1, "points": None,
+                                              "min_inclusive": True, "max_inclusive": True}
         # future plots: x vs δ (block 0) and a y/z map coloured by Φ and by the M1 label
         series = repo.get_series(run, "x", "delta")
         assert [x for x, _ in series] == sorted(v["x"] for v in ref.variables if "x" in v)
@@ -553,12 +576,12 @@ def test_double_click_after_filtering_and_the_details_window(win, app, engine, m
     dbl(win.table.view, 7)
     app.processEvents()
     assert win.details.row.row_id == rec.id
-    from hea_calc.ui.widgets import dialogs
-    shown = []
-    monkeypatch.setattr(dialogs.AlloyDetailsDialog, "exec", lambda self: shown.append(self.row) or 0)
     menu = win.table.view.row_menu(m.row_at(2), "name")
     next(a for a in menu.actions() if a.text() == "Open details in new window").trigger()
-    assert shown[0].row_id == m.row_at(2).id and shown[0].name == m.row_at(2).name
+    aw = win.analysis_window(create=False)
+    assert aw is not None and aw.isVisible()
+    assert aw.panel.row.row_id == m.row_at(2).id and aw.panel.row.name == m.row_at(2).name
+    aw.close()
 
 
 def test_remove_result_on_the_last_page_moves_to_a_valid_page(win, app, engine):
@@ -630,7 +653,7 @@ def test_storage_failure_during_a_calculation_never_leaves_the_ui_calculating(wi
     for el in ("Fe", "Co", "Ni", "Cr"):
         win.elements.table.tiles[el].click()
     win.composition.set_mode(1)
-    win.composition.unit_box.setCurrentIndex(1)
+    win.composition.set_basis("at")
     for r in win.composition.sweep.rows.values():
         r.min.setText("5"), r.max.setText("50"), r.step.setText("5")
     from conftest import settle_composition
@@ -642,7 +665,11 @@ def test_storage_failure_during_a_calculation_never_leaves_the_ui_calculating(wi
         time.sleep(0.01)
     app.processEvents()
     assert win.worker is None and win.composition.calc_btn.isEnabled()
-    assert "disk" in win.notification.body.text() and "database or disk is full" not in win.notification.body.text()
+    # the title bar keeps the Figma Failed state; the cause is in its tooltip and in Composition setup's footer
+    reason = win.progress.detail.toolTip()
+    assert win.progress.label.text() == "Calculation failed" and win.progress_line.kind == "error"
+    assert "disk" in reason and "database or disk is full" not in reason
+    assert reason == win.composition.footer.status.status.info, "the footer status explains the failure"
 
 
 def test_main_process_memory_does_not_grow_with_the_dataset(win, app, engine):
@@ -686,7 +713,7 @@ def test_sweep_summary_reports_large_sets_instead_of_refusing_them(win, app, lo,
     for el in ("Fe", "Co", "Ni", "Cr", "Mn"):
         win.elements.table.tiles[el].click()
     win.composition.set_mode(1)
-    win.composition.unit_box.setCurrentIndex(1)
+    win.composition.set_basis("at")
     sw = win.composition.sweep
     for r in sw.rows.values():
         r.min.setText(str(lo)), r.max.setText(str(hi)), r.step.setText("1")
@@ -711,7 +738,7 @@ def test_beyond_the_largest_tested_batch_is_refused_plainly(win, app):
     for el in ("Fe", "Co", "Ni", "Cr", "Mn", "Al"):
         win.elements.table.tiles[el].click()
     win.composition.set_mode(1)
-    win.composition.unit_box.setCurrentIndex(1)
+    win.composition.set_basis("at")
     sw = win.composition.sweep
     for r in sw.rows.values():
         r.min.setText("1"), r.max.setText("40"), r.step.setText("1")      # 41 659 248 alloys
@@ -727,7 +754,7 @@ def test_beyond_the_largest_tested_batch_is_refused_plainly(win, app):
     assert not win.composition.calc_btn.isEnabled()
     win.composition.calculate()                       # even a direct request is refused plainly
     app.processEvents()
-    assert win.worker is None and "largest tested batch" in win.notification.body.text()
+    assert win.worker is None and "largest tested batch" in win.progress.message_text()
 
 
 def test_clearing_everything_gives_the_disk_space_back(repo, engine):
@@ -775,7 +802,7 @@ def test_closing_during_a_calculation_leaves_no_process_and_no_file(app):
     for el in ("Fe", "Co", "Ni", "Cr", "Mn"):
         w.elements.table.tiles[el].click()
     w.composition.set_mode(1)
-    w.composition.unit_box.setCurrentIndex(1)
+    w.composition.set_basis("at")
     for r in w.composition.sweep.rows.values():
         r.min.setText("2"), r.max.setText("40"), r.step.setText("2")
     from conftest import settle_composition

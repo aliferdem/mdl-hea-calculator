@@ -35,8 +35,10 @@ from .engine import (MODEL_KEYS, NA_ERROR, NA_MISSING_DATA, NA_UNDEFINED, STATUS
 from .family import family_key
 from .results import COLUMNS, composition_text
 
-NUM_KEYS: tuple[str, ...] = tuple(c.key for c in COLUMNS if c.kind == "num")
-TEXT_KEYS: tuple[str, ...] = tuple(c.key for c in COLUMNS if c.kind == "text" and c.key not in ("name", "composition"))
+# stored result columns only: Run and Variables (2026-10-28) are read from run_id and the design tables
+NUM_KEYS: tuple[str, ...] = tuple(c.key for c in COLUMNS if c.kind == "num" and c.stored)
+TEXT_KEYS: tuple[str, ...] = tuple(c.key for c in COLUMNS if c.kind == "text" and c.stored
+                                   and c.key not in ("name", "composition"))
 NAN = float("nan")
 
 # Storage codes (schema 2).  SQL stores NULL for "none" (-1 in a chunk).

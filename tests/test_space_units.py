@@ -88,7 +88,9 @@ def test_design_keeps_the_entered_values_and_names_use_atomic_amounts():
     grid = list(r.iterate())
     comp = r.atomic(grid[0])
     assert list(r.design(grid)) == [10.0, 90.0]                 # wt.% coordinates, not at.%
-    assert r.name(comp) == C.percent_name(comp)
+    # names are the ATOMIC percentages, labelled as such since 2026-10-28 (a wt.% space's name is never its entered
+    # weight percentages read as stoichiometry)
+    assert r.name(comp) == C.percent_name(comp) + " (at.%)"
     assert abs(comp["Al"] - 100 * C.to_fractions({"Al": 10, "Ni": 90}, "wt")["Al"]) < 1e-12
     meta = r.run_meta()
     assert meta["source"]["unit"] == "wt" and meta["axes"][0]["unit"] == "wt.%"

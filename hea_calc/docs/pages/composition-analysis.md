@@ -37,8 +37,17 @@ and are not interchangeable.
 ## Options menu
 
 The **Options** menu (⋮) of Composition offers **Copy values**, **Export composition report…** (PDF), **Print
-composition report…**, **Show full precision** and **Help: Prediction model coverage**. To see a result in its own
-window, use the row menu's **Open details in new window**; it opens **Alloy details** with the same tabs.
+composition report…**, **Open in new window** and **Help: Prediction model coverage**, plus **Show full
+precision**.
+
+## Analysis window
+
+**Open in new window** (Options menu), the row menu's **Open details in new window**, or a double-click on a results
+row while the top panels are hidden (View › **Top panels**, Ctrl+B) opens the **Analysis window**: a separate window
+with the whole Analysis — Composition and Collection with all their tabs. It shows the same analysis as the panel:
+the composition, tabs, collection and plot settings are shared, so a change in one shows in the other. It has its own
+taskbar button; minimise, maximise or close it like any window — closing it does not close the calculator, and the
+next request reopens it. Exports are in its **Options** menu.
 
 ## Expanded analysis
 

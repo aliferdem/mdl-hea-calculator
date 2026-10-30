@@ -15,19 +15,33 @@ class RangeError(ValueError):
 
 @dataclass(frozen=True)
 class ElementRange:
+    """One element's grid: Min to Max inclusive, either in steps of ``step`` (Step size) or as ``points`` evenly
+    spaced values including both ends (Points; ``step`` is then not used)."""
+
     element: str
     minimum: float
     maximum: float
     step: float
+    points: int | None = None
 
     def validate(self) -> None:
-        for name, v in (("Min", self.minimum), ("Max", self.maximum), ("Step", self.step)):
+        for name, v in (("Min", self.minimum), ("Max", self.maximum)):
             if v is None or not math.isfinite(v):
                 raise RangeError(f"{self.element}: {name} is missing or invalid.")
         if self.minimum < 0:
             raise RangeError(f"{self.element}: Min must be ≥ 0.")
         if self.maximum < self.minimum:
             raise RangeError(f"{self.element}: Max must be ≥ Min.")
+        if self.points is not None:
+            if isinstance(self.points, bool) or not isinstance(self.points, int):
+                raise RangeError(f"{self.element}: Points must be a whole number.")
+            if self.maximum > self.minimum and self.points < 2:
+                raise RangeError(f"{self.element}: Points must be ≥ 2 when Max > Min.")
+            if self.points < 1:
+                raise RangeError(f"{self.element}: Points must be ≥ 1.")
+            return
+        if self.step is None or not math.isfinite(self.step):
+            raise RangeError(f"{self.element}: Step is missing or invalid.")
         if self.step <= 0 and self.maximum > self.minimum:
             raise RangeError(f"{self.element}: Step must be > 0.")
 
@@ -40,9 +54,34 @@ def _decimals(*values: float) -> int:
     return min(d, 6)
 
 
+def grid_scale(ranges, total: float | None = None) -> int:
+    """The one integer scale every grid of a space is expressed in (value × scale is an integer for every grid
+    value): 10^decimals of the entered numbers, times the lcm of (Points − 1) of the Points rows - so an N-point
+    grid (step (Max − Min)/(N − 1), e.g. thirds) is exact too, and sums, counts and duplicate removal stay integer
+    arithmetic."""
+    vals = [v for r in ranges for v in (r.minimum, r.maximum)]
+    vals += [r.step for r in ranges if getattr(r, "points", None) is None]
+    if total is not None:
+        vals.append(total)
+    scale = 10 ** _decimals(*vals)
+    for r in ranges:
+        n = getattr(r, "points", None)
+        if n is not None and n >= 2 and r.maximum > r.minimum:
+            scale = scale * (n - 1) // math.gcd(scale, n - 1)
+    return scale
+
+
 def grid(r: ElementRange, scale: int) -> list[int]:
-    """Integer grid (value × scale) from Min to Max inclusive in steps of Step."""
+    """Integer grid (value × scale) from Min to Max inclusive: in steps of Step, or ``points`` values."""
     lo, hi = round(r.minimum * scale), round(r.maximum * scale)
+    if r.points is not None:
+        if hi == lo or r.points < 2:
+            return [lo]
+        span = hi - lo
+        if span % (r.points - 1):
+            raise RangeError(f"{r.element}: internal grid scale error.")     # grid_scale guarantees this
+        st = span // (r.points - 1)
+        return [lo + k * st for k in range(r.points)]
     if hi == lo or r.step <= 0:
         return [lo]
     st = round(r.step * scale)
@@ -65,12 +104,13 @@ def iter_sweep(ranges: list[ElementRange], total: float = 100.0, limit: int | No
         raise RangeError("Select at least two elements.")
     for r in ranges:
         r.validate()
-    scale = 10 ** _decimals(total, *[v for r in ranges for v in (r.minimum, r.maximum, r.step)])
+    scale = grid_scale(ranges, total)
     target = round(total * scale)
     grids = [grid(r, scale) for r in ranges]
     last = ranges[-1]
     last_lo, last_hi = round(last.minimum * scale), round(last.maximum * scale)
-    last_step = round(last.step * scale) if last.step > 0 else 0
+    lg = grids[-1]
+    last_step = (lg[1] - lg[0]) if len(lg) > 1 else 0
     mins = [g[0] for g in grids]
     maxs = [g[-1] for g in grids]
     suffix_min = [sum(mins[i:]) for i in range(len(grids) + 1)]
@@ -143,9 +183,17 @@ class SweepSpec:
     maximum: float
     step: float
     required: bool = True
+    points: int | None = None          # Points mode: this many values from Min to Max (``step`` not used)
 
     def as_range(self) -> ElementRange:
-        return ElementRange(self.element, self.minimum, self.maximum, self.step)
+        return ElementRange(self.element, self.minimum, self.maximum, self.step, self.points)
+
+    @property
+    def effective_step(self) -> float:
+        """The grid spacing in the entered basis (Points: (Max − Min) / (Points − 1))."""
+        if self.points is not None:
+            return (self.maximum - self.minimum) / (self.points - 1) if self.points > 1 else 0.0
+        return self.step
 
 
 @dataclass
@@ -182,8 +230,7 @@ def _positive_grid(spec: SweepSpec, scale: int) -> list[int]:
 def _space_grids(specs: list[SweepSpec], total: float) -> tuple[int, int]:
     for s in specs:
         s.as_range().validate()
-    vals = [v for s in specs for v in (s.minimum, s.maximum, s.step)] + [total]
-    scale = 10 ** _decimals(*vals)
+    scale = grid_scale(specs, total)
     return scale, round(total * scale)
 
 
