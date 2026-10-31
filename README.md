@@ -235,9 +235,10 @@ py -3.11 -m venv .venv
 
 The dependencies are declared in `pyproject.toml`. PySide6 is pinned to version 6.7.3, while openpyxl and
 XlsxWriter are used for spreadsheet import and Excel export, respectively. pytest and matplotlib are development
-tools, which are not required at runtime; `uv sync` installs them by default. Nuitka, used for the optional Windows
-build, is installed with `uv sync --group build`. After a dependency change in `pyproject.toml`, `uv lock` updates
-`uv.lock`, and `requirements.txt` is regenerated with the command recorded at the top of that file.
+tools, which are not required at runtime; `uv sync` installs them by default. Nuitka builds the portable app (a .zip
+on Windows, a .tar.gz on Linux) with `uv run --group build tools/build.py`. After a dependency change in
+`pyproject.toml`, `uv lock` updates `uv.lock`, and `requirements.txt` is regenerated with the command recorded at the
+top of that file.
 
 ## Quick start
 

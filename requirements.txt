@@ -17,7 +17,7 @@ iniconfig==2.3.1
 kiwisolver==1.5.1
     # via matplotlib
 matplotlib==3.11.2
-nuitka==2.4.8
+nuitka==4.3.3
 numpy==2.4.6 ; python_full_version < '3.12'
     # via
     #   contourpy
@@ -28,12 +28,11 @@ numpy==2.5.4 ; python_full_version >= '3.12'
     #   matplotlib
 openpyxl==3.1.5
     # via hea-calculator
-ordered-set==4.1.0
-    # via nuitka
 packaging==26.3
     # via
     #   matplotlib
     #   pytest
+patchelf==0.19.1.0 ; sys_platform == 'linux'
 pillow==13.0.0
     # via matplotlib
 pluggy==1.7.0
@@ -53,6 +52,7 @@ pyside6-essentials==6.7.3
 pytest==9.2.0
 python-dateutil==3.0.0
     # via matplotlib
+ruff==0.17.3
 shiboken6==6.7.3
     # via
     #   pyside6
@@ -64,5 +64,3 @@ tzdata==2026.6
     # via python-dateutil
 xlsxwriter==3.2.0
     # via hea-calculator
-zstandard==0.25.0
-    # via nuitka
