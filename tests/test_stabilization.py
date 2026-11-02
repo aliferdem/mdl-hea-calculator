@@ -209,8 +209,8 @@ def test_direct_expression_jobs_store_exactly_what_the_plan_stores(engine, tmp_p
 @pytest.fixture()
 def synth_repo(engine, tmp_path):
     import sys as _sys
-    _sys.path.insert(0, str(ROOT / "tools"))
-    from synthetic import fill
+    _sys.path.insert(0, str(ROOT / "tests"))
+    from _support import fill
     from hea_calc.core.repository import ResultRepository
     repo = ResultRepository(engine, root=tmp_path / "s")
     run = fill(repo, 6000, engine, chunk=2000)
@@ -644,8 +644,8 @@ def test_element_properties_are_grouped_by_category_labelled_with_sources_and_ne
 # ====================================================================== 14-17. The separate Analysis window
 def _rows(win, n=30):
     import sys as _sys
-    _sys.path.insert(0, str(ROOT / "tools"))
-    from screenshot import demo_rows
+    _sys.path.insert(0, str(ROOT / "tests"))
+    from _support import demo_rows
     demo_rows(win, n)
     pump(app=QApplication.instance())
 
@@ -912,7 +912,7 @@ def test_native_activation_moves_the_whole_title_bar_without_menu_flicker():
     import json
     import subprocess
     import sys as _sys
-    probe = ROOT / "tools" / "titlebar_activation_probe.py"
+    probe = ROOT / "tests" / "_native_titlebar_probe.py"
     r = subprocess.run([_sys.executable, str(probe), "light", "1", str(Path(tempfile.mkdtemp()))],
                        capture_output=True, text=True, cwd=str(ROOT), timeout=180,
                        env={k: v for k, v in os.environ.items() if k != "QT_QPA_PLATFORM"})
@@ -1089,8 +1089,8 @@ def test_a_notification_filled_before_it_is_placed_never_becomes_a_window(app):
     from PySide6.QtWidgets import QVBoxLayout, QWidget
     from hea_calc.ui.analysis.widgets import ActionableNotification
     import sys as _sys
-    _sys.path.insert(0, str(ROOT / "tools"))
-    from window_watch import WindowWatch
+    _sys.path.insert(0, str(ROOT / "tests"))
+    from _support import WindowWatch
     host = QWidget()
     lay = QVBoxLayout(host)
     host.show()
@@ -1110,8 +1110,8 @@ def test_model_details_with_warnings_open_no_transient_window(win, app):
     """M7 extrapolated (CoCuMgVZn), M6 / M7 flagged data (NiTaV), N/A models (ReSnWZr): every Model details view in
     the embedded panel and the separate window shows its notices inside the page - no top-level window flashes."""
     import sys as _sys
-    _sys.path.insert(0, str(ROOT / "tools"))
-    from window_watch import WindowWatch
+    _sys.path.insert(0, str(ROOT / "tests"))
+    from _support import WindowWatch
     from hea_calc.core.analysis import state as S
     from hea_calc.core.engine import MODEL_KEYS
     c = win.analysis_ctl
@@ -1242,7 +1242,7 @@ def test_native_open_menu_follows_the_pointer_and_arrows_one_at_a_time():
     import json
     import subprocess
     import sys as _sys
-    r = subprocess.run([_sys.executable, str(ROOT / "tools" / "menubar_probe.py"), "1"], capture_output=True, text=True,
+    r = subprocess.run([_sys.executable, str(ROOT / "tests" / "_native_menubar_probe.py"), "1"], capture_output=True, text=True,
                        cwd=str(ROOT), timeout=120, env={k: v for k, v in os.environ.items() if k != "QT_QPA_PLATFORM"})
     line = [ln for ln in r.stdout.splitlines() if ln.startswith("{")]
     assert line, r.stdout[-2000:] + r.stderr[-2000:]

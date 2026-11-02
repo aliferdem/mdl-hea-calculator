@@ -4,7 +4,7 @@ Fractional device pixel ratios are exercised by rendering into QImages with
 ``setDevicePixelRatio(1.25 / 1.5)`` at several logical offsets (so the widget lands on different
 fractional physical positions - the situation that made a 2 px QPen frame 2 px on one side and
 3 px on the other at Windows 125 %).  Layout is exercised at the logical client sizes of the
-target 2160 x 1440 display at Windows 100 / 125 / 150 % (see tools/dpi_harness.py).
+target 2160 x 1440 display at Windows 100 / 125 / 150 %.
 """
 
 import math
@@ -61,8 +61,8 @@ def win(app):
 
 def add_rows(win, n):
     import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-    from screenshot import demo_rows
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _support import demo_rows
     demo_rows(win, n)
     for _ in range(5):
         QApplication.processEvents()

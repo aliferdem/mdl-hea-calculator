@@ -486,7 +486,7 @@ class MainWindow(QMainWindow):
             self.header.align_status_to(self.composition.title)
 
     def layout_report(self) -> dict:
-        """Live layout facts for tools/dpi_diagnostics.py and the DPI tests."""
+        """Live layout facts for the DPI tests."""
         vbar = self.table.view.verticalScrollBar()
         hbar = self.table.view.horizontalScrollBar()
         return {

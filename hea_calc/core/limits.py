@@ -25,9 +25,9 @@ SYNTHETIC rows inserted through the real writer path (4.0 GB, 9.8 s per full sor
 ingestion, flat GUI memory).  The real engine was validated end to end up to 1 039 776 alloys;
 between ≈ 1 M and 10 M the calculation path is extrapolated (constant throughput and per-row size).
 Beyond 10 M every sort/filter would be a multi-ten-second wait and nothing has been validated; raise
-it by re-running ``tools/perf_harness.py --scenario storage`` (and a real-engine run) at a larger
-size.  Independently, a batch is refused when its estimated database does not fit on the disk
-holding the session.
+it only after repeating the storage measurement (the former ``tools/perf_harness.py --scenario storage``, in
+the Git history) and a real-engine run at a larger size.  Independently, a batch is refused when its estimated
+database does not fit on the disk holding the session.
 """
 
 from __future__ import annotations

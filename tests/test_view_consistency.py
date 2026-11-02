@@ -20,8 +20,8 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from hea_calc.core.repository import ResultRepository, ResultView, filter_sql, order_sql  # noqa: E402
 from hea_calc.core.results import ModelFilter, RangeFilter  # noqa: E402
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from synthetic import fill  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _support import fill  # noqa: E402
 
 N = 20_000
 FLT = [RangeFilter("dhmix", None, -2.0), ModelFilter("M1", {"SS", "N/A"})]

@@ -1,6 +1,6 @@
 """Results data table (Figma 278:20578): toolbar, sortable header, prediction tags in cells, pagination.
 
-Architecture (measured; see ``tools/perf_harness.py`` and ``design/implementation/performance.md``):
+Architecture (measured with the former ``tools/perf_harness.py``, in the Git history):
 
 * the results live in the SQLite :class:`~hea_calc.core.repository.ResultRepository`; the table
   is a *view* of that dataset (:class:`~hea_calc.core.repository.ResultView`), never the dataset;

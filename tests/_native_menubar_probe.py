@@ -1,6 +1,6 @@
 """Native title-bar menu-bar probe (real mouse and keyboard input, sent from a worker thread).
 
-    .venv/Scripts/python.exe tools/menubar_probe.py [scale multiplier, 1 = native]
+    .venv/Scripts/python.exe tests/_native_menubar_probe.py [scale multiplier, 1 = native]
 
 Click File; move the pointer over Edit, View, Help (each opens, exactly one menu at a time); Right / Left arrows;
 Esc; then plain hover over the menus (nothing may open).  Prints one JSON line.  A multiplier other than 1 sets

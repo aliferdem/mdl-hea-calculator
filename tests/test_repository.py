@@ -31,8 +31,8 @@ from hea_calc.core.repository import (ResultRepository, ResultView, cleanup_stal
                                       filter_sql, order_sql)
 from hea_calc.core.results import ModelFilter, RangeFilter, ResultRow  # noqa: E402
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from synthetic import fill, synthetic_chunk  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _support import fill, synthetic_chunk  # noqa: E402
 
 
 # =========================================================================== fixtures
@@ -677,8 +677,8 @@ def test_main_process_memory_does_not_grow_with_the_dataset(win, app, engine):
     columnar store grew 0.39 KiB/row = 95 MiB here; ResultRow objects 1.4 GiB)."""
     if os.name != "nt":
         pytest.skip("private bytes via the Windows API")
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-    from perf_harness import memory_mib
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _support import memory_mib
     m = loaded(win, engine, 50_000)
     m.set_page(m.page_count() - 1)
     gc.collect()
@@ -794,8 +794,8 @@ def test_a_single_calculation_with_a_sort_active_appears_at_once(win, app):
 
 
 def test_closing_during_a_calculation_leaves_no_process_and_no_file(app):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-    from perf_harness import process_alive
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _support import process_alive
     from hea_calc.ui.main_window import MainWindow
     w = MainWindow(settings=QSettings(str(Path(tempfile.mkdtemp()) / "s.ini"), QSettings.Format.IniFormat))
     w.show()

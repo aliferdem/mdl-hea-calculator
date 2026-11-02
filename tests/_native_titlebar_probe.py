@@ -2,10 +2,10 @@
 taskbar / Help / the Analysis window / a dialog take activation, and after returning; the number of activation
 changes while a title-bar menu opens (flicker check).  Prints one JSON line; captures go to <outdir>.
 
-    .venv/Scripts/python.exe tools/titlebar_activation_probe.py <light|dark> <scale multiplier, 1 = native> <outdir>
+    .venv/Scripts/python.exe tests/_native_titlebar_probe.py <light|dark> <scale multiplier, 1 = native> <outdir>
 
 A multiplier other than 1 sets QT_SCALE_FACTOR for this diagnostic process only (100 / 150 % emulation on a 125 %
-display), as tools/dpi_harness.py does; production never sets it.
+display); production never sets it.
 """
 import ctypes
 import json

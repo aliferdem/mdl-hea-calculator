@@ -652,8 +652,8 @@ def test_redo_branch_and_limit_purge_the_trash(win, app):
 
 def test_large_clear_undo_copies_no_rows_into_python(app, settings, engine):
     import sys
-    sys.path.insert(0, str(ROOT / "tools"))
-    from synthetic import fill
+    sys.path.insert(0, str(ROOT / "tests"))
+    from _support import fill
     w = make_win(app, settings)
     try:
         fill(w.repo, 200_000, w.engine)

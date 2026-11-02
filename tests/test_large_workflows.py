@@ -1,6 +1,6 @@
 """Large-composition workflows: pre-flight counting, process-based jobs, the page-backed results
 table and its interaction model, responsive reflow, Pending status, tooltip/toggletip geometry and
-the shared Carbon menu.  (Timings of the real 30k / 100k runs: tools/perf_harness.py.)"""
+the shared Carbon menu."""
 
 import os
 import sys
@@ -24,8 +24,8 @@ from hea_calc.core.recipes import SweepRecipe  # noqa: E402
 from hea_calc.core.chunks import pack_results  # noqa: E402
 from hea_calc.core.repository import ResultRepository, ResultView  # noqa: E402
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from synthetic import fill  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _support import fill  # noqa: E402
 
 FIVE = ["Fe", "Co", "Ni", "Cr", "Mn"]
 
@@ -176,8 +176,8 @@ def win(app):
 
 def add_rows(win, n):
     import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-    from screenshot import demo_rows
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _support import demo_rows
     demo_rows(win, n)
     QApplication.processEvents()
 

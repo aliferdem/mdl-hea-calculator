@@ -39,7 +39,7 @@ class JobRunner(QObject):
         self.first_id: int | None = None
         self.added = 0
         self.ticks = 0
-        self.ingest_seconds = 0.0           # GUI-thread time per tick (measured by tools/perf_harness)
+        self.ingest_seconds = 0.0           # GUI-thread time per tick (performance measurements)
         self.max_tick_seconds = 0.0
         self.storage_error: str | None = None
         self._finalizing = None
