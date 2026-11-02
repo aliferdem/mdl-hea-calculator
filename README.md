@@ -451,4 +451,4 @@ For the original HEACalculator, the following references are provided:
 
 HEA Calculator is distributed under version 3 of the GNU General Public License (GPL-3.0). The licence is provided
 in [`LICENSE.txt`](LICENSE.txt). The software is supplied without warranty. The licences of the third-party
-components are available in [`License/`](License).
+components are in [`THIRD-PARTY-NOTICES.txt`](THIRD-PARTY-NOTICES.txt).
