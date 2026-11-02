@@ -3,6 +3,24 @@
 The eight published criteria, as the calculator implements them. Bounds are stated with their inclusive (≤, ≥) or
 strict (<, >) form; the numbers in brackets refer to [Scientific References](help://references).
 
+## Calculated quantities
+
+The calculations are based on normalized atomic fractions, *c<sub>i</sub>*. At least two elements must be present in
+a composition. The table summarizes the main quantities, equations and data sources used in the application.
+
+| Quantity | Equation or method | Data source | Description |
+|---|---|---|---|
+| ΔS<sub>mix</sub> | −R Σ *c<sub>i</sub>* ln *c<sub>i</sub>* | — | Ideal configurational entropy |
+| ΔH<sub>mix</sub> | Σ<sub>i<j</sub> 4 *c<sub>i</sub>c<sub>j</sub>* ΔH<sub>ij</sub> | Takeuchi & Inoue (2005) [10], Miedema liquid enthalpies | Regular-solution estimate |
+| T<sub>m</sub>, ρ | Rule of mixtures (ρ = Σ *c<sub>i</sub>M<sub>i</sub>* / Σ *c<sub>i</sub>V<sub>i</sub>*) | Elemental tables; Miedema molar volumes [11] | Approximation without excess terms |
+| VEC | Σ *c<sub>i</sub>* VEC<sub>i</sub>; FCC if ≥ 8.0, BCC if < 6.87 | Guo et al. (2011) [13] | Empirical structure rule |
+| δ | 100 √Σ *c<sub>i</sub>*(1 − *r<sub>i</sub>*/r̄)² | Guo & Liu (2011) radii [9] | Atomic-size mismatch used in M2–M5 |
+| δ<sub>CN12</sub> | Same equation | Kittel CN12 radii [12] | Atomic-size mismatch used in M1 |
+| Ω, γ, Λ, φ, Φ, ΔH<sub>IM</sub>, k<sub>1</sub><sup>cr</sup> | Calculated according to the corresponding model | — | Model-dependent parameters |
+
+Electronegativity differences and the e/a ratio are not calculated. The remaining symbols, their units and
+definitions are given under [Symbols, Parameters and Units](help://symbols).
+
 ## M1 — Yang & Zhang (2012): Ω–δ criterion
 
 *X. Yang, Y. Zhang [1].* Separates solid-solution-forming compositions from those that form intermetallics or
@@ -107,3 +125,27 @@ The models use different descriptors, data and thresholds, calibrated on differe
 the same composition differently — AlCoCrFeNi is SS in M1 and M3, MP in M2, M5 and M8, SS+IM in M4, and IM in M6 and
 M7. Treat the tags as independent screening indicators, not as votes on one answer. See
 [Equiatomic CoCrFeMnNi](help://example-cantor) for a worked comparison.
+
+## Implementation decisions
+
+A number of decisions were necessary when the published criteria were implemented. Their sources and the reasons
+for the decisions are discussed in `CALCULATION_AUDIT.md` in the source repository.
+
+* **Numerical boundaries.** Strict and inclusive inequalities were implemented according to the publications. For
+  inclusive boundaries, a relative tolerance of 10⁻¹² is used to account for floating-point rounding. For example,
+  ΔH<sub>mix</sub> for CoCrFeNiCu is represented as 3.200000000000001. Without the tolerance, the composition would
+  incorrectly fall outside the M2 boundary of 3.2 kJ mol⁻¹. Strict inequalities are evaluated without this tolerance.
+* **M2.** Guo et al. illustrate the intermetallic region without giving a numerical boundary. Thus, compositions
+  satisfying neither of the two printed conditions are assigned MP with a caution. The calculation does not identify
+  a separate intermetallic region from the figure.
+* **M7.** The criterion was derived for ΔH<sub>mix</sub> < 0. Equation 6 is also evaluated for compositions outside
+  that range, but these results are identified as *Extrapolated*.
+* **M8.** The implemented criterion is Φ ≥ 1. The δ ≤ 6.6 % condition in Section 3.4 of King et al. was applied
+  during the selection of candidate compositions, whereas the criterion itself is given in Section 3.1.
+* **Troparevsky dataset.** There are 43 cells in the published data that lie outside the range represented in the
+  publication's figure. The original values were retained. Calculations involving these values are marked
+  *Flagged binary data*.
+* **Undefined parameters.** Some ratios cannot be calculated for particular compositions, such as Ω when
+  ΔH<sub>mix</sub> = 0. The model is then reported as N/A with an explanation rather than assigning an infinite value.
+* **Incomplete data.** When elemental or binary interaction data are unavailable, only the models requiring those
+  values are reported as N/A. The other models are still calculated; missing values are not replaced with zero.

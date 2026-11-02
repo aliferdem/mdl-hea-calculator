@@ -25,6 +25,16 @@ Add Mn and switch its Lock off; set Al from 0.05 to 1.5 in steps of 0.05 and Mn 
 space now has four element systems — CoCrFeNi, +Al, +Mn and +Al+Mn — and **341 valid compositions**
 (1 + 30 + 10 + 300).
 
+## Varying four elements of CoCrFeMnNi
+
+Switch to *Composition space* and define the composition intervals for the elements. For example, Cr, Mn and Ni can
+be varied from 0.5 to 1.5, Fe from 0.8 to 1.2, while Co is kept constant at 1.0. Using a step size of 0.1 gives
+11 × 11 × 11 × 5 = 6,655 compositions. The number of compositions, estimated runtime and temporary storage
+requirement are displayed before starting the calculation.
+
+When compositions are given as atomic ratios or masses, proportional entries such as 1:1 and 2:2 represent the same
+normalized alloy composition. These repeated entries are removed before calculation.
+
 ## Weight percent: Fe–Cr–Ni
 
 Select Fe, Cr and Ni, choose **Range basis › wt.%**, and in the **All:** row set Min 20, Max 60, Step 10. Only

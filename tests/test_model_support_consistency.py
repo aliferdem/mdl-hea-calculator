@@ -1,4 +1,4 @@
-"""Model availability (``Engine.model_support``) agrees with evaluation for every model (CALCULATION_AUDIT.md §15).
+"""Model availability (``Engine.model_support``) agrees with evaluation for every model (development history §15).
 
 The periodic-table indicator must never promise a model the engine then reports as N/A for missing data, and never
 deny one the engine evaluates.  These corrections change availability metadata and N/A wording only - the values

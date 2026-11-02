@@ -72,7 +72,7 @@ def test_atomic_radius_follows_guo_liu_table1_within_printed_precision(data):
     """Guo & Liu (2011) Table 1 prints 73 radii to 0.1 pm; every stored value of those elements must round to it.
 
     Half a printed unit (0.05 pm) accepts the 0.01 pm digits taken from Zhang et al. (2014) - that precision is a
-    separate, open decision (CALCULATION_AUDIT.md section 17.1) - but no value from another table.  Before section 18
+    separate, open decision (docs/SCIENTIFIC_DEVELOPMENT_HISTORY.md section 17.1) - but no value from another table.  Before section 18
     this failed for exactly Pm, Po, Pa and U, which held Kittel CN12 values.
     """
     ref = json.loads((REF / "guo_liu_2011_table1.json").read_text(encoding="utf-8"))["radius_pm"]

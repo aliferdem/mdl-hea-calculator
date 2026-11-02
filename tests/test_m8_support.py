@@ -1,4 +1,4 @@
-"""M8 availability (``Engine.model_support``) must agree with M8 evaluation (CALCULATION_AUDIT.md §14).
+"""M8 availability (``Engine.model_support``) must agree with M8 evaluation (development history §14).
 
 M8 (King et al. 2016) is Phi >= 1 alone (F9): it reads no atomic radius.  Its data requirements are the Miedema
 parameters and classification of every element and, for a transition / non-transition pair, both R/P factors.
@@ -96,7 +96,7 @@ def test_m8_support_and_evaluation_agree_for_every_miedema_pair():
 
 # ------------------------------------------------------------------ 4. other models keep their dependencies
 # M1-M7 statuses frozen from the committed engine (HEAD c2fa310) before the M8 correction (section 14).  One later,
-# deliberate change (CALCULATION_AUDIT.md section 15): the ten elements with no radius at all (At, Rn, Cm-Lr) report
+# deliberate change (docs/SCIENTIFIC_DEVELOPMENT_HISTORY.md section 15): the ten elements with no radius at all (At, Rn, Cm-Lr) report
 # M3/M4 "none" instead of "warn", because both models are N/A for them.
 _RARE = "Ac Am Ar At Bh Bk Br Cf Cl Cm Cn Db Ds Es F Fl Fm Fr He Hs I Kr Lr Lv Mc Md Mt Ne Nh No Np Og Pa Ra Rf Rg Rn Sg Ts Xe"
 _NO_TROP = ("Ac Am Ar As At B Ba Be Bh Bi Bk Br C Ca Ce Cf Cl Cm Cn Cs Db Ds Dy Er Es Eu F Fl Fm Fr Ga Gd Ge H He Hg "
@@ -156,10 +156,14 @@ def test_m8_threshold_is_still_inclusive_phi_one():
 
 # ------------------------------------------------------------------ 6. documentation agrees with the code
 def test_calculation_audit_states_the_implemented_m8_criterion():
-    text = (ROOT / "CALCULATION_AUDIT.md").read_text(encoding="utf-8")
-    m8 = re.search(r"### M8 .*?(?=\n---|\n## )", text, re.S).group(0)
-    assert "**SS if Φ ≥ 1**" in m8
-    assert "**Φ ≥ 1 and δ ≤ 6.6 %**" not in text                   # the pre-F9 criterion is gone as a rule
-    missing = re.search(r"Missing CN12 radius →[^\n]*\n[^\n]*", text).group(0)
-    assert "M8 is unaffected" in missing
-    assert "## 14. M8 documentation and model-support correction" in text
+    """The audit (current state) states Phi >= 1 alone and that M8 needs no radius; the development history keeps
+    the record of the correction (section 14)."""
+    text = (ROOT / "docs" / "CALCULATION_AUDIT.md").read_text(encoding="utf-8")
+    m8 = re.search(r"### M8: .*?(?=\n---|\n## |\n### )", text, re.S).group(0)
+    assert r"**Criterion.** SS if $\Phi \ge 1$, otherwise MP." in m8
+    assert "not part of the criterion" in m8 and "requires no radius" in m8
+    flat = " ".join(text.split())
+    assert r"$\Phi \ge 1$ and $\delta" not in flat and "Φ ≥ 1 and δ ≤ 6.6" not in flat   # the pre-F9 rule is gone
+    assert "A missing Kittel CN12 radius makes only $\\delta_{\\mathrm{CN12}}$ and M1 unavailable; M8 is unaffected" in flat
+    history = (ROOT / "docs" / "SCIENTIFIC_DEVELOPMENT_HISTORY.md").read_text(encoding="utf-8")
+    assert "## 14. M8 documentation and model-support correction" in history

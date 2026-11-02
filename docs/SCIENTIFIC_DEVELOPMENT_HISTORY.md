@@ -1,4 +1,66 @@
-# Calculation Audit — HEA Calculator
+# Scientific Development History
+
+This document is the chronological record of the scientific investigation behind the HEA Calculator engine. It
+holds the findings F1–F15, the dated sections §0–§20 and the note of 2026-10-28, which were previously kept in
+`CALCULATION_AUDIT.md`. The text below the line is that record, moved without change on 2026-11-02; only this
+preface was added.
+
+The current implementation, its data and its validation are described in
+[`CALCULATION_AUDIT.md`](CALCULATION_AUDIT.md). That document states the present behaviour directly and refers
+here when the development history of a decision is relevant.
+
+## Reading this record
+
+* **Cross-references.** Source-code comments, test docstrings and dataset metadata cite this record as
+  "audit section *n*", "audit §*n*", "audit F*n*" or "audit M8-AE" (the Ca, Sr and Ba correction of §16). These
+  references resolve to the sections below.
+* **Chronology.** Sections §0–§7 described the behaviour current at the time of writing and were corrected in place
+  with dated notes; §8–§20 are dated reports. A statement in an earlier section can therefore be superseded by a later
+  one. The main superseded statements are listed in the next table.
+* **Test counts.** The suite sizes quoted below (140, 203, 1352, 1357, 1417 and 1469 passed tests) are historical
+  results of the dates given and do not describe the current repository.
+* **Engine fingerprints.** The last fingerprints recorded below (§19, §20) are `engine_version()` `f64504541a84` and
+  `dataset_ids()["periodic_table.json"]` `581eea161276`. They were still the current values on 2026-11-02.
+
+### Statements superseded or not reproducible from the repository
+
+| Where | Statement in the record | Current state (2026-11-02) |
+|---|---|---|
+| §0 F3, §1 | Kittel CN12 radii "identical to legacy for 70 elements" | The dataset holds CN12 radii for 73 elements (69 single values and 4 range or valence entries; `tests/reference/kittel_cn12.json`). |
+| §0 F12 | Lists "W–Re −719" meV/atom among the out-of-range cells | No committed version of `data/binary_formation_enthalpy_data.json` contains −719; W–Re is +7 meV/atom in every version. The example could not be traced. |
+| §0 F12 | "43 of 435 cells lie outside the publication figure's own range" | 43 cells have \|ΔH<sub>f</sub>\| > 700 meV/atom (the guard). 69 cells lie outside the legend range −500 to +300 meV/atom. 45 pairs are flagged in total (the 43 plus Fe–Mo and Fe–W). |
+| §1, §17.1 | Stored `atomic_radius` values at 0.01 pm; precision decision open | Superseded by §20: all 73 Guo & Liu elements hold the printed 0.1 pm values. |
+| §1, §6, §17.1 | Pm, Po, Pa and U hold Kittel CN12 values | Corrected in §18. |
+| §3 Ω | "∞ if ΔH<sub>mix</sub> = 0" (before §17) | Ω is undefined (N/A with a reason) since F11. |
+| §4 M5, §17.3 | The Intermetallics 59 supplementary table of \|S<sub>E</sub>\| is absent and unverified | Superseded by the note of 2026-10-28 in §4 M5. |
+| §8, §9, §10 | Independent validator: 600 PASS / 8 FAIL / 5 UNSUPPORTED / 0 ERROR | §17.4 adds the DOC status (186 checks); after §20 the recorded result is 599 PASS / 9 FAIL / 5 UNSUPPORTED / 186 DOC / 0 ERROR of 799 checks. |
+| §14 | Ca, Sr, Ba: volume coefficient 0.04 and no R/P factor (open) | Corrected in §16. |
+| §16 | Tests `test_missing_r_over_p_factor_is_reported_as_a_partner_dependency` and `test_missing_r_over_p_factor_message_is_readable_and_behaviour_unchanged` | Replaced as stated in §16; the replacements exist in `tests/test_m8_support.py` and `tests/test_model_support_consistency.py`. |
+| §20 | `ANALYSIS_FIGMA_SAMPLE_DATA.md` carries a dated note | The file is not in the repository. |
+
+### Material referred to but not in this repository
+
+The record cites working material that has never been committed to this repository (checked with `git log --all`
+on 2026-11-02). Results obtained with it are kept here as historical evidence. They cannot be re-run from this
+repository, and the paths below should not be read as available files.
+
+* `Model Sources/`: the publication PDFs, supplements and book scans read during the investigation.
+* `docs/analysis-redesign/`: investigation reports, proposals, scripts (for example `m8_support_check.py`,
+  `m3_radius_investigation.py`, `radius_precision_rerun.py`, `m5_se_stability.py`, `ca_sr_ba_impact.py`) and their
+  data snapshots.
+* The independent validator (`run_validation.py`, 799 checks).
+* `archive/update_miedema.py` (the source of the replaced formation-enthalpy matrix).
+* `AGENTS.md` and `ANALYSIS_FIGMA_SAMPLE_DATA.md`.
+* The legacy HEACalculator 2.2.0 sources and the earlier `hea-calculator-preview` engine, used for the comparisons
+  of §0 and §5. The original HEACalculator is available from its own
+  [repository](https://github.com/dogusariturk/HEACalculator).
+
+The transcribed reference values that the regression tests use are in [`tests/reference/`](../tests/reference). Some
+of their metadata still name the `docs/analysis-redesign/` files they were copied from.
+
+---
+
+*Original title: Calculation Audit — HEA Calculator (last revised 2026-10-28).*
 
 Scope: every descriptor and phase-prediction model in `hea_calc/core/engine.py`, compared across
 
