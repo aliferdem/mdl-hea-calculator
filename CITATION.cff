@@ -1,0 +1,47 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite it using the metadata from this file, together with the publications of the
+  phase-formation models and data sources listed in the README, and the original HEACalculator.
+type: software
+title: HEA Calculator
+abstract: >-
+  A desktop application for calculating the thermodynamic and atomic-size parameters of high-entropy alloys and
+  evaluating eight published solid-solution formation criteria.
+authors:
+  - family-names: Erdem
+    given-names: Ali Fethi
+    affiliation: >-
+      Metals Development Laboratory, Department of Metallurgical and Materials Engineering, Middle East Technical
+      University
+version: 1.0.0rc1
+license: GPL-3.0-or-later
+repository-code: "https://github.com/aliferdem/mdl-hea-calculator"
+keywords:
+  - high-entropy alloys
+  - solid-solution formation
+  - phase prediction
+  - materials science
+references:
+  - type: software
+    title: HEACalculator
+    authors:
+      - family-names: Sarıtürk
+        given-names: Doğuhan
+    year: 2019
+    doi: 10.5281/zenodo.3590318
+    repository-code: "https://github.com/dogusariturk/HEACalculator"
+    license: GPL-3.0
+  - type: article
+    title: >-
+      HEACalculator: An open-source Python tool for thermodynamic property calculation and solid solution prediction
+      in high-entropy alloys
+    authors:
+      - family-names: Sarıtürk
+        given-names: D.
+      - family-names: Kalay
+        given-names: Y.E.
+      - family-names: Arróyave
+        given-names: R.
+    year: 2026
+    doi: 10.48550/arXiv.2606.19661
+    journal: arXiv

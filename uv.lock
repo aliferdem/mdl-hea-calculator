@@ -128,7 +128,7 @@ wheels = [
 
 [[package]]
 name = "hea-calculator"
-version = "1.0.0"
+version = "1.0.0rc1"
 source = { virtual = "." }
 default-groups = ["dev", "lint"]
 dependencies = [

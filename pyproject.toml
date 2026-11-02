@@ -1,6 +1,6 @@
 [project]
 name = "hea-calculator"
-version = "1.0.0"         # keep in step with hea_calc.__version__
+version = "1.0.0rc1"      # must equal hea_calc.__version__ (checked by tests/test_about.py)
 description = "Desktop calculator for high-entropy alloy thermodynamic descriptors and phase-prediction models"
 readme = "README.md"
 license = "GPL-3.0-or-later"
