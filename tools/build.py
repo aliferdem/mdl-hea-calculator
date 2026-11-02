@@ -4,8 +4,8 @@ Run from the project root (Nuitka needs a C compiler: MSVC on Windows, gcc on Li
 
     uv run --group build tools/build.py
 
-Writes ``dist/HEA-Calculator-<version>-windows-portable.zip`` on Windows (the app's files at the top) and
-``dist/HEA-Calculator-<version>-linux-portable.tar.gz`` on Linux (one ``HEA Calculator`` folder).  Either runs
+Writes ``dist/HEA-Calculator-<version>-windows-portable.zip`` on Windows and
+``dist/HEA-Calculator-<version>-linux-portable.tar.gz`` on Linux, each with one ``HEA Calculator`` folder that runs
 without Python.  Nuitka's working files go to ``build/``.  ``LICENSE.txt`` and ``THIRD-PARTY-NOTICES.txt`` go next to
 the program; the build stops first if the notices miss a bundled package or list another version of it.
 """
@@ -37,6 +37,8 @@ def main() -> None:
         sys.exit(f"pyproject.toml version {version} != hea_calc.__version__ {__version__}")
     check_notices(project["dependencies"])
     windows = sys.platform == "win32"
+    # Windows file versions are numbers only: 1.0.0rc1 -> 1.0.0 (the archive name keeps the full version)
+    numeric = re.match(r"\d+(\.\d+){0,3}", version)[0]
 
     args = [
         "--mode=standalone",
@@ -51,8 +53,8 @@ def main() -> None:
         "--include-distribution-metadata=XlsxWriter",
         "--company-name=MDL",
         f"--product-name={NAME}",
-        f"--file-version={version}",
-        f"--product-version={version}",
+        f"--file-version={numeric}",
+        f"--product-version={numeric}",
         f"--output-filename={NAME}",
         f"--output-folder-name={NAME}",
         f"--output-dir={BUILD}",
@@ -71,12 +73,7 @@ def main() -> None:
     shutil.rmtree(DIST, ignore_errors=True)
     DIST.mkdir()
     stem = f"HEA-Calculator-{version}-{'windows' if windows else 'linux'}-portable"
-    if windows:
-        # the files at the top: Explorer's Extract All already makes a folder named after the zip
-        archive = shutil.make_archive(str(DIST / stem), "zip", portable / NAME)
-    else:
-        # one "HEA Calculator/" folder, as tar archives usually unpack (tar makes no folder of its own)
-        archive = shutil.make_archive(str(DIST / stem), "gztar", portable, NAME)
+    archive = shutil.make_archive(str(DIST / stem), "zip" if windows else "gztar", portable, NAME)
     print(f"{Path(archive).relative_to(ROOT)}  {Path(archive).stat().st_size / 2**20:.0f} MB")
 
 
