@@ -1,7 +1,9 @@
 name: Build
 
-# Test builds of the portable app (tools/build.py); the archives are listed under Artifacts on the run's page.
-# Runs by hand (Actions → Build → Run workflow) and on pull requests that change the build.
+# Builds the portable app (tools/build.py); the archives are listed under Artifacts on the run's page.
+# Runs by hand (Actions → Build → Run workflow), on pull requests that change the build, and on version tags:
+# pushing a tag like v1.0.0 (git tag v1.0.0 && git push origin v1.0.0) builds both archives and publishes them as a
+# GitHub release of that name; versions like 1.0.0rc1 become pre-releases.
 on:
   workflow_dispatch:
   pull_request:
@@ -10,6 +12,8 @@ on:
       - tools/build.py
       - pyproject.toml
       - uv.lock
+  push:
+    tags: ["v*"]
 
 jobs:
   build:
@@ -21,6 +25,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+      # a release tag must name the version it builds: v1.0.0rc1 for version = "1.0.0rc1" in pyproject.toml
+      - if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' pyproject.toml)
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version $version in pyproject.toml"
+            exit 1
+          fi
       - uses: astral-sh/setup-uv@v6
       # the app's dependencies and Nuitka only, at the versions in uv.lock; the runners have MSVC and gcc
       - run: uv run --frozen --no-default-groups --group build tools/build.py
@@ -29,3 +42,26 @@ jobs:
         with:
           path: dist/*
           archive: false
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write                                 # create the release and upload its files
+    steps:
+      # both archives into dist/, as they were uploaded (skip-decompress keeps the Windows .zip a .zip)
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+          skip-decompress: true
+      # the notes list the pull requests merged since the previous release
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          prerelease=""
+          if [[ $version =~ (a|b|rc|dev)[0-9]*$ ]]; then prerelease=--prerelease; fi
+          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/*.tar.gz --repo "$GITHUB_REPOSITORY" \
+            --title "HEA Calculator $version" --generate-notes $prerelease
