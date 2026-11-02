@@ -1,7 +1,8 @@
 # Scientific References
 
 The publications that define the models and the datasets used by HEA Calculator. Numbers [1]–[8] follow the model
-numbering M1–M8; they are cited throughout this documentation and in the About window.
+numbering M1–M8 and [9]–[14] are the data sources; the same numbers are used in the README, throughout this
+documentation and in the About window.
 
 ## Prediction models
 

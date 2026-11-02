@@ -267,8 +267,8 @@ def composition_report_html(row, info=None, created: str | None = None, batch_ma
         parts.append(f"<p><b>Purpose.</b> {h.purpose}</p><p><b>Data.</b> {h.data}</p>"
                      f"<p><b>Not available when</b> {h.not_available[0].lower() + h.not_available[1:]}</p>"
                      f"<p><b>Limitations.</b> {sup(h.limitations)}</p>")
-        from ..references import model_citation
-        parts.append(f"<p class='note'>{_e(model_citation(k))}</p>")
+        from .. import references as R
+        parts.append(f"<p class='note'>[{R.number(k)}] {R.citation_html(R.model_reference(k))}</p>")
     parts.append("<h2>Scientific limitations</h2>" + "".join(f"<p>• {x}</p>" for x in LIMITATIONS))
     parts.append("</body></html>")
     return "".join(parts)

@@ -12,9 +12,9 @@ For every composition the calculator reports:
   ΔH<sub>mix</sub>, ideal mixing entropy ΔS<sub>mix</sub>, atomic-size mismatch δ (Guo & Liu radii) and
   δ<sub>CN12</sub> (Kittel radii), valence electron concentration VEC with the FCC/BCC rule, and the quantities of
   each model (Ω, γ, Λ, φ, Φ, ΔH<sub>IM</sub> …). See [Symbols, Parameters and Units](help://symbols).
-* **Predictions of eight models** — M1 Yang & Zhang (2012), M2 Guo et al. (2013), M3 Wang et al. (2015), M4 Singh
-  et al. (2014), M5 Ye et al. (2015), M6 Troparevsky et al. (2015), M7 Senkov & Miracle (2016) and M8 King et al.
-  (2016). See [Phase-Formation Models M1–M8](help://phase-models).
+* **Predictions of eight models** — M1 Yang & Zhang (2012) [1], M2 Guo et al. (2013) [2], M3 Wang et al. (2015) [3], M4
+  Singh et al. (2014) [4], M5 Ye et al. (2015) [5], M6 Troparevsky et al. (2015) [6], M7 Senkov & Miracle (2016) [7]
+  and M8 King et al. (2016) [8]. See [Phase-Formation Models M1–M8](help://phase-models).
 
 ## How it works
 

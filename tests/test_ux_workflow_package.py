@@ -1835,15 +1835,16 @@ def test_model_details_show_the_figure_with_this_composition(win, app):
 
 
 # ============================================================================================ E2 About
-def test_about_shows_the_contact_address_and_no_guessed_repository(win, app, monkeypatch):
-    from PySide6.QtGui import QDesktopServices
+def test_about_shows_the_contact_address_and_verified_repository(win, app, monkeypatch):
+    from PySide6.QtGui import QDesktopServices, QTextDocumentFragment
     from hea_calc.core import references as R
     win.show_about()
     pump(app)
     ab = win._about
     sec = ab.sections["Contact"]
     assert "erdem.alifethi@gmail.com" in sec.text() and "mailto:erdem.alifethi@gmail.com" in sec.text()
-    assert R.REPOSITORY_URL is None and "Source code" not in sec.text()      # not verifiable: no guessed link
+    assert R.REPOSITORY_URL == "https://github.com/aliferdem/mdl-hea-calculator"   # the verified public remote
+    assert f"Source code: {R.REPOSITORY_URL}" in QTextDocumentFragment.fromHtml(sec.text()).toPlainText()
     assert {"Development", "Original software", "References", "Built with", "Licence"} <= set(ab.sections)
     opened = []
     monkeypatch.setattr(QDesktopServices, "openUrl", lambda u: opened.append(u.toString()))

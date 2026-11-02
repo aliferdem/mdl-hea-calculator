@@ -22,10 +22,82 @@ def test_reference_list_is_mse_a_style_and_numbered_by_model():
                   "Mater. Chem. Phys. 132 (2012) 233–238.")
     assert R.MODEL_REFERENCES[0].url == "https://doi.org/10.1016/j.matchemphys.2011.11.021"
     assert all(r.doi for r in R.MODEL_REFERENCES)
-    # fields the local sources do not establish stay empty instead of being guessed
+    # a DOI with parentheses stays one link target (percent-encoded), with the readable DOI as the link text
     guo_liu = next(r for r in R.DATA_REFERENCES if r.key == "guo-liu")
-    assert guo_liu.title == "" and guo_liu.doi == ""
+    assert guo_liu.url == "https://doi.org/10.1016/S1002-0071(12)60080-X"
+    assert f"[{guo_liu.url}](https://doi.org/10.1016/S1002-0071%2812%2960080-X)." in R.markdown(R.DATA_REFERENCES)
+    # books carry no DOI
+    assert all(not r.doi for r in R.REFERENCES if r.book)
     assert R.markdown(R.MODEL_REFERENCES).startswith("[1] X. Yang")
+
+
+def test_readme_footnotes_match_the_application():
+    """The README cites the bibliography as GitHub footnotes [^1]-[^14], each defined once at the end with the same
+    entry as references.py and its DOI link; every definition is cited, and the first citations run 1, 2, ... 14, so
+    the numbers GitHub displays are the application's numbers."""
+    import re
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    first_def = readme.index("\n[^1]: ")
+    body, notes = readme[:first_def], readme[first_def:]
+    defs = {int(m.group(1)): " ".join(m.group(2).split())
+            for m in re.finditer(r"^\[\^(\d+)\]: (.+?)(?=^\[\^\d+\]: |\Z)", notes, re.M | re.S)}
+    assert sorted(defs) == list(range(1, len(R.REFERENCES) + 1))
+    for i, r in enumerate(R.REFERENCES, 1):
+        assert defs[i] == r.text() + (f" [{r.url}]({r.href})." if r.url else ""), i
+    cites = [int(n) for n in re.findall(r"\[\^(\d+)\](?!:)", body)]
+    assert list(dict.fromkeys(cites)) == list(range(1, len(R.REFERENCES) + 1)), "first citations in reference order"
+    assert readme.splitlines()[0] == "![HEA Calculator main window](docs/screenshots/dark/main-window.png)"
+    assert "criteria are implemented.[^1][^2][^3][^4][^5][^6][^7][^8]" in body
+    for i in range(1, len(R.MODEL_REFERENCES) + 1):
+        assert f"| **M{i}** | [^{i}] |" in body
+    # no hand-made bibliography or anchors, and no citation linked straight to a DOI
+    assert "## References" not in readme and "#ref-" not in readme and "<a name=" not in readme
+    assert not re.search(r"\[\[\d+\]\]\(", readme)
+
+
+def test_calculation_audit_footnotes_match_the_application():
+    """CALCULATION_AUDIT.md cites with its own GitHub footnotes (named labels; footnotes are not shared between files).
+    Every application reference is defined there with the same text and DOI link as references.py, every definition is
+    cited, and every citation is defined."""
+    import re
+    root = Path(__file__).resolve().parents[1]
+    audit = (root / "docs" / "CALCULATION_AUDIT.md").read_text(encoding="utf-8")
+    defs = {m.group(1): " ".join(m.group(2).split())
+            for m in re.finditer(r"^\[\^([\w-]+)\]: (.+?)(?=^\[\^[\w-]+\]: |\Z)", audit, re.M | re.S)}
+    body = audit[:audit.index("\n[^")]
+    cited = set(re.findall(r"\[\^([\w-]+)\](?!:)", body))
+    assert cited == set(defs), (cited ^ set(defs))
+    for r in R.REFERENCES:
+        entry = r.text() + (f" [{r.url}]({r.href})." if r.url else "")
+        assert entry in defs.values(), r.key
+
+
+def test_help_citations_link_to_their_entries():
+    """[n] in Help opens the entry in Scientific References (offline); the entries' DOIs are web links."""
+    from hea_calc.core import docs
+    refs_html = docs.to_html(docs.source("references"))
+    for i, r in enumerate(R.REFERENCES, 1):
+        assert f'<a name="ref-{i}"></a>[{i}] ' in refs_html
+        if r.url:
+            assert f'<a href="{r.href}">{r.url}</a>.' in refs_html
+    page = docs.to_html(docs.source("elemental-data"))
+    assert '<a href="help://references#ref-11">[11]</a>' in page
+    assert docs.resolve("help://references#ref-11").page == "references"
+    assert "[99]" in docs.inline("[99]") and "href" not in docs.inline("[99]"), "only real reference numbers link"
+
+
+def test_version_is_consistent():
+    """One version: the package, pyproject.toml, uv.lock, CITATION.cff and the README agree (PEP 440)."""
+    import re
+    import tomllib
+    from packaging.version import Version
+    root = Path(__file__).resolve().parents[1]
+    assert str(Version(__version__)) == __version__, "PEP 440 normal form"
+    assert tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"] == __version__
+    lock = (root / "uv.lock").read_text(encoding="utf-8")
+    assert re.search(r'name = "hea-calculator"\s+version = "([^"]+)"', lock).group(1) == __version__
+    assert re.search(r"^version: (\S+)$", (root / "CITATION.cff").read_text(encoding="utf-8"), re.M).group(1)         == __version__
+    assert f"Version {__version__} " in (root / "README.md").read_text(encoding="utf-8")
 
 
 def test_help_and_about_cite_the_same_list():

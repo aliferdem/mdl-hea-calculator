@@ -52,6 +52,34 @@ def label(text: str, role: str = "body", wrap: bool = False, selectable: bool = 
     return lab
 
 
+class LinkLabel(QLabel):
+    """A selectable rich-text label whose web links open in the default browser, in the theme's link colour."""
+
+    def __init__(self, html_text: str, role: str = "body"):
+        super().__init__()
+        self._html = html_text
+        self.setTextFormat(Qt.TextFormat.RichText)
+        self.setWordWrap(True)
+        self.setObjectName({"body": "AnaBody", "secondary": "AnaSecondary"}[role])
+        self.setOpenExternalLinks(False)
+        self.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.linkActivated.connect(self._open)
+        from ..theme import THEME
+        THEME.changed.connect(self._theme_changed)   # bound: auto-disconnected on deletion
+        self._theme_changed()
+
+    def _theme_changed(self, *_):
+        from ..theme import style_links
+        self.setText(style_links(rich(self._html), t("link-primary")))
+
+    @staticmethod
+    def _open(href: str) -> None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        if href.startswith(("http://", "https://")):
+            QDesktopServices.openUrl(QUrl(href))
+
+
 def _floating_regions(k: dict) -> str:
     """The floating window's shell equals layer-01 in the light theme: its regions are then layer-02 (ui/surface.py)."""
     if k['shell'].lower() == k['layer-01'].lower():

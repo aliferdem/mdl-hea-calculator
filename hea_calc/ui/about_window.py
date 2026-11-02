@@ -133,12 +133,10 @@ class AboutWindow(QDialog):
                 f"{html.escape(o['author'])}. Copyright in the original {o['name']} remains with its author.<br>"
                 f"{_link(o['repository'], 'HEACalculator on GitHub')}<br>"
                 f"{_link('https://doi.org/' + o['doi'], 'Cite HEACalculator (Zenodo)')}")
-        refs = []
-        for i, r in enumerate(R.REFERENCES, 1):
-            line = f"[{i}] {html.escape(r.text())}"
-            if r.url:
-                line += " " + _link(r.url)
-            refs.append(line)
+        section("Acknowledgements",
+                "Special thanks to " + ", and to ".join(f"{_link(url, name)} {html.escape(why)}"
+                                                        for name, url, why in R.ACKNOWLEDGEMENTS) + ".")
+        refs = [f"[{i}] {R.citation_html(r)}" for i, r in enumerate(R.REFERENCES, 1)]
         section("References", "".join(f"<p style='margin:0 0 6px 0'>{r}</p>" for r in refs)
                 + "<p style='margin:10px 0 0 0'>Models M1–M8 are references [1]–[8]. Details: "
                 + _link("help://references", "Help › Scientific References") + ".</p>")

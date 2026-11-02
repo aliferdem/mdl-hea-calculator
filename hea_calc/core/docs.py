@@ -416,6 +416,15 @@ def png_size(path: Path) -> tuple[int, int] | None:
     return None
 
 
+_CITATION = re.compile(r"\[(\d{1,2})\](?!\()")
+_REFERENCE_ENTRY = re.compile(r"^\[(\d{1,2})\] ")
+
+
+def _is_reference(n: str) -> bool:
+    from . import references
+    return 1 <= int(n) <= len(references.REFERENCES)
+
+
 def inline(text: str) -> str:
     """Inline Markdown -> HTML (escapes everything except the allowed inline tags)."""
     keep: list[str] = []
@@ -431,6 +440,9 @@ def inline(text: str) -> str:
     t = html.escape(t, quote=False)
     t = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)",
                lambda m: stash(f'<a href="{m.group(2)}">') + m.group(1) + stash("</a>"), t)
+    # numbered citations [n] link to their entry in Scientific References (offline, inside Help)
+    t = _CITATION.sub(lambda m: stash(f'<a href="help://references#ref-{m.group(1)}">') + m.group(0) + stash("</a>")
+                      if _is_reference(m.group(1)) else m.group(0), t)
     t = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
     t = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"<i>\1</i>", t)
     return re.sub(r"\x00(\d+)\x00", lambda m: keep[int(m.group(1))], t)
@@ -457,7 +469,14 @@ def to_html(md: str, image_width: int = 640, lead: bool = True) -> str:
     def flush():
         if para:
             cls = ' class="lead"' if (state["after_h1"] and lead) else ""
-            out.append(f"<p{cls}>{inline(' '.join(para))}</p>")
+            text = ' '.join(para)
+            entry = _REFERENCE_ENTRY.match(text)
+            if entry and _is_reference(entry.group(1)):
+                # a bibliography entry "[n] ...": the anchor its citations link to, the number itself not a link
+                n = entry.group(1)
+                out.append(f'<p{cls}><a name="ref-{n}"></a>[{n}] {inline(text[entry.end():])}</p>')
+            else:
+                out.append(f"<p{cls}>{inline(text)}</p>")
             para.clear()
         state["after_h1"] = False
 

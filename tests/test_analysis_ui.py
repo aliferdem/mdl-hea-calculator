@@ -550,7 +550,8 @@ def test_model_details_list_and_mse_a_reference(win, app):
                 if lab.objectName() == "ModelReference"]
         assert len(refs) == 1
         text = QTextDocumentFragment.fromHtml(refs[0].text()).toPlainText()
-        assert text == R.model_citation(k) and "https://doi.org/" in text, (k, text)
+        assert text == f"[{R.number(k)}] {R.model_citation(k)}" and "https://doi.org/" in text, (k, text)
+        assert f'href="{R.model_reference(k).href}"' in refs[0].text(), "the DOI is a link"
     md = R.markdown(R.MODEL_REFERENCES)
     assert all(R.MODEL_REFERENCES[i].text() in md for i in range(8)), "Help uses the same citations"
 

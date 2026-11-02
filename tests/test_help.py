@@ -79,7 +79,11 @@ LINK = re.compile(r"\]\((help://[^)\s]+)\)")
 
 
 def _anchors(page: str) -> set[str]:
-    return {a for _l, _t, a in docs.headings(page)} | {"related-topics", "in-this-section"}
+    anchors = {a for _l, _t, a in docs.headings(page)} | {"related-topics", "in-this-section"}
+    if page == "references":
+        from hea_calc.core.references import REFERENCES
+        anchors |= {f"ref-{i}" for i in range(1, len(REFERENCES) + 1)}   # the bibliography entries
+    return anchors
 
 
 def test_every_help_link_in_the_documentation_resolves_to_a_page_and_anchor():
@@ -101,6 +105,8 @@ def test_every_in_app_help_link_resolves():
     for href in hrefs:
         if href.endswith("://"):
             continue
+        if href == "help://references#ref-":
+            href += "1"   # the citation-link template of core/docs.py; every [n] is checked in test_about
         route = docs.resolve(href)
         assert route is not None, href
         if route.anchor:

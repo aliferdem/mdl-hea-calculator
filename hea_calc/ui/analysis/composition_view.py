@@ -1016,10 +1016,11 @@ class CompositionContent(CurrentStack):
         rl.addWidget(label("Not available when", "heading"))
         rl.addWidget(label(h.not_available, "body", wrap=True))
         rl.addSpacing(8)
-        # the publication, in the one MSE-A form the About window, Help and reports use (brief §37)
-        from ...core.references import model_citation
+        # the publication, numbered and formatted as in the About window, Help, reports and the README
+        from ...core import references as R
+        from .widgets import LinkLabel
         rl.addWidget(label("Reference", "heading"))
-        ref = label(_html.escape(model_citation(k)), "body", wrap=True, selectable=True)
+        ref = LinkLabel(f"[{R.number(k)}] {R.citation_html(R.model_reference(k))}")
         ref.setObjectName("ModelReference")
         rl.addWidget(ref)
         rl.addStretch(1)
