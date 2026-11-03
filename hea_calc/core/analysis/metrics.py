@@ -32,6 +32,7 @@ GROUP_SHORT = {G_MIXING: "Mixing thermodynamics", G_SIZE: "Atomic size", G_ELECT
 
 DATA_TAKEUCHI = "Takeuchi & Inoue (2005), 2,628 binary pairs"
 DATA_GUO_LIU = "Guo & Liu (2011) atomic radii (supplementary values cautioned)"
+DATA_GUO_LIU_CHI = "Guo & Liu (2011) Pauling electronegativities, 73 elements (no other scale substituted)"
 DATA_KITTEL = "Kittel CN12 (12-coordination) radii"
 DATA_TROP = "Troparevsky et al. (2015) DFT formation enthalpies, 30 elements, 435 pairs"
 DATA_MIEDEMA = "Bakker (1998) Miedema parameters"
@@ -125,6 +126,10 @@ DESCRIPTORS_LIST: list[Descriptor] = [
     _D("cstr", "Crystal structure (VEC rule)", "", "Crystal structure", "", G_ELECTRONIC, 0,
        "VEC rule of Guo et al. (2011): FCC if VEC ≥ 8.0, BCC if VEC < 6.87, otherwise BCC + FCC. "
        "A tendency, not an observed phase.", "", "Guo et al., J. Appl. Phys. 109 (2011) 103505", stored=True),
+    _D("dchi", "Electronegativity difference — Pauling", "Δχ", "Δχ", "", G_ELECTRONIC, 3,
+       "Concentration-weighted spread of the Pauling electronegativities (Guo & Liu 2011, Eq. 4). Used by no model "
+       "M1–M8. Pauling scale only: not comparable with values on the Allen or other scales.",
+       "Δχ = √(Σ c<sub>i</sub> (χ<sub>i</sub> − χ̄)²), χ̄ = Σ c<sub>i</sub> χ<sub>i</sub>", DATA_GUO_LIU_CHI),
     # ---- Ye excess entropy
     _D("s_e", "Excess entropy", "S<sub>E</sub>", "SE", "J mol⁻¹ K⁻¹", G_YE, 3,
        "Hard-sphere excess entropy of mixing, mean of the bcc (0.68) and fcc (0.74) packing fractions.",

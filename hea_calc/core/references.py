@@ -84,7 +84,8 @@ DATA_REFERENCES: tuple[Reference, ...] = (
     Reference("guo-liu", "S. Guo, C.T. Liu",
               "Phase stability in high entropy alloys: Formation of solid-solution phase or amorphous phase",
               "Progress in Natural Science: Materials International", "21", "2011", "433–446",
-              "10.1016/S1002-0071(12)60080-X", note="Atomic radii (Table 1)"),
+              "10.1016/S1002-0071(12)60080-X",
+              note="Atomic radii and Pauling electronegativities (Table 1); electronegativity difference Δχ (Eq. 4)"),
     Reference("takeuchi-inoue", "A. Takeuchi, A. Inoue",
               "Classification of Bulk Metallic Glasses by Atomic Size Difference, Heat of Mixing and Period of "
               "Constituent Elements and Its Application to Characterization of the Main Alloying Element",

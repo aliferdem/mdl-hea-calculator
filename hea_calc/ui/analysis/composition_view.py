@@ -77,7 +77,10 @@ def kv_value(d: dict, key: str, full: bool = False) -> tuple[str, str]:
     v = d.get(key)
     if v is None:
         und = d.get(f"{key}_undefined")
-        return ("Undefined" if und else "N/A"), (und or "Not available (missing data)")
+        if und:
+            return "Undefined", und
+        # the engine's reason when it records one (e.g. ``dchi_unavailable``: which element has no value)
+        return "N/A", d.get(f"{key}_unavailable") or "Not available (missing data)"
     text = format_value(key, v, full)
     return text, f"{text} ({full_precision(v)} exactly as calculated)" if isinstance(v, float) else text
 

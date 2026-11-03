@@ -30,8 +30,8 @@ _ENGINE_SOURCES = ("engine.py", "data.py")
 
 # Plain-language names of the scientific datasets (reports, Toggletips).
 DATASET_LABELS = {
-    "periodic_table.json": "Elemental properties (Guo & Liu 2011 radii, Kittel CN12 radii, Bakker 1998 Miedema "
-                           "parameters, melting points, valence electrons)",
+    "periodic_table.json": "Elemental properties (Guo & Liu 2011 radii and Pauling electronegativities, Kittel CN12 "
+                           "radii, Bakker 1998 Miedema parameters, melting points, valence electrons)",
     "mixing_enthalpy_data.json": "Takeuchi & Inoue (2005) liquid mixing enthalpies",
     "binary_formation_enthalpy_data.json": "Troparevsky et al. (2015) binary formation enthalpies",
 }

@@ -7,10 +7,12 @@ The investigation that led to it, including superseded findings and earlier vers
 [`docs/SCIENTIFIC_DEVELOPMENT_HISTORY.md`](SCIENTIFIC_DEVELOPMENT_HISTORY.md). Section numbers such as
 "audit section 19" or "audit F9" in source-code comments and test docstrings refer to that record.
 
-The state described here corresponds to engine fingerprint `f64504541a84` and dataset identifiers
-`periodic_table.json` `581eea161276`, `mixing_enthalpy_data.json` `12bdfbcd5f00` and
+The state described here corresponds to engine fingerprint `a741ab74769c` and dataset identifiers
+`periodic_table.json` `99817a9deb58`, `mixing_enthalpy_data.json` `12bdfbcd5f00` and
 `binary_formation_enthalpy_data.json` `633051507e72` (`hea_calc/core/provenance.py`). Validation figures marked
-"measured 2026-11-02" were obtained with this state.
+"measured 2026-11-02" were obtained with the previous state (engine `f64504541a84`, `periodic_table.json`
+`581eea161276`); the only change since then is the $\Delta\chi$ descriptor and its data column (Section 3.19), which
+changes no other descriptor or classification (development history, §21).
 
 **Contents**
 
@@ -136,6 +138,7 @@ The data files are in [`data/`](../data). Each carries a `_metadata` block with 
 | `molar_volume` | cm³ mol⁻¹ | Bakker (1998), Table A1[^bakker1998] for 71 elements; source not recorded for the other 47 | 118 | Miedema model (M8); density |
 | `work_function_phi`, `n_ws` | V; density units | Bakker (1998), Table A1 | 71 | Miedema model (M8) |
 | `bulk_modulus`, `shear_modulus` | 10¹⁰ Pa | Bakker (1998), Table A5 | 71 | Elastic term (M8) |
+| `electronegativity_pauling` | – | Guo and Liu (2011), Table 1, Pauling column[^guoliu2011] | 73 elements (the Table 1 elements; no other source) | $\Delta\chi$ only; no model (Section 3.19) |
 
 The Miedema parameters were compared with Bakker's tables for every element; the stored values are identical, with
 the divalent parameter set used for Eu and Yb. The elemental `density` property is displayed in the Elements panel
@@ -262,6 +265,7 @@ A pair or property absent from a dataset is missing data and is never treated as
 | A Kittel CN12 radius | $\delta_{\mathrm{CN12}}$ | M1 | All other models, including M8 |
 | A Troparevsky pair | $\Delta H_{\mathrm{f}}$ extremes, $\Delta H_{\mathrm{IM}}$, $k_1$ | M6, M7 | M1–M5, M8 |
 | Miedema parameters or classification of an element | King descriptors | M8 | M1–M7 |
+| A Guo and Liu Pauling electronegativity | $\Delta\chi$ | None | All descriptors and M1–M8 |
 
 A missing Kittel CN12 radius makes only $\delta_{\mathrm{CN12}}$ and M1 unavailable; M8 is unaffected because its
 criterion uses no radius. Each N/A carries a reason naming the missing element or pair (for example "No Troparevsky
@@ -617,6 +621,40 @@ $$
   reproduces Bakker's table within rounding (Section 6.3).
 * **Undefined** when $\Delta G_{\max} = 0$; $\Phi$ is then divergent and M8 is N/A (undefined).
 
+### 3.19 Electronegativity difference
+
+$$
+\Delta\chi = \sqrt{\sum_i c_i \left(\chi_i - \bar{\chi}\right)^2}, \qquad \bar{\chi} = \sum_i c_i \chi_i
+$$
+
+* **Source.** Guo and Liu (2011), Eq. (4),[^guoliu2011] with the Pauling electronegativities of their Table 1
+  (pp. 435–436). Singh et al. (2023)[^singh2023] use the same definition "following Guo et al." and the same values
+  (Section 6.2). There is no factor 100, unlike $\delta$.
+* **Variables.** $\chi_i$ is the Pauling electronegativity of element $i$, `electronegativity_pauling` in
+  `data/periodic_table.json`, stored as printed (0.01).
+* **Units.** Dimensionless (Pauling scale). Values on the Allen or other scales are a different quantity and are not
+  mixed in.
+* **Data and coverage.** The 73 elements of Guo and Liu's Table 1, which are exactly the elements with a Guo and Liu
+  radius. Every value was read on a 220-dpi rendering of pp. 435–436 on 2026-11-03 and equals the PDF text layer of
+  the same row; the radius on the same printed line confirms the row alignment
+  (`tests/reference/guo_liu_2011_table1_pauling.json`). The 45 other elements (among them H, the noble gases, the
+  halogens, As, Sb, Hg, Bi and Pu) have no value, and no value from another source is substituted. Table 1 cites
+  webelements.com and Senkov and Miracle (2001) as its sources. The printed values are kept as printed, because they
+  are the values with which the published $\Delta\chi$ were calculated; they were not compared with other Pauling
+  compilations.
+* **Use.** A descriptor only. No criterion M1–M8 reads it, and adding it changed no other descriptor, classification,
+  reason, caution or warning (`tests/test_dchi.py::test_dchi_changes_no_other_descriptor_or_model`).
+* **Unavailable** when any element of the composition has no tabulated $\chi_i$. The value is then N/A
+  (`dchi` = None), the missing elements are listed in `dchi_missing`, and the reason (for example "No Guo & Liu (2011)
+  Pauling electronegativity for Sb, so Δχ is not available.") is stored in `dchi_unavailable` and added to the
+  warnings. Missing data is never replaced by zero.
+* **Zero.** $\Delta\chi = 0$ is a valid value when all elements have the same tabulated $\chi$ (for example Ru, Pd, Os
+  and Ir, all 2.20; Cu and Si, both 1.90). The engine returns exactly 0 in that case, as for $S_{\mathrm{E}}$ with equal
+  diameters, instead of a rounding residue of order $10^{-16}$.
+* **Presentation.** Optional results-table and export column "Δχ" (three decimals in the table, full precision in the
+  exported file); Analysis group "Electronic structure"; Details; filters; the Symbols page of Help. The
+  elemental $\chi_i$ is shown in the Elements panel (row χ, a dash for the elements without a value).
+
 ---
 
 ## 4. Phase-formation criteria
@@ -963,6 +1001,17 @@ Measured 2026-11-02 with the current engine and data, using the classification o
 | M8 | King et al., §2.1 worked examples | $\Delta G_{\mathrm{ss}}$, $\Delta H^{\mathrm{int}}$, $\Delta G_{\max}$ | 3 each | 0 | 3 each | 0 |
 | M8 | King et al., §2.1 worked examples | $\Phi$ | 3 | 2 | 1 | 0 |
 | M8 | King et al., §3.2.1 | $\Phi$ | 1 | 0 | 0 | 1 |
+| Descriptor | Guo and Liu (2011), Table 2, p. 437 | $\Delta\chi$ | 41 | 40 | 0 | 1 |
+| Descriptor | Singh et al. (2023), Tables 2–3 | $\Delta\chi$ | 6 | 6 (truncated, see note) | 0 | 0 |
+
+Note on $\Delta\chi$ (measured 2026-11-03; `tests/test_dchi.py`, `tests/reference/dchi_published.json`): Guo and Liu
+print two decimals; 40 of the 41 rows of p. 437 with an unambiguous formula agree within half a unit, four equiatomic
+binaries (Cu50Zr50 0.285, Ni50Nb50 0.155, Zr50Ti50 0.105, Mg50Cu50 0.295) falling exactly on a rounding half that the
+table rounds up. The row "6FeNiCoSiCrAlTi" and the continuation of the table on p. 438 (PDF text layer without row
+alignment) were not transcribed. Singh et al. print three to five decimals and agree with **truncation**, not rounding:
+for all six alloys $0 \le \Delta\chi_{\mathrm{engine}} - \Delta\chi_{\mathrm{printed}}$ is less than one unit of the
+last printed digit (for example 0.36157 printed 0.361, 0.35656 printed 0.356, 0.23690 printed 0.236); under the
+half-unit rule three of the six would count as within one unit only. The test asserts the truncation rule.
 
 Note on $\lvert S_{\mathrm{E}} \rvert$: the catalogue stores, for each alloy, the mean of the two printed
 packing-fraction columns, so many reference values have more digits than any printed number. The test resolves them
@@ -995,6 +1044,7 @@ $\Omega$ is additionally asserted for selected rows within 2 % (`test_yang_zhang
 | Classification of Ca, Sr, Ba ($P$, hybridisation, $a$) | Source rules typed into the test | Internal consistency against the source rules | `test_miedema_classification_ca_sr_ba`, `test_miedema_volume_coefficient` |
 | Miedema parameters against Bakker Tables A1/A5 | Identical for the checked elements | Exact | `test_miedema_parameters_match_bakker_tables_a1_a5` |
 | Guo and Liu radii against Table 1 | All 73 printed values | Exact | `test_atomic_radius_equals_guo_liu_table1_exactly` |
+| Guo and Liu Pauling electronegativities against Table 1 (rendered pp. 435–436) | All 73 printed values; no value for the 45 other elements | Exact | `test_dchi.py::test_pauling_value_equals_guo_liu_table1`, `test_only_table1_elements_have_a_pauling_value` |
 | Kittel CN12 radii against Table 9 | All transcribed values | Exact | `test_kittel_cn12_radii` |
 | Takeuchi and Inoue table completeness | 73 elements, 2,628 pairs | Internal consistency | `test_mixing_table_covers_73_elements_completely` |
 
@@ -1105,6 +1155,8 @@ source adopted by this project) or **open** (unresolved).
 | Senkov and Miracle, Table 1 | Al0.3NbTa0.8Ti1.4V0.2Zr1.3 | $\Delta H_{\mathrm{IM}}$ printed −5.62, engine −6.69 | Interpretation: likely a typographical error in the table. |
 | Senkov and Miracle, Table 1 | Printed $\Delta H_{\mathrm{mix}}$ column | Differs from the cited Takeuchi and Inoue values by up to 7 kJ mol⁻¹ for Al-containing refractory alloys (for example Al0.5CoCrCuFeNi printed −3.40, table −1.52, as also printed by Yang and Zhang and Guo et al.) | Confirmed. With the printed $\Delta H_{\mathrm{mix}}$, Eq. (7) reproduces the printed $k_1^{\mathrm{cr}}$ in 33 of 45 rows; three rows (CrMo0.5NbTa0.5TiZr, CrNbTiVZr, CrNbTiZr) violate the table's own relation $k_1^{\mathrm{cr}} = 1 + 0.4\thinspace\Omega$. |
 | King et al., §3.2.1 | Co43Cr1Fe7Ni49 | $\Phi$ 9.288 against 8.93 (+4.0 %) | Confirmed; attributed to tabulated versus equation inputs. |
+| Guo and Liu (2011), Table 2 | Zr50Ni50 | $\Delta\chi$ printed 0.24; from the paper's own Table 1, $\lvert 1.33 - 1.91 \rvert / 2 = 0.29$ exactly | Confirmed on the rendered page (p. 437); a misprint. The reference keeps 0.24 and the test asserts the difference. |
+| Singh et al. (2023), Tables 2–3 | All six $\Delta\chi$ | Printed values are truncated, not rounded (Section 6.2) | Confirmed; a printing convention, not a disagreement. |
 | de Boer et al., Table V-4.02 | Be in As; Sb in Cd | Printed +2 and −1 kJ mol⁻¹; equation +21 and −11 | Confirmed as printed. |
 | Takeuchi and Inoue | Ba with 19 non-transition metals | Mean +2.0, maximum 4.9 kJ mol⁻¹ from the printed factor 0.4 | Interpretation: the Ba rows behave like a factor 0.5; the printed factor 0.4 is kept. |
 
@@ -1195,6 +1247,7 @@ publications beyond their calibration alloys; results far outside those alloys (
 | Published benchmark catalogue (846 cases) | `tests/reference/published_benchmarks.json` |
 | Transcribed published tables used by individual tests | `tests/reference/published_tables.py` |
 | Guo and Liu Table 1; Kittel CN12; Bakker Tables A2, A3/A4; de Boer Table V-4.02; Troparevsky supplement | `tests/reference/*.json` |
+| Guo and Liu Table 1 Pauling column; published $\Delta\chi$ (Guo and Liu Table 2, Singh et al. 2023) | `tests/reference/guo_liu_2011_table1_pauling.json`, `tests/reference/dchi_published.json` |
 | Published values plotted in Analysis (display only; not read by the engine) | `data/model_figures.json`, built by `tools/build_model_figures.py` |
 
 ### 8.2 Use of published values in the tests
@@ -1222,7 +1275,7 @@ The scientific tests run without a display:
 
 ```powershell
 $env:QT_QPA_PLATFORM = "offscreen"
-uv run pytest -q tests/test_published_benchmarks.py tests/test_models_published.py tests/test_datasets.py tests/test_model_boundaries.py tests/test_engine_behaviour.py tests/test_m5_excess_entropy_limits.py tests/test_miedema_takeuchi_inoue.py tests/test_m8_alkaline_earth_independent.py tests/test_m8_support.py tests/test_model_support_consistency.py tests/test_radius_f2_invariance.py
+uv run pytest -q tests/test_published_benchmarks.py tests/test_models_published.py tests/test_datasets.py tests/test_model_boundaries.py tests/test_engine_behaviour.py tests/test_m5_excess_entropy_limits.py tests/test_miedema_takeuchi_inoue.py tests/test_m8_alkaline_earth_independent.py tests/test_m8_support.py tests/test_model_support_consistency.py tests/test_radius_f2_invariance.py tests/test_dchi.py
 ```
 
 The full suite is run with `uv run pytest -q` (see [`CONTRIBUTING.md`](../CONTRIBUTING.md#development)). Test counts
@@ -1306,5 +1359,8 @@ HEACalculator[^sariturk2019] are also part of that record.
 [^otto2013]: F. Otto, Y. Yang, H. Bei, E.P. George, Relative effects of enthalpy and entropy on the phase stability of
     equiatomic high-entropy alloys, Acta Materialia 61 (2013) 2628–2638.
     [https://doi.org/10.1016/j.actamat.2013.01.042](https://doi.org/10.1016/j.actamat.2013.01.042).
+[^singh2023]: S. Singh, N.K. Katiyar, S. Goel, S.N. Joshi, Phase prediction and experimental realisation of a new
+    high entropy alloy using machine learning, Sci. Rep. 13 (2023) 4811. Not the authors of model M4.
+    [https://doi.org/10.1038/s41598-023-31461-7](https://doi.org/10.1038/s41598-023-31461-7).
 [^sariturk2019]: D. Sarıtürk, HEACalculator, Zenodo (2019).
     [https://doi.org/10.5281/zenodo.3590318](https://doi.org/10.5281/zenodo.3590318).

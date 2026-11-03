@@ -44,6 +44,7 @@ formatted for display only — nothing is recalculated or rounded before it is u
 | VEC | Valence electron count | — | The number of valence electrons counted as s + d electrons. | standard tabulation | VEC and the crystal-structure rule; the Miedema valence |
 | φ* | Miedema electronegativity parameter | V | The electronegativity parameter φ* of Miedema's model (a work-function-like quantity, not the measured work function). | Bakker (1998), Table A1 [11] | Miedema model (M8) |
 | n<sub>ws</sub> | Electron density at the Wigner–Seitz cell boundary | density units (d.u.) | Miedema's electron density parameter. | Bakker (1998), Table A1 [11] | Miedema model (M8) |
+| χ | Pauling electronegativity | — | The Pauling electronegativity, shown to 0.01 as printed in the source table. It is a different quantity from Miedema's φ\*. In the panel it sits in the free third row of the K / G column. | Guo & Liu (2011), Table 1 [9] (73 elements) | the electronegativity difference Δχ only — no model |
 
 ## Elastic properties
 
@@ -56,7 +57,7 @@ formatted for display only — nothing is recalculated or rounded before it is u
 
 Of the 118 elements, the dataset has T<sub>m</sub>, V<sub>m</sub>, m<sub>a</sub> and VEC for all 118; ρ for 103;
 r for 108 (35 of them supplementary values; At, Rn and Cm–Lr have none); r<sub>CN12</sub> for 73; φ*,
-n<sub>ws</sub>, K and G for 71.
+n<sub>ws</sub>, K and G for 71; χ for 73 (the elements of Guo & Liu's Table 1).
 
 ## Related
 

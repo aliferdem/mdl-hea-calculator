@@ -17,6 +17,9 @@ M6    Troparevsky et al. (2015)     -T dSmix < dHf(ij) < 37 meV/atom for every p
 M7    Senkov & Miracle (2016)       dHmix - T dSmix < dH_IM - k2 T dSmix  (k2 = 0.6)
 M8    King et al. (2016)            Phi = dG_ss / -|dG_max| >= 1
 ====  ============================  =====================================================
+
+Descriptors used by no model are reported as well, e.g. the Pauling electronegativity difference
+``dchi`` (Guo & Liu 2011, Eq. 4).
 """
 
 from __future__ import annotations
@@ -340,6 +343,19 @@ class Engine:
         d["dsmix"] = -R * sum(x * math.log(x) for x in c.values() if x > 0)
         d["n_elements"] = len(els)
 
+        # Pauling electronegativity difference (Guo & Liu 2011 Eq. 4) with their Table 1 values.  A descriptor
+        # only: no model M1-M8 uses it.  An element without a Table 1 value makes it unavailable, with the reason
+        # recorded (never a substitute value and never zero); 0 itself is a valid result for equal values.
+        chi = {el: data.prop(el, "electronegativity_pauling") for el in els}
+        missing_chi = [el for el in els if chi[el] is None]
+        d["dchi_missing"] = missing_chi
+        d["dchi"] = self._dchi(c, chi)
+        d["dchi_unavailable"] = None
+        if missing_chi:
+            d["dchi_unavailable"] = ("No Guo & Liu (2011) Pauling electronegativity for " + ", ".join(missing_chi)
+                                     + ", so Δχ is not available.")
+            res.warnings.append(d["dchi_unavailable"])
+
         # Liquid mixing enthalpy (Takeuchi & Inoue 2005), regular solution: dHmix = sum 4 H_ij c_i c_j.
         missing_mix = [(a, b) for a, b in pairs if data.mixing_enthalpy(a, b) is None]
         d["missing_mixing_pairs"] = missing_mix
@@ -454,6 +470,17 @@ class Engine:
             return None
         r_bar = sum(c[el] * radii[el] for el in c)
         return 100.0 * math.sqrt(sum(c[el] * (1.0 - radii[el] / r_bar) ** 2 for el in c))
+
+    @staticmethod
+    def _dchi(c: dict, chi: dict) -> float | None:
+        """Guo & Liu (2011) Eq. (4): sqrt(sum c_i (chi_i - chi_bar)^2), chi_bar = sum c_i chi_i (no x100 factor)."""
+        if any(chi[el] is None for el in c):
+            return None
+        if len(set(chi[el] for el in c)) == 1:
+            # Every term is exactly zero; evaluating chi_bar instead leaves rounding of order 1e-16.
+            return 0.0
+        chi_bar = sum(c[el] * chi[el] for el in c)
+        return math.sqrt(sum(c[el] * (chi[el] - chi_bar) ** 2 for el in c))
 
     @staticmethod
     def _gamma(c: dict, radii: dict) -> float | None:

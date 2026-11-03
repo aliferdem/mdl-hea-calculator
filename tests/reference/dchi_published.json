@@ -1,0 +1,44 @@
+{
+ "_metadata": {
+  "description": "Published Pauling electronegativity differences dchi = sqrt(sum c_i (chi_i - chi_bar)^2) (Guo & Liu 2011 Eq. 4), each transcribed from a rendered page of the original PDF on 2026-11-03.",
+  "use": "Regression oracle for tests/test_dchi.py (CALCULATION_AUDIT.md section 3.19). Formulas are the printed ones, read as atomic proportions by hea_calc.core.composition.parse_formula.",
+  "rounding": "Guo & Liu print two decimals and agree with round-to-nearest (|calculated - printed| <= 0.005). Singh et al. print three to five significant decimals and agree with truncation, not rounding: 0 <= calculated - printed < one unit of the last printed digit (e.g. 0.36157 printed 0.361, 0.35656 printed 0.356, 0.23690 printed 0.236)."
+ },
+ "guo_liu_2011_table2": {
+  "source": "S. Guo, C.T. Liu, Prog. Nat. Sci.: Mater. Int. 21 (2011) 433-446, Table 2 'Calculated parameters dHmix, delta, dchi, dSmix and VEC for alloys used in Figs. 1 and 2', p. 437 (PDF page 5, read on a 220-dpi rendering), column dchi.",
+  "doi": "10.1016/S1002-0071(12)60080-X",
+  "scope": "Every row of p. 437 with an unambiguous formula (41 rows). Excluded: '6FeNiCoSiCrAlTi' (printed formula does not define the amounts unambiguously) and the continuation on p. 438, whose PDF text layer has lost the row alignment of formulas and values.",
+  "rows": [
+   ["Cu0.5NiAlCoCrFeSi", 0.12], ["Zr17Ta16Ti19Nb22Si26", 0.20], ["Cu50Zr50", 0.29], ["Ni50Nb50", 0.16],
+   ["PdPtCuNiP", 0.16], ["SrCaYbMgZn", 0.26], ["SrCaYbMgZnCu", 0.35], ["SrCaYb(Li0.55Mg0.45)Zn", 0.26],
+   ["ErTbDyNiAl", 0.30], ["AlCrTaTiZr", 0.11], ["CuNbNiTiZr", 0.22], ["Zr50Ti50", 0.11], ["Mg50Cu50", 0.30],
+   ["Mg50Ni50", 0.30], ["ZrHfTiCuNi", 0.27], ["ZrHfTiCuFe", 0.25], ["ZrHfTiCuCo", 0.26],
+   ["Cu0.5NiAlCoCrFeTi", 0.14], ["Cu0.5NiAlCoCrFe", 0.12], ["AlCrMoSiTi", 0.23], ["AlCrMoTaTiZr", 0.26],
+   ["AlMoNbSiTaTiVZr", 0.24], ["WNbMoTa", 0.36], ["WNbMoTaV", 0.34], ["FeCoNiCrCu", 0.09],
+   ["FeCoNiCrCuAl0.3", 0.10], ["FeCoNiCrCuAl0.5", 0.11], ["FeCoNiCrCuAl0.8", 0.12], ["FeCoNiCrCuAl1.0", 0.12],
+   ["FeCoNiCrCuAl1.5", 0.12], ["FeCoNiCrCuAl2.0", 0.13], ["FeCoNiCrCuAl2.3", 0.13], ["FeCoNiCrCuAl2.8", 0.13],
+   ["FeCoNiCrCuAl3", 0.13], ["FeNi2CrCuAl0.2", 0.10], ["FeNi2CrCuAl0.4", 0.11], ["FeNi2CrCuAl0.6", 0.12],
+   ["FeNi2CrCuAl0.8", 0.12], ["FeNi2CrCuAl1.0", 0.12], ["FeNi2CrCuAl1.2", 0.13]
+  ],
+  "discrepancies": {
+   "Zr50Ni50": {
+    "printed": 0.24,
+    "recalculated": 0.29,
+    "reason": "Equiatomic binary: dchi = |chi_Zr - chi_Ni| / 2 = |1.33 - 1.91| / 2 = 0.29 exactly, from the paper's own Table 1. The printed 0.24 cannot be reproduced with any reading of Eq. 4 and Table 1; recorded as a misprint, the reference value is not changed."
+   }
+  }
+ },
+ "singh_2023": {
+  "source": "S. Singh, N.K. Katiyar, S. Goel, S.N. Joshi, Sci. Rep. 13 (2023) 4811, Table 2 (p. 12) and Table 3 (p. 13), column dchi, read on 200-dpi renderings. The paper computes dchi 'following Guo et al.' (its ref. 35 = Guo & Liu 2011).",
+  "doi": "10.1038/s41598-023-31461-7",
+  "note": "Not model M4 (Singh, Kumar, Dwivedi, Subramaniam 2014). Table 3 heads the composition 'wt %', but its values and descriptors only reproduce as atomic fractions.",
+  "rows": [
+   ["Ti0.5NbMoTaW", "0.361", "Table 2"],
+   ["TiNbMoTaW", "0.356", "Table 2"],
+   ["Al0.5CrCuNiV", "0.133", "Table 2"],
+   ["PdPtRhIrCuNi", "0.161", "Table 2"],
+   ["AuPdAgPtCuNi", "0.236", "Table 2"],
+   ["Ni25Cu18.75Fe25Co25Al6.25", "0.07178", "Table 3"]
+  ]
+ }
+}

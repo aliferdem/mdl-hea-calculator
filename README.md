@@ -67,8 +67,9 @@ time and temporary disk-space requirement.
 ## Descriptors and models
 
 The calculations are based on normalized atomic fractions. The calculated quantities ($\Delta S_{\mathrm{mix}}$,
-$\Delta H_{\mathrm{mix}}$, $T_{\mathrm{m}}$, $\rho$, VEC, $\delta$, $\delta_{\mathrm{CN12}}$ and the model
-parameters), their equations and data sources[^9][^10][^11][^12][^13][^14] are listed in
+$\Delta H_{\mathrm{mix}}$, $T_{\mathrm{m}}$, $\rho$, VEC, $\delta$, $\delta_{\mathrm{CN12}}$, the Pauling
+electronegativity difference $\Delta\chi$ (used by no model) and the model parameters), their equations and data
+sources[^9][^10][^11][^12][^13][^14] are listed in
 [Phase-formation models](hea_calc/docs/pages/phase-models.md#calculated-quantities).
 
 Two atomic-radius datasets[^9][^12] are used because the models were developed with different definitions of atomic

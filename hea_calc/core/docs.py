@@ -259,6 +259,7 @@ SEARCH_ALIASES: tuple[tuple[str, ...], ...] = (
     ("omega", "ω"), ("gamma", "γ"), ("lambda", "λ"), ("phi", "φ", "φ (ye)"), ("king", "φ king", "Φ"),
     ("melting temperature", "tm", "melting point"),
     ("valence electron concentration", "vec"),
+    ("electronegativity difference", "δχ", "dchi", "delta chi", "pauling electronegativity"),
     ("not available", "n/a", "na"),
     ("solid solution", "ss"), ("intermetallic", "im"), ("multiple phases", "mp"), ("metallic glass", "mg"),
     ("composition space", "sweep", "range"),

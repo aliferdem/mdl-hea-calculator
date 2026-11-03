@@ -34,7 +34,7 @@ definition.
 | **Cryst. Str.** | VEC rule: FCC if VEC ≥ 8.0, BCC if VEC < 6.87, otherwise BCC + FCC | — |
 | **M1** … **M8** | Prediction of each model | tag |
 
-**Table columns** (settings icon) adds optional columns: the composition in at.%, δ<sub>CN12</sub>, Ω, γ, Λ, φ,
+**Table columns** (settings icon) adds optional columns: the composition in at.%, δ<sub>CN12</sub>, Δχ, Ω, γ, Λ, φ,
 S<sub>E</sub>, ΔH<sub>f,min</sub>, ΔH<sub>f,max</sub>, −TΔS<sub>mix</sub>, T, ΔH<sub>IM</sub>, k<sub>1</sub>,
 k<sub>1</sub><sup>cr</sup>, Φ, ΔG<sub>ss</sub>, ΔG<sub>max</sub> and M̄. **Reset to default** restores the default
 set; **Alloy** is always shown. The choice is remembered. Definitions: [Symbols, Parameters and Units](help://symbols).

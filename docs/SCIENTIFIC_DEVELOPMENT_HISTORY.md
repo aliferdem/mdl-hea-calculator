@@ -1054,3 +1054,58 @@ data `data/atomic-radius-f2-2026-10-27/`; every number equals the proposal's pre
   - publication-data-backed: M1, M2, M3, M4, M7;
   - illustrative criterion charts: M5 and M8, with the few published values; M6, from −k_B·T·ln N and 37 meV/atom,
     with no published values.
+
+## 21. Pauling electronegativity difference Δχ — new descriptor (2026-11-03)
+
+Step 1 of the property-prediction roadmap (prepared in the older development workspace, `research/property_prediction/`
+`SCIENTIFIC_SOURCE_AUDIT.md` §3.2 and `IMPLEMENTATION_ROADMAP.md` Step 1; not in this repository). A descriptor only:
+no equation, constant, threshold, dataset value or result of M1–M8 changed.
+
+**Definition.** Guo & Liu, Prog. Nat. Sci.: Mater. Int. 21 (2011) 433, Eq. (4):
+Δχ = √(Σ cᵢ(χᵢ − χ̄)²), χ̄ = Σ cᵢχᵢ, no ×100 factor. Singh, Katiyar, Goel & Joshi, Sci. Rep. 13 (2023) 4811 (not the
+M4 authors) use the same equation "following Guo et al." and list Δχ as one of their five features.
+
+**Data (`data/periodic_table.json`, new property `electronegativity_pauling`; CRLF kept).** The Pauling column of
+Guo & Liu Table 1 (pp. 435–436), 73 elements, as printed (0.01). Transcription: the earlier audit's text-layer
+extraction (`derived/guo_liu_2011_table1_pauling_AUDIT_ONLY.csv`, not copied) was used only as a seed; every row was
+read on 220-dpi renderings of PDF pages 3–4 and all 73 agreed with it. The radius on the same printed line equals
+`tests/reference/guo_liu_2011_table1.json`, which confirms the row alignment. The 73 elements are exactly the
+non-supplementary radius elements; the other 45 have no value and none was supplied from another scale or source.
+`_metadata.properties.electronegativity_pauling` records the source, pages, method and date.
+
+**Engine (`core/engine.py`).** `descriptors["dchi"]` (`Engine._dchi`), `dchi_missing` (elements without a value) and
+`dchi_unavailable` (the reason, also appended to the warnings). Missing data gives None, never 0. Equal values give
+exactly 0.0 (as S_E at equal diameters, §19), avoiding a 10⁻¹⁶ residue from χ̄.
+
+**Presentation.** Optional results/export column "Δχ" (not a default column; shared, so listed under General in Table
+columns); Analysis registry entry in "Electronic structure" (Details, plots, statistics, Symbols page); numeric filter;
+Help search aliases; the Details tooltip shows the engine's reason for an N/A value (`kv_value` reads
+`<key>_unavailable`); the Guo & Liu reference note and the dataset label mention the electronegativities; Help pages
+"Phase-formation models" (which said electronegativity differences were not calculated), "Elemental property data"
+and "Results table" updated. The Elements panel shows the elemental χ in the free third row of its K / G column (same
+panel height; the panel's dash for the 45 elements without a value), documented on "Element property definitions".
+
+**Measured (2026-11-03; `tests/test_dchi.py`, references `tests/reference/guo_liu_2011_table1_pauling.json` and
+`dchi_published.json`).**
+* *Data:* 73 of 73 values equal the rendered Table 1; no value for the 45 other elements.
+* *Singh et al. (2023), Tables 2–3 (rendered pp. 12–13):* 6 of 6 reproduced. The printed values are **truncated**,
+  not rounded (Ti0.5NbMoTaW 0.36157 → 0.361, TiNbMoTaW 0.35656 → 0.356, AuPdAgPtCuNi 0.23690 → 0.236); the test asserts
+  0 ≤ engine − printed < one unit of the last digit.
+* *Guo & Liu (2011), Table 2 (rendered p. 437):* 40 of 41 rows within half a unit of the printed 0.01. **Zr50Ni50**
+  is printed 0.24, but the paper's own Table 1 gives |1.33 − 1.91|/2 = 0.29 exactly — recorded as a misprint, the
+  reference keeps 0.24 and the test asserts the difference. Not transcribed: "6FeNiCoSiCrAlTi" (ambiguous formula)
+  and p. 438 (text layer without row alignment).
+* *Isolation:* the engine with and without the new column (scratch harness, not committed) gives identical
+  descriptors (other than Δχ), M1–M8 outcomes (label, reason, caution, status, N/A kind, values) and warnings (other
+  than the Δχ warning) for 33 015 compositions: 763 benchmark formulas, 20 349 equiatomic 4/5-element alloys of 20
+  common elements, 5 000 random alloys over all elements and 6 903 binaries. Δχ was N/A, each with its missing
+  elements named, for 17 224 of them. The same comparison over 14 alloys is a regression test.
+* *Fingerprints:* engine `f64504541a84` → `a741ab74769c`; `periodic_table.json` `581eea161276` → `99817a9deb58`;
+  the binary datasets are unchanged.
+
+**Open.**
+* The rest of Guo & Liu Table 2 (p. 438 onwards) could add further Δχ reference rows once read on the rendered pages.
+* Shen et al. (2025) SI Table S3 prints Δχ for 88 refractory alloys (74 of 80 parsed rows agreed in a quick check);
+  a candidate third oracle after verification.
+* The printed Pauling values were not compared with other compilations; they are kept as printed, because they are
+  the values behind the published Δχ.

@@ -175,7 +175,7 @@ class ColumnsDialog(Modal):
         return [k for k in self.order if self.checks[k].isChecked()]
 
 
-FILTER_KEYS = ["dhmix", "dsmix", "delta", "delta_cn12", "vec", "tm", "density", "omega", "gamma", "lambda",
+FILTER_KEYS = ["dhmix", "dsmix", "delta", "delta_cn12", "vec", "dchi", "tm", "density", "omega", "gamma", "lambda",
                "phi_ye", "k1", "k1cr", "phi_king"]
 
 

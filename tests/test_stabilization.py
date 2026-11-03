@@ -621,7 +621,7 @@ def test_element_properties_are_grouped_by_category_labelled_with_sources_and_ne
     assert props == [["density", "melting_point", "molar_volume"],
                      ["atomic_weight", "atomic_radius", "atomic_radius_cn12"],
                      ["nvalence", "work_function_phi", "n_ws"],
-                     ["bulk_modulus", "shear_modulus"]]
+                     ["bulk_modulus", "shear_modulus", "electronegativity_pauling"]]
     tips = {prop: tip for g in info.GROUPS for _k, prop, _f, _s, tip in g}
     # 2026-10-28 (C2): the tooltips define the property and its use; the sources are in Documentation
     assert "M2–M5" in tips["atomic_radius"] and "different radius set" in tips["atomic_radius_cn12"]

@@ -12,6 +12,7 @@ never filled in by assumption: an element without a required property makes only
 | Melting point | K | standard tabulation | T<sub>m</sub>; Ω (M1), φ (M5), the default M6/M7 temperature, M8 |
 | Atomic weight | g mol⁻¹ | standard tabulation | conversions between at.%, wt.% and mass; ρ |
 | Valence electrons (s + d) | — | standard tabulation | VEC and the crystal-structure rule; Miedema valence |
+| Pauling electronegativity χ | — | Guo & Liu (2011), Table 1 [9] (73 elements) | Δχ only — no model |
 | Molar volume V | cm³ mol⁻¹ | Bakker (1998), Table A1 [11] | Miedema model (M8); ρ |
 | Work function φ* | V | Bakker (1998), Table A1 | Miedema model (M8) |
 | Electron density n<sub>ws</sub> | density units | Bakker (1998), Table A1 | Miedema model (M8) |
@@ -38,3 +39,6 @@ the superheavy elements. 35 of them carry supplementary radii from other sources
 Cm–Lr have no radius at all. Models M2–M5 can
 be evaluated with them, but the Model support row shows **Supplementary data used** and the result carries a
 caution.
+
+The same 45 elements have no Pauling electronegativity: Δχ is N/A, with the missing elements named, for any
+composition that contains one of them. No supplementary electronegativity is used.

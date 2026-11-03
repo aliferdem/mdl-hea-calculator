@@ -339,7 +339,8 @@ class ElementInfo(QWidget):
 
     Groups by scientific category (each key a symbol; its Tooltip gives the full name, unit and data source):
     thermophysical (ρ, Tm, Vm) | atomic (atomic mass, the two radius sets) | electronic (VEC and the Miedema
-    φ* and n_ws) | elastic (K, G).  ``r`` is the Guo & Liu (2011, Table 1) radius used by M2-M5 (δ, γ, S_E);
+    φ* and n_ws) | elastic (K, G), with the Pauling electronegativity χ in that column's free third row.
+    ``r`` is the Guo & Liu (2011, Table 1) radius used by M2-M5 (δ, γ, S_E);
     ``r_CN12`` the Kittel CN12 metallic radius used for δ_CN12 by M1 (M8 uses no radius) - two datasets, shown side
     by side, never merged.
     Formatting only: every value is the dataset value (moduli are stored in 10^10 Pa and shown in GPa)."""
@@ -362,7 +363,11 @@ class ElementInfo(QWidget):
          ("n<sub>ws</sub>", "n_ws", "{:.2f} d.u.", 1.0,
           "Miedema electron density at the Wigner–Seitz cell boundary (density units)")],
         [("K", "bulk_modulus", "{:.1f} GPa", 10.0, "Bulk modulus (GPa)"),
-         ("G", "shear_modulus", "{:.1f} GPa", 10.0, "Shear modulus (GPa)")],
+         ("G", "shear_modulus", "{:.1f} GPa", 10.0, "Shear modulus (GPa)"),
+         # the free third row of this column: no extra row, so the panel height is unchanged.  Shown to 0.01, as
+         # printed in the source table; elements outside it show the dash (no value, never zero)
+         ("χ", "electronegativity_pauling", "{:.2f}", 1.0,
+          "Pauling electronegativity χ (dimensionless); used only for the electronegativity difference Δχ")],
     ]
     KEY_GAP = 8                           # key column to value column
     GROUP_GAP = 20                        # after each divider; compresses to GROUP_GAP_MIN

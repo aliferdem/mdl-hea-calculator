@@ -16,9 +16,11 @@ a composition. The table summarizes the main quantities, equations and data sour
 | VEC | Σ *c<sub>i</sub>* VEC<sub>i</sub>; FCC if ≥ 8.0, BCC if < 6.87 | Guo et al. (2011) [13] | Empirical structure rule |
 | δ | 100 √Σ *c<sub>i</sub>*(1 − *r<sub>i</sub>*/r̄)² | Guo & Liu (2011) radii [9] | Atomic-size mismatch used in M2–M5 |
 | δ<sub>CN12</sub> | Same equation | Kittel CN12 radii [12] | Atomic-size mismatch used in M1 |
+| Δχ | √Σ *c<sub>i</sub>*(χ<sub>i</sub> − χ̄)², χ̄ = Σ *c<sub>i</sub>*χ<sub>i</sub> (Guo & Liu, Eq. 4) | Guo & Liu (2011) Pauling electronegativities [9] | Electronegativity difference; used by no model |
 | Ω, γ, Λ, φ, Φ, ΔH<sub>IM</sub>, k<sub>1</sub><sup>cr</sup> | Calculated according to the corresponding model | — | Model-dependent parameters |
 
-Electronegativity differences and the e/a ratio are not calculated. The remaining symbols, their units and
+Δχ is N/A when an element has no Pauling value in Guo & Liu's table (for example Sb, Bi or Hg); no other
+electronegativity scale is substituted. The e/a ratio is not calculated. The remaining symbols, their units and
 definitions are given under [Symbols, Parameters and Units](help://symbols).
 
 ## M1 — Yang & Zhang (2012): Ω–δ criterion
