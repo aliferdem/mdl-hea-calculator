@@ -328,7 +328,8 @@ def test_theme_switch(win, app):
     from hea_calc.ui.theme import THEME
     win.set_theme("light")
     # the sheet is scoped to the main window (see MainWindow.apply_theme), not to QApplication
-    assert THEME.name == "light" and "#f4f4f4" in win.styleSheet()
+    # (2026-11-04: checked with a real light token; the former "#f4f4f4" matched only a stylesheet comment)
+    assert THEME.name == "light" and THEME.tokens["background"] == "#f2f4f8" and "#f2f4f8" in win.styleSheet()
     assert app.styleSheet() == "", "no application-wide sheet may be kept alive"
     win.set_theme("dark")
     assert THEME.name == "dark"
@@ -430,8 +431,9 @@ def test_data_table_row_and_header_colours(win, app):
     """
     from hea_calc.ui.theme import DARK, LIGHT, THEME
 
-    for theme, header, selected, rule in (("dark", "#393939", "#333333", "#525252"),
-                                          ("light", "#e0e0e0", "#e8e8e8", "#e0e0e0")):
+    # the same roles in Cool Gray (commit f5c73c1); still: the selected row never shares the header's colour
+    for theme, header, selected, rule in (("dark", "#343a3f", "#2e3439", "#4d5358"),
+                                          ("light", "#dde1e6", "#e4e9f1", "#dde1e6")):
         THEME.set_theme(theme)
         app.processEvents()
         k = DARK if theme == "dark" else LIGHT
@@ -514,7 +516,7 @@ def test_element_tiles_have_no_tooltip_and_the_right_selected_border(win, app):
     assert any("Chromium" in t for t in texts), texts
 
     tile = tiles["Cr"]
-    assert t("tile-selected-border") == DARK["tile-selected-border"] == "#f4f4f4"
+    assert t("tile-selected-border") == DARK["tile-selected-border"] == "#f2f4f8"     # Cool Gray 10
     assert LIGHT["tile-selected-border"] == "#0f62fe"
     tile.setChecked(True)
     img = tile.grab().toImage().convertToFormat(QImage.Format.Format_RGB32)
@@ -577,7 +579,8 @@ def test_icon_only_buttons_centre_their_icon(win, app):
     app.sendEvent(b, QEnterEvent(QPointF(16, 16), QPointF(1, 1), QPointF(1, 1)))
     app.processEvents()
     img = b.grab().toImage().convertToFormat(QImage.Format_RGB32)
-    assert hx(img.pixelColor(1, 1)) == "#333333", "hover surface"
+    from hea_calc.ui.theme import t
+    assert hx(img.pixelColor(1, 1)) == t("button-ghost-hover") == "#2b3236", "hover surface (Cool Gray)"
     dx, dy = offset(b)
     assert abs(dx) <= 0.5 and abs(dy) <= 0.5, (dx, dy)
 
@@ -666,7 +669,7 @@ def test_carbon_tooltip_matches_the_component_reference(win, app):
     assert (tip.width(), tip.height()) == (102, 24 + 6), (tip.width(), tip.height())
     assert tip.RADIUS == TOOLTIP_RADIUS == 2      # tooltip/toggletip exception to the 7 px radius
     img = tip.grab().toImage().convertToFormat(QImage.Format_RGB32)
-    assert img.pixelColor(20, 12).name().lstrip("#").upper() == "F4F4F4"
+    assert img.pixelColor(20, 12).name().lstrip("#").upper() == "F2F4F8"     # background-inverse (Cool Gray)
     ink = [img.pixelColor(x, y).red() for y in range(3, 20) for x in range(3, 90)]
     assert min(ink) < 60, "dark text on the inverse surface"
     # the caret: 12 px at its base, narrowing over 6 rows

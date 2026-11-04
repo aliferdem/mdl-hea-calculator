@@ -240,13 +240,15 @@ def test_theme_tokens_reproduce_the_figma_variables_in_both_themes():
     for name, tokens in (("light", LIGHT), ("dark", DARK)):
         for alias, var in SEMANTIC_ALIASES.items():
             assert tokens[alias] == FIGMA_VARIABLES[name][var], (name, alias)
-    # spot values read from the Figma file (White / Gray 100)
+    # spot values of the Figma variables in the Cool Gray theme (White / Cool Gray 100, commit f5c73c1)
     assert (LIGHT["syntax-number"], DARK["syntax-number"]) == ("#0072c3", "#82cfff")
     assert (LIGHT["syntax-variable"], DARK["syntax-variable"]) == ("#d02670", "#ff7eb6")
-    assert (LIGHT["syntax-line-number"], DARK["syntax-line-number"]) == ("#237893", "#858585")
+    assert (LIGHT["syntax-line-number"], DARK["syntax-line-number"]) == ("#237893", "#878d96")
     assert (LIGHT["tag-red-bg"], DARK["tag-red-bg"]) == ("#ffd7d9", "#a2191f")
-    assert LIGHT["shell"] == "#ffffff" and DARK["shell"] == "#161616"
-    assert LIGHT["layer-01"] == "#ffffff" and DARK["layer-01"] == "#262626"
+    assert LIGHT["shell"] == "#ffffff" and DARK["shell"] == "#21272a"
+    assert LIGHT["layer-01"] == "#ffffff" and DARK["layer-01"] == "#21272a"
+    # independent windows (2026-11-04): their surface and caption are window-background, distinct from the panels
+    assert LIGHT["window-background"] == "#ffffff" and DARK["window-background"] == "#121619"
 
 
 # ====================================================================== newest-first view (core)

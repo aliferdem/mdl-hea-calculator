@@ -1449,7 +1449,7 @@ def test_dialog_surfaces_are_the_dialog_background_in_gray_100(app):
             "footer: the dialog's own surface (Cool Gray 100)"
         from PySide6.QtWidgets import QLineEdit
         f = [x for x in d.findChildren(QLineEdit) if x.isVisible()][0]
-        assert f.grab().toImage().pixelColor(f.width() - 4, f.height() // 2).name() == t("dialog-field") == "#262626"
+        assert f.grab().toImage().pixelColor(f.width() - 4, f.height() // 2).name() == t("dialog-field") == "#21272a"
         d.reject()
     finally:
         w.close()

@@ -326,8 +326,9 @@ def test_balance_field_disabled_only_in_its_active_percentage_column(win, app):
 
 
 # ============================================================================================ B2 / B3 field colours
-@pytest.mark.parametrize("theme,bg,text,border", [("light", "#f4f4f4", "#bcbcbc", "#c6c6c6"),
-                                                  ("dark", "#393939", "#686868", "#6f6f6f")])
+# field-02, field-text-disabled, field-border-quiet (Cool Gray, commit f5c73c1)
+@pytest.mark.parametrize("theme,bg,text,border", [("light", "#f2f4f8", "#878d96", "#c1c7cd"),
+                                                  ("dark", "#343a3f", "#a2a9b0", "#697077")])
 def test_disabled_and_read_only_field_rendering(app, theme, bg, text, border):
     from PySide6.QtGui import QColor
     from hea_calc.ui.widgets.composition_panel import ROW_H
