@@ -412,7 +412,8 @@ def test_native_titlebar_attributes_follow_the_tokens():
     assert WT.colorref("#0f62fe") == 0xFE620F
     dark = dict(WT.caption_attributes("dark", DARK, 22631))
     assert dark[WT.DWMWA_USE_IMMERSIVE_DARK_MODE] == 1
-    assert dark[WT.DWMWA_CAPTION_COLOR] == WT.colorref(DARK["shell"])
+    # 2026-11-04: an independent window's caption is its own surface (window-background), not the main shell
+    assert dark[WT.DWMWA_CAPTION_COLOR] == WT.colorref(DARK["window-background"]) == WT.colorref("#121619")
     assert dark[WT.DWMWA_TEXT_COLOR] == WT.colorref(DARK["text-primary"])
     light = dict(WT.caption_attributes("light", LIGHT, 22631))
     # Main window.svg: the light title bar and shell are #FFFFFF

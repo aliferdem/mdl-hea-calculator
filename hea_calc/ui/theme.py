@@ -89,7 +89,7 @@ DARK = {
     "layer-01": "#21272a", "layer-02": "#343a3f", "layer-03": "#4d5358",
     "layer-hover-01": "#2b3236", "layer-hover-02": "#434a51",
     "layer-active-01": "#4d5358", "layer-active-02": "#697077",
-    "layer-selected-01": "#343a3f", "layer-selected-hover-01": "#434a51", "layer-selected-02": "#4d5358", "layer-selected-hover-02": "#5d646a", "shell": "#21272a", "notification-info-bg": "#21272a", "notification-success-bg": "#21272a", "notification-warning-bg": "#21272a", "notification-error-bg": "#21272a",
+    "layer-selected-01": "#343a3f", "layer-selected-hover-01": "#434a51", "layer-selected-02": "#4d5358", "layer-selected-hover-02": "#5d646a", "shell": "#21272a", "window-background": "#121619", "notification-info-bg": "#21272a", "notification-success-bg": "#21272a", "notification-warning-bg": "#21272a", "notification-error-bg": "#21272a",
     "field-01": "#21272a", "field-02": "#343a3f", "field-hover-02": "#434a51",
     # a field on the dialog's Cool Gray 90 surface uses field-01 (field-02 is for fields on layer-01)
     "dialog-field": "#21272a", "dialog-field-hover": "#2b3236",
@@ -134,10 +134,12 @@ DARK = {
     "background-selected": "#3d878d96",
     # Figma Background/background-hover (16 %) / -active (40 %) of the title bar; its progress track
     "background-active": "#66878d96", "titlebar-hover": "#29878d96", "titlebar-track": "#4d5358",
-    # inactive title bar uses the panel surface (#21272a), rather than the old Windows inactive #202020.
+    # The inactive title bar steps one Cool Gray level up from the active one (shell #21272a): #2b3236 (contrast
+    # 1.16, as the Gray palette's #202020 on #161616, 1.11).  The Cool Gray mapping had made both #21272a, so an
+    # inactive window no longer looked inactive (fixed 2026-11-04).
     # Inactive title and menus use readable Cool Gray text while remaining dimmer than active text.
     # The state line keeps its hue at INACTIVE_LINE_MIX of its strength.
-    "titlebar-inactive": "#21272a", "titlebar-inactive-title": "#c1c7cd", "titlebar-inactive-text": "#a2a9b0",
+    "titlebar-inactive": "#2b3236", "titlebar-inactive-title": "#c1c7cd", "titlebar-inactive-text": "#a2a9b0",
 }
 
 LIGHT = {
@@ -145,7 +147,7 @@ LIGHT = {
     "layer-01": "#ffffff", "layer-02": "#f2f4f8", "layer-03": "#ffffff",
     "layer-hover-01": "#e4e9f1", "layer-hover-02": "#e4e9f1",
     "layer-active-01": "#c1c7cd", "layer-active-02": "#c1c7cd",
-    "layer-selected-01": "#dde1e6", "layer-selected-hover-01": "#cdd3da", "layer-selected-02": "#dde1e6", "layer-selected-hover-02": "#cdd3da", "shell": "#ffffff", "notification-info-bg": "#edf5ff", "notification-success-bg": "#defbe6", "notification-warning-bg": "#fcf4d6", "notification-error-bg": "#fff1f1",
+    "layer-selected-01": "#dde1e6", "layer-selected-hover-01": "#cdd3da", "layer-selected-02": "#dde1e6", "layer-selected-hover-02": "#cdd3da", "shell": "#ffffff", "window-background": "#ffffff", "notification-info-bg": "#edf5ff", "notification-success-bg": "#defbe6", "notification-warning-bg": "#fcf4d6", "notification-error-bg": "#fff1f1",
     "field-01": "#ffffff", "field-02": "#f2f4f8", "field-hover-02": "#e4e9f1",
     "dialog-field": "#f2f4f8", "dialog-field-hover": "#e4e9f1",
     "border-subtle-00": "#dde1e6", "border-subtle-01": "#dde1e6", "border-subtle-02": "#c1c7cd",
@@ -560,13 +562,13 @@ QHeaderView::section:hover {{ background: {k['layer-hover-02']}; }}
 QTableCornerButton::section {{ background: {k['header-row']}; border: none; }}
 
 /* ---------------- dialogs / notifications */
-/* application dialogs use the shell surface, which now matches the panels in both modes (dark Cool Gray 90,
-   light white); Carbon layers stay inside it */
-QDialog {{ background: {k['shell']}; }}
+/* application dialogs are independent windows: their outer surface is `window-background` (dark #121619, the
+   main window's background; light white).  `shell` stays the title-bar colour.  Carbon layers stay inside it */
+QDialog {{ background: {k['window-background']}; }}
 #ModalTitle {{ font-size: 20px; color: {k['text-primary']}; }}
 #ModalLabel {{ font-size: 12px; color: {k['text-secondary']}; letter-spacing: 0.32px; }}
 /* the footer is the dialog's own surface (Gray 100 / White) - the ghost action at its left showed a Gray 90 block */
-#ModalFooter {{ background: {k['shell']}; }}
+#ModalFooter {{ background: {k['window-background']}; }}
 QDialog QLineEdit {{ background: {k['dialog-field']}; }}
 QDialog QLineEdit:hover {{ background: {k['dialog-field-hover']}; }}
 QDialog QLineEdit:read-only, QDialog QLineEdit:disabled {{ background: transparent; }}

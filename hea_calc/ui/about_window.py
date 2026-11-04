@@ -188,7 +188,7 @@ class AboutWindow(QDialog):
     def _apply_style(self, *_):
         k = THEME.tokens
         self.setStyleSheet(
-            f"#AboutWindow, #AboutBody, #AboutScroll {{ background: {k['shell']}; border: none; }}"
+            f"#AboutWindow, #AboutBody, #AboutScroll {{ background: {k['window-background']}; border: none; }}"
             f"QLabel {{ font-family: '{FONT_FAMILY}'; background: transparent; }}"
             f"#AboutTitle {{ font-size: 32px; color: {k['text-primary']}; }}"
             f"#AboutMeta {{ font-size: 12px; color: {k['text-secondary']}; letter-spacing: 0.32px; }}"

@@ -54,7 +54,8 @@ WS_MAXIMIZEBOX = 0x00010000
 NATIVE_STYLE = WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
 SWP_FLAGS = 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020    # NOSIZE | NOMOVE | NOZORDER | NOACTIVATE | FRAMECHANGED
 SM_CXSIZEFRAME, SM_CYSIZEFRAME, SM_CXPADDEDBORDER = 32, 33, 92
-DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND = 33, 2
+DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND = 33, 1, 2
+DWMWA_BORDER_COLOR, DWMWA_COLOR_DEFAULT, DWMWA_COLOR_NONE = 34, 0xFFFFFFFF, 0xFFFFFFFE
 ABM_GETSTATE, ABM_GETAUTOHIDEBAREX, ABS_AUTOHIDE = 4, 11, 1
 ABE_LEFT, ABE_TOP, ABE_RIGHT, ABE_BOTTOM = 0, 1, 2, 3
 MONITOR_DEFAULTTONEAREST = 2
@@ -166,6 +167,18 @@ def hit_zone(x: int, y: int, w: int, h: int, bx: int, by: int, maximized: bool, 
     return {"max": HTMAXBUTTON, "caption": HTCAPTION}.get(bar, HTCLIENT)
 
 
+def frame_treatment(maximized: bool, fullscreen: bool) -> tuple[int, int]:
+    """(DWM corner preference, DWM border colour) for a window state.  Pure (unit-tested).
+
+    A restored window keeps the Windows 11 rounded corners and the system border.  A maximised or full-screen
+    window covers its whole area, so it gets square corners and no border.  Windows squares a maximised window on
+    its own, but full screen (``showFullScreen``) is an ordinary, non-zoomed window to DWM: without this it stays
+    rounded, the desktop shows in the corners, and a 1 px border runs round the screen."""
+    if maximized or fullscreen:
+        return DWMWCP_DONOTROUND, DWMWA_COLOR_NONE
+    return DWMWCP_ROUND, DWMWA_COLOR_DEFAULT
+
+
 def maximized_client(rect: tuple[int, int, int, int], bx: int, by: int,
                      autohide: tuple[bool, bool, bool, bool] = (False, False, False, False)) -> tuple[int, int, int, int]:
     """Client rectangle of a maximised window whose window rectangle ``rect`` (l, t, r, b) overhangs the monitor
@@ -249,9 +262,26 @@ class WinChrome(QObject):
             dwm = ctypes.windll.dwmapi
             m = MARGINS(0, 0, 1, 0)                 # a 1 px DWM frame: the shadow on Windows 10 (hidden by Qt)
             dwm.DwmExtendFrameIntoClientArea(wintypes.HWND(h), ctypes.byref(m))
-            pref = ctypes.c_int(DWMWCP_ROUND)       # Windows 11 rounded corners (ignored on Windows 10)
+        except (AttributeError, OSError):
+            pass
+        self.apply_frame_treatment()
+
+    def apply_frame_treatment(self) -> None:
+        """Corners and border for the current window state (``frame_treatment``); Windows 11 only - Windows 10
+        ignores both attributes and the calls fail silently."""
+        h = self.hwnd()
+        if not self.enabled or not h:
+            return
+        ws = self.window.windowState()
+        corner, border = frame_treatment(bool(ws & Qt.WindowState.WindowMaximized),
+                                         bool(ws & Qt.WindowState.WindowFullScreen))
+        try:
+            dwm = ctypes.windll.dwmapi
+            pref = ctypes.c_int(corner)
             dwm.DwmSetWindowAttribute(wintypes.HWND(h), DWMWA_WINDOW_CORNER_PREFERENCE, ctypes.byref(pref),
                                       ctypes.sizeof(pref))
+            col = wintypes.DWORD(border)
+            dwm.DwmSetWindowAttribute(wintypes.HWND(h), DWMWA_BORDER_COLOR, ctypes.byref(col), ctypes.sizeof(col))
         except (AttributeError, OSError):
             pass
 
@@ -262,6 +292,7 @@ class WinChrome(QObject):
                 self.apply_style()
             elif et == QEvent.Type.WindowStateChange:
                 self.bar.set_maximized(bool(self.window.windowState() & Qt.WindowState.WindowMaximized))
+                self.apply_frame_treatment()
             # activation: the title bar keeps its own active / inactive state (widgets/header.TitleBar)
         return False
 
@@ -383,6 +414,6 @@ class WinChrome(QObject):
         return int(_user32().GetWindowLongPtrW(wintypes.HWND(h), GWL_STYLE)) if h else 0
 
 
-__all__ = ["WinChrome", "supported", "hit_zone", "maximized_client", "frame_thickness", "HTCLIENT", "HTCAPTION",
+__all__ = ["WinChrome", "supported", "hit_zone", "frame_treatment", "maximized_client", "frame_thickness", "HTCLIENT", "HTCAPTION",
            "HTMAXBUTTON", "HTTOP", "HTLEFT", "HTRIGHT", "HTBOTTOM", "HTTOPLEFT", "HTTOPRIGHT", "HTBOTTOMLEFT",
            "HTBOTTOMRIGHT", "NATIVE_STYLE"]

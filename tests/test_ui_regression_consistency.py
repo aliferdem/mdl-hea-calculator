@@ -135,8 +135,9 @@ def test_callouts_have_one_continuous_frame_meeting_the_accent(app, theme):
 
 
 # ============================================================================================ 2 / 3 surfaces
-CONTRACT = {"light": {"docked": "#ffffff", "floating": "#ffffff", "expanded": "#f4f4f4"},
-            "dark": {"docked": "#262626", "floating": "#161616", "expanded": "#161616"}}
+# docked = layer-01, floating = window-background, expanded = background (Cool Gray, commit f5c73c1; 2026-11-04)
+CONTRACT = {"light": {"docked": "#ffffff", "floating": "#ffffff", "expanded": "#f2f4f8"},
+            "dark": {"docked": "#21272a", "floating": "#121619", "expanded": "#121619"}}
 
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
@@ -181,8 +182,8 @@ def test_analysis_backgrounds_follow_the_host_not_the_layout(app, theme):
         assert aw.wide and pixel(aw, 6, aw.height() - 6) == CONTRACT[theme]["floating"]
         rf = [r for r in aw.workspace.findChildren(type(ws.model_region)) if r.objectName() == "AnaRegion"
               and r.isVisible()]
-        # a region is one level above its host: the light shell IS layer-01, so its regions are layer-02
-        want = t("layer-02") if t("shell") == t("layer-01") else t("layer-01")
+        # a region is one level above its host: the light window surface IS layer-01, so its regions are layer-02
+        want = t("layer-02") if t("window-background") == t("layer-01") else t("layer-01")
         assert pixel(rf[0], rf[0].width() - 6, 6) == want
         # runtime theme switch: the docked wide surface follows
         aw.close()

@@ -81,8 +81,9 @@ class LinkLabel(QLabel):
 
 
 def _floating_regions(k: dict) -> str:
-    """The floating window's shell equals layer-01 in the light theme: its regions are then layer-02 (ui/surface.py)."""
-    if k['shell'].lower() == k['layer-01'].lower():
+    """The floating window's surface equals layer-01 in the light theme: its regions are then layer-02
+    (ui/surface.py)."""
+    if k['window-background'].lower() == k['layer-01'].lower():
         return f"#AnalysisWindow #AnaRegion, #AnalysisWindow #AnaRail {{ background: {k['layer-02']}; }}" + chr(10)
     return ""
 
@@ -98,11 +99,13 @@ def stylesheet_rules(k: dict) -> str:
 #AnaHeading02 {{ color: {k['text-primary']}; font-size: 16px; font-weight: 600; }}
 #AnaTitle {{ color: {k['text-primary']}; font-size: 20px; }}
 #AnaWorkspace {{ background: {k['background']}; }}
-/* the separate Analysis window: its whole surface is the shell (Gray 100 #161616 / White #ffffff); the light
-   theme's `background` is Gray 10 #f4f4f4, which made the window grey; the panel's components keep their layers */
-#AnalysisWindow, #AnalysisWindow #Panel {{ background: {k['shell']}; }}
+/* the separate Analysis window: its whole surface is the outer window surface `window-background` (dark #121619,
+   light White #ffffff); the light theme's `background` is #f2f4f8, which made the window grey; the panel's
+   components keep their layers */
+#AnalysisWindow, #AnalysisWindow #Panel {{ background: {k['window-background']}; }}
 /* its wide layout (the expanded workspace, analysis/window.py) on the same window surface */
-#AnalysisWindow #AnaWorkspace, #AnalysisWindow QScrollArea#AnaWindowScroll {{ background: {k['shell']}; border: none; }}
+#AnalysisWindow #AnaWorkspace, #AnalysisWindow QScrollArea#AnaWindowScroll {{ background: {k['window-background']};
+    border: none; }}
 #AnaRail, #AnaRegion {{ background: {k['layer-01']}; }}
 /* docked Analysis (ui/surface.py): a layer-01 panel in the compact AND the wide layout - the wide layout is not a
    standalone workspace shell - so its regions are the next layer, layer-02 */

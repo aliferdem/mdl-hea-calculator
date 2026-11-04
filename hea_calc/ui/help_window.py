@@ -630,9 +630,9 @@ class HelpWindow(QWidget):
         k = THEME.tokens
         self.setStyleSheet(
             getattr(self, "base_sheet", "") +
-            f"#HelpWindow, #HelpHeader {{ background: {k['shell']}; }}"
-            f"#HelpNav {{ background: {k['shell']}; border: none; outline: none; }}"
-            f"#HelpBrowser {{ background: {k['shell']}; border: none; }}")
+            f"#HelpWindow, #HelpHeader {{ background: {k['window-background']}; }}"
+            f"#HelpNav {{ background: {k['window-background']}; border: none; outline: none; }}"
+            f"#HelpBrowser {{ background: {k['window-background']}; border: none; }}")
         self.view.document().setDefaultStyleSheet(stylesheet())
 
     def _theme_changed(self, *_):

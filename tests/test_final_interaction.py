@@ -718,14 +718,16 @@ def test_empty_table_disables_invalid_actions(win, app):
 
 
 # ====================================================================== window roots
-@pytest.mark.parametrize("theme, root", [("dark", "#161616"), ("light", "#ffffff")])
+@pytest.mark.parametrize("theme, root", [("dark", "#121619"), ("light", "#ffffff")])
 def test_every_app_window_root_is_the_caption_colour(app, settings, theme, root):
     from hea_calc.ui import win_titlebar
     from hea_calc.ui.theme import THEME
     from hea_calc.ui.widgets.dialogs import ColumnsDialog, FilterDialog
     w = make_win(app, settings, theme)
     try:
-        assert THEME.tokens["shell"].lower() == root
+        # independent windows: root and native caption are window-background (2026-11-04); `shell` is the main
+        # window's own title bar
+        assert THEME.tokens["window-background"].lower() == root
         attrs = dict(win_titlebar.caption_attributes(theme, THEME.tokens, 22631))
         assert attrs[win_titlebar.DWMWA_CAPTION_COLOR] == win_titlebar.colorref(root)
         w.show_about()

@@ -2,7 +2,7 @@
 
 Analysis is shown in five hosts - the compact and the wide docked layouts (the main window's Analysis slot, a
 ``layer-01`` panel), the dedicated in-window expanded workspace (``background``) and the compact and wide floating
-window (``shell``).  Carbon colours a component by the layer it sits on, so the same component needs different
+window (``window-background``).  Carbon colours a component by the layer it sits on, so the same component needs different
 tokens in different hosts.  This module is the one place that decides it:
 
 * a *host* declares the Carbon level of its own surface - the ``carbon_layer`` property (0 = background, 1 =
@@ -32,8 +32,9 @@ SHIFT_UP = {
 
 
 def window_level() -> int:
-    """The floating Analysis window's surface (``shell``): level 1 where it equals ``layer-01`` (light), else 0."""
-    return 1 if t("shell").lower() == t("layer-01").lower() else 0
+    """The floating Analysis window's surface (``window-background``): level 1 where it equals ``layer-01``
+    (light), else 0."""
+    return 1 if t("window-background").lower() == t("layer-01").lower() else 0
 
 
 def host_level(w) -> int | None:

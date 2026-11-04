@@ -108,7 +108,7 @@ class AnalysisWorkspace(QWidget):
         # the tabs sit on the page background - the docked panel's layer-01 in the wide docked layout; when the
         # header is tight they become scrollable (§21)
         surface = (("layer-01", "layer-hover-01", "layer-active-01") if docked else
-                   ("shell" if external else "background", "background-hover", "layer-active-01"))
+                   ("window-background" if external else "background", "background-hover", "layer-active-01"))
         self.comp_tabs = LineTabs(list(S.COMP_TAB_LABELS), surface=surface)
         self.coll_tabs = LineTabs(list(S.COLL_TAB_LABELS), surface=surface)
         self.tab_stack.addWidget(self.comp_tabs)

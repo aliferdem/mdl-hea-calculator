@@ -21,7 +21,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 SPEC = {("light", "docked"): "#ffffff", ("light", "floating"): "#ffffff",
-        ("dark", "docked"): "#262626", ("dark", "floating"): "#161616"}
+        ("dark", "docked"): "#21272a", ("dark", "floating"): "#121619"}       # layer-01 / window-background
 
 
 @pytest.fixture(scope="module")
@@ -113,7 +113,7 @@ def test_floating_surface_follows_runtime_theme_switch_and_reopen(app):
         assert surface(aw) == "#ffffff"
         THEME.set_theme("dark")                                      # switched while the window is open
         pump(app, 15)
-        assert surface(aw) == "#161616" and surface(w.analysis) == "#262626"
+        assert surface(aw) == SPEC[("dark", "floating")] and surface(w.analysis) == SPEC[("dark", "docked")]
         aw.close()                                                   # closed (hidden) ...
         THEME.set_theme("light")                                     # ... theme changed meanwhile ...
         pump(app)

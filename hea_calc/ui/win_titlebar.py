@@ -9,8 +9,9 @@ shadow and the caption buttons stay Windows' own.  Only the caption colours are 
 * ``DWMWA_BORDER_COLOR`` = 34, ``DWMWA_CAPTION_COLOR`` = 35, ``DWMWA_TEXT_COLOR`` = 36 - Windows 11 (build
   22000+) only; ``COLORREF`` is ``0x00BBGGRR``.
 
-Colours are the theme's own tokens: caption = ``background`` (#161616 dark / #f4f4f4 light), text =
-``text-primary``, border = ``background``.  Every call fails silently on other platforms and older builds
+Colours are the theme's own tokens: caption and border = ``window-background`` (dark #121619, light #ffffff: the
+same surface as the window's content, so caption and content read as one), text = ``text-primary``.  Every
+call fails silently on other platforms and older builds
 (the window then simply keeps the system caption).  Only this process's top-level QWidget windows are touched
 - never native file dialogs, other applications or the global Windows theme.
 
@@ -62,9 +63,10 @@ def caption_attributes(theme: str, tokens: dict, build: int) -> list[tuple[int, 
     elif build >= 17763:
         out.append((DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, dark))
     if build >= 22000:
-        out.append((DWMWA_CAPTION_COLOR, colorref(tokens.get("shell", tokens["background"]))))
+        surface = tokens.get("window-background", tokens["background"])
+        out.append((DWMWA_CAPTION_COLOR, colorref(surface)))
         out.append((DWMWA_TEXT_COLOR, colorref(tokens["text-primary"])))
-        out.append((DWMWA_BORDER_COLOR, colorref(tokens.get("shell", tokens["background"]))))
+        out.append((DWMWA_BORDER_COLOR, colorref(surface)))
     return out
 
 

@@ -1445,7 +1445,8 @@ def test_dialog_surfaces_are_the_dialog_background_in_gray_100(app):
         d.show()
         pump(app, 0.1)
         img = d.footer_widget.grab().toImage()
-        assert img.pixelColor(8, 8).name() == t("shell") == "#161616", "footer: the dialog's Gray 100"
+        assert img.pixelColor(8, 8).name() == t("window-background") == "#121619", \
+            "footer: the dialog's own surface (Cool Gray 100)"
         from PySide6.QtWidgets import QLineEdit
         f = [x for x in d.findChildren(QLineEdit) if x.isVisible()][0]
         assert f.grab().toImage().pixelColor(f.width() - 4, f.height() // 2).name() == t("dialog-field") == "#262626"
@@ -1465,7 +1466,7 @@ def test_analysis_window_opens_without_a_focus_ring_on_a_gray_100_surface(win, a
     try:
         assert not aw.panel.switcher.hasFocus(), "the window opens with no control focused"
         img = aw.grab().toImage()
-        assert img.pixelColor(4, aw.height() - 4).name() == t("background") == "#161616"
+        assert img.pixelColor(4, aw.height() - 4).name() == t("background") == t("window-background") == "#121619"
     finally:
         aw.close()
         THEME.set_theme("light")
