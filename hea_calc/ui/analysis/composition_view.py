@@ -25,7 +25,7 @@ from ...core.engine import MODEL_KEYS, MODELS, NA, STATUS_DATA_SUSPECT, STATUS_E
 from ...core.family import family_key
 from .. import crisp, icons
 from ..surface import ctx
-from ..theme import BODY_COMPACT_01, HAIRLINE, LABEL_01, font, t
+from ..theme import BODY_COMPACT_01, HAIRLINE, LABEL_01, UI_SEPARATOR, font, t
 from ..widgets.common import IconButton, TagLabel
 from ..widgets.common import retire
 from ..widgets.tooltip import InfoButton, Toggletip
@@ -86,10 +86,11 @@ def kv_value(d: dict, key: str, full: bool = False) -> tuple[str, str]:
 
 
 def identity_line(info) -> str:
-    """"<calculation mode> · Run <n>" of a result's run, or "" when the run is unknown."""
+    """"<calculation mode> | Run <n>" of a result's run, or "" when the run is unknown (UI_SEPARATOR, 2026-11-04:
+    no middle dot as a separator)."""
     if info is None:
         return ""
-    return f"{mode_name(info.mode)} · Run {info.run_id}"
+    return f"{mode_name(info.mode)}{UI_SEPARATOR}Run {info.run_id}"
 
 
 class _Anchor(QWidget):
@@ -109,9 +110,24 @@ def open_cell_tip(table: QWidget, rect: QRect, html: str, title: str) -> None:
     tip.show()
 
 
-def descriptor_tip(key: str) -> str:
+def unavailable_reason(d: dict, key: str) -> str:
+    """Why descriptor ``key`` has no value in ``d`` (empty when it has one): the engine's undefined / unavailable
+    reason, or the generic missing-data text."""
+    if d.get(key) is not None:
+        return ""
+    return kv_value(d, key)[1]
+
+
+def descriptor_tip(key: str, values: dict | None = None) -> str:
+    """The descriptor's Toggletip (the explicit information control of the Descriptors views): definition,
+    equation, data and, when ``values`` has no value for it, why (2026-11-04: those views show no hover
+    Tooltips, so an unavailable value is explained here)."""
     d = DESCRIPTORS[key]
-    parts = [f"<b>Definition</b><br>{d.definition}"]
+    parts = []
+    reason = unavailable_reason(values, key) if values is not None else ""
+    if reason:
+        parts.append(f"<b>Not available</b><br>{_html.escape(reason)} Missing data are never replaced by zero.")
+    parts.append(f"<b>Definition</b><br>{d.definition}")
     if d.equation:
         parts.append(f"<b>Equation</b><br>{d.equation}")
     if d.data:
@@ -459,10 +475,11 @@ class CompositionContent(CurrentStack):
         rows = []
         for key in (*KEY_DESCRIPTORS, *extra):
             desc = DESCRIPTORS[key]
-            val, tip = kv_value(d, key)
+            val, _tip = kv_value(d, key)
             name = KEY_LABELS.get(key, desc.name)
             text = f"{desc.symbol} {name}" if self.size_class == "S" else f"{name} {desc.symbol}"   # frame 13 / 2
-            rows.append((text, val, desc.unit, None, None, tip))
+            # no hover Tooltip on these values (2026-11-04); "All descriptors" and Data quality explain N/A values
+            rows.append((text, val, desc.unit))
         cstr = d.get("cstr")
         rows.append(("Crystal structure (VEC rule)", "", "", DESCRIPTORS["cstr"].definition, cstr or NA))
         return rows
@@ -503,7 +520,7 @@ class CompositionContent(CurrentStack):
         return ", ".join(parts)
 
     def identity_text(self) -> str:
-        """The composition's origin - "Composition space · Run 1".  The alloy is the title's tag and its family and
+        """The composition's origin - "Composition space | Run 1".  The alloy is the title's tag and its family and
         element count are in Overview, so they are not repeated here (Analysis metadata clean-up, 2026-10-25)."""
         return identity_line(self.info)
 
@@ -636,9 +653,10 @@ class CompositionContent(CurrentStack):
                     if dd.key == "cstr":
                         rows.append((dd.name, "", "", descriptor_tip("cstr"), d.get("cstr") or NA))
                         continue
-                    val, tip = kv_value(d, dd.key)
+                    val, _tip = kv_value(d, dd.key)
                     name = self._descriptor_name(dd, d)
-                    rows.append((f"{name} {dd.symbol}", val, dd.unit, descriptor_tip(dd.key), None, tip))
+                    # no hover Tooltip on the value: the ⓘ Toggletip holds the definition and any N/A reason
+                    rows.append((f"{name} {dd.symbol}", val, dd.unit, descriptor_tip(dd.key, d)))
                 col.addWidget(KVRows(rows, label_w=200, value_w=80, unit_w=90))
                 col.addSpacing(12)
             col.addStretch(1)
@@ -759,8 +777,8 @@ class CompositionContent(CurrentStack):
                 if dd.key == "cstr":
                     val = Cell(tag=d.get("cstr") or NA)
                 else:
-                    text, tip = kv_value(d, dd.key, self.full_precision)
-                    val = Cell(text, align="right", tip=tip)
+                    text, _tip = kv_value(d, dd.key, self.full_precision)
+                    val = Cell(text, align="right")          # no hover Tooltip (the info column explains N/A)
                 unit = dd.unit or "–"
                 if self.size_class == "S":
                     rows.append([Cell(f"{dd.symbol} <span style='color:{t('text-secondary')}'>{name}</span>"
@@ -782,7 +800,8 @@ class CompositionContent(CurrentStack):
         x0, w = tbl.column_rects()[-1]
         if x0 <= e.position().x() <= x0 + w:
             key = self._desc_keys[i]
-            open_cell_tip(tbl, QRect(int(x0 + 4), tbl.row_y[i], 24, ROW_XS), descriptor_tip(key),
+            open_cell_tip(tbl, QRect(int(x0 + 4), tbl.row_y[i], 24, ROW_XS),
+                          descriptor_tip(key, descriptor_values(self.row)),
                           DESCRIPTORS[key].name)
 
     # -------------------------------------------------------------- Models
@@ -1066,10 +1085,11 @@ class CompositionContent(CurrentStack):
         lay.addLayout(head)
         lay.addWidget(label(f"<b>{_html.escape(fig.title)}</b>", "body"))
         lay.addWidget(chart)
-        lay.addWidget(label(_html.escape(fig.caption), "secondary", wrap=True))
-        src = label("Source: " + _html.escape(fig.source), "secondary", wrap=True, selectable=True)
-        src.setObjectName("ModelFigureSource")
-        lay.addWidget(src)
+        cap = label(_html.escape(fig.caption), "secondary", wrap=True)
+        cap.setObjectName("ModelFigureCaption")
+        lay.addWidget(cap)
+        # the citation is not repeated here (2026-11-04): the page's Reference section holds it; the caption keeps
+        # what is plotted, its provenance and its exclusions
         self.figure_widget = chart
         return w
 

@@ -775,15 +775,13 @@ def test_statistics_visualization_is_bounded(win, app):
 
 
 def test_no_decorative_middle_dot_separators_in_ui_copy():
-    """`·` stays only where it is mathematical (J/(mol·K), 0.55·Tm, −T·ΔS, k·p) - and in the one place the final
-    Figma design uses it as a separator: the Analysis identity "Composition space · Run 1" (Analysis 494:69395)."""
+    """`·` / `⋅` stay only where they are mathematical (J/(mol·K), 0.55·Tm, −T·ΔS, k·p, f · Tm).  Since 2026-11-04
+    there is no exception: the Analysis identity reads "Composition space | Run 1" (``theme.UI_SEPARATOR``)."""
     bad = []
     for f in (ROOT / "hea_calc").rglob("*.py"):
         for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
             if line.strip().startswith("#"):
                 continue
-            if "· Run" in line or "· {origin}" in line:            # the Figma identity line
-                continue
-            if re.search(r"[ \"'{]·[ \"'}]", line) and not re.search(r"f · T", line):
+            if re.search(r"[ \"'{][·⋅][ \"'}]", line) and not re.search(r"f [·⋅] T", line):
                 bad.append(f"{f.name}:{i}: {line.strip()}")
     assert not bad, "\n".join(bad)

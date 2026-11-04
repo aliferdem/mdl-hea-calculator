@@ -19,6 +19,42 @@ from .plot import categorical, class_color
 PAD_L, PAD_R, PAD_T, PAD_B = 56, 16, 12, 44
 LEGEND_H = 24
 
+# Responsive geometry (2026-11-04): the figure never stretches with the window.  Its drawing is at most MAX_WIDTH wide
+# and centred; its height follows from the width through a bounded plot-area aspect, so a maximised Analysis window
+# shows the same proportions as a narrow one.
+MAX_WIDTH = {"scatter": 720, "curves": 720, "strip": 760}
+SCATTER_ASPECT = 1.5            # plot-area width : height for ordinary two-variable charts (3:2)
+PLOT_H_MIN, PLOT_H_MAX = 150, 420
+STRIP_PLOT_H = 84               # one-dimensional threshold charts (a single scalar criterion): a compact band
+
+STAR_R = 10.0                   # "This composition": outer radius of the star (px)
+STAR_INNER = 0.45               # inner / outer radius
+STAR_LEGEND_R = 6.5
+
+
+def star_polygon(cx: float, cy: float, r: float) -> QPolygonF:
+    """A five-pointed star centred on (cx, cy), point up - the one shape of "This composition" in the plot, the
+    legend and exports."""
+    return QPolygonF([QPointF(cx + r * math.cos(math.pi / 2 + k * math.pi / 5) * (1 if k % 2 == 0 else STAR_INNER),
+                              cy - r * math.sin(math.pi / 2 + k * math.pi / 5) * (1 if k % 2 == 0 else STAR_INNER))
+                      for k in range(10)])
+
+
+def paint_star(p: QPainter, cx: float, cy: float, r: float) -> None:
+    """The analysed composition: a solid star in ``text-primary`` with a halo in the plot surface colour, so it reads
+    against data points, tinted regions and grid lines in both themes - by shape and contrast, not by colour alone."""
+    p.save()
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    halo = QPen(QColor(t("layer-01")), 3.0)
+    halo.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+    p.setPen(halo)
+    p.setBrush(QColor(t("layer-01")))
+    p.drawPolygon(star_polygon(cx, cy, r + 1.5))
+    p.setPen(QPen(QColor(t("text-primary")), 1.0))
+    p.setBrush(QColor(t("text-primary")))
+    p.drawPolygon(star_polygon(cx, cy, r))
+    p.restore()
+
 
 def _nice_ticks(lo: float, hi: float, n: int = 5) -> list[float]:
     if hi <= lo:
@@ -43,14 +79,68 @@ class ModelFigureWidget(QWidget):
         super().__init__(parent)
         self.fig = fig
         self.current = current or {}
-        self.setMinimumHeight(280)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        sp = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        sp.setHeightForWidth(True)
+        self.setSizePolicy(sp)
         self.setAccessibleName(f"{fig.model} figure: {fig.title}")
         self.setAccessibleDescription(fig.caption)
         THEME.changed.connect(self.update)
 
+    def max_width(self) -> int:
+        return MAX_WIDTH.get(self.fig.kind, 720)
+
+    def plot_aspect(self) -> float | None:
+        """Plot-area width : height, or None for a one-dimensional strip (fixed compact height).
+
+        A chart whose two axes are the same physical quantity and that draws the identity line (M7: k1 against k1cr,
+        both dimensionless enthalpy ratios, the criterion being k1 < k1cr) uses equal data-unit scaling, so the
+        diagonal is at 45 degrees.  Unrelated quantities (delta in %, dHmix in kJ/mol, ...) get a plain 3:2 plot."""
+        f = self.fig
+        if f.kind == "strip":
+            return None
+        if self.equal_scale():
+            (x0, x1), (y0, y1) = self.ranges()
+            if x1 > x0 and y1 > y0:
+                return (x1 - x0) / (y1 - y0)
+        return SCATTER_ASPECT
+
+    def figure_size(self, width: float) -> tuple[float, float]:
+        """(drawing width, total height) for a widget ``width`` px wide."""
+        w = min(float(width), float(self.max_width()))
+        aspect = self.plot_aspect()
+        plot_w = max(10.0, w - PAD_L - PAD_R)
+        if aspect is None:
+            plot_h = STRIP_PLOT_H
+        elif self.equal_scale():
+            # one data unit is the same length on both axes: when the height is capped, the width follows it
+            plot_h = min(PLOT_H_MAX, plot_w / aspect)
+            plot_w = plot_h * aspect
+        else:
+            plot_h = min(PLOT_H_MAX, max(PLOT_H_MIN, plot_w / aspect))
+        return plot_w + PAD_L + PAD_R, plot_h + PAD_T + PAD_B + LEGEND_H
+
+    def equal_scale(self) -> bool:
+        """Equal data-unit scaling on both axes (see ``plot_aspect``)."""
+        f = self.fig
+        return f.kind != "strip" and any(ln.kind == "diag" for ln in f.lines) and not (f.log_x or f.log_y)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return int(math.ceil(self.figure_size(width)[1]))
+
     def sizeHint(self) -> QSize:
-        return QSize(520, 300)
+        w = 600
+        return QSize(w, self.heightForWidth(w))
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(280, self.heightForWidth(280))
+
+    def drawing_rect(self) -> QRectF:
+        """Where the figure is drawn inside the widget: at most ``max_width`` wide, horizontally centred."""
+        w, h = self.figure_size(self.width())
+        return QRectF((self.width() - w) / 2.0, 0.0, w, min(h, float(self.height())))
 
     # -------------------------------------------------------------- geometry
     def ranges(self) -> tuple[tuple[float, float], tuple[float, float]]:
@@ -209,16 +299,11 @@ class ModelFigureWidget(QWidget):
             if f.kind == "strip" and n <= 12:
                 p.setPen(sec)
                 p.drawText(QPointF(X(pt["x"]) + 6, y + 4), pt["label"])
-        # the analysed composition
+        # the analysed composition: drawn last, above every data point
         cx, cy = self.current.get("x"), self.current.get("y")
         if isinstance(cx, (int, float)) and (f.kind == "strip" or isinstance(cy, (int, float))):
             y = plot.center().y() if f.kind == "strip" else Y(cy)
-            star = QPolygonF([QPointF(X(cx) + 7 * math.cos(math.pi / 2 + k * math.pi / 5) * (1 if k % 2 == 0 else 0.45),
-                                      y - 7 * math.sin(math.pi / 2 + k * math.pi / 5) * (1 if k % 2 == 0 else 0.45))
-                              for k in range(10)])
-            p.setPen(QPen(QColor(t("layer-01")), 1))
-            p.setBrush(QColor(t("text-primary")))
-            p.drawPolygon(star)
+            paint_star(p, X(cx), y, STAR_R)
         p.restore()
         # legend
         items = []
@@ -237,6 +322,8 @@ class ModelFigureWidget(QWidget):
             if kind == "line":
                 p.setPen(QPen(col, 2))
                 p.drawLine(QPointF(x, ly), QPointF(x + 12, ly))
+            elif kind == "star":                                     # the same shape as in the plot
+                paint_star(p, x + 5, ly, STAR_LEGEND_R)
             else:
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(col)
@@ -247,11 +334,18 @@ class ModelFigureWidget(QWidget):
 
     def paintEvent(self, _e):
         p = QPainter(self)
-        self.render_to(p, self.width(), self.height())
+        r = self.drawing_rect()
+        p.translate(r.left(), 0)
+        self.render_to(p, r.width(), r.height())
         p.end()
 
-    def export(self, path: str, w: int = 900, h: int = 520) -> None:
-        """PNG (2x) or SVG (vector) of the figure, in the current theme."""
+    def export(self, path: str, w: int | None = None, h: int | None = None) -> None:
+        """PNG (2x) or SVG (vector) of the figure, in the current theme, at its bounded on-screen proportions (the
+        star and legend exactly as on screen)."""
+        if w is None:
+            w = self.max_width()
+        if h is None:
+            h = self.heightForWidth(w)
         if path.lower().endswith(".svg"):
             from PySide6.QtSvg import QSvgGenerator
             gen = QSvgGenerator()

@@ -112,7 +112,26 @@ class AnalysisWindow(QWidget):
         self.panel.set_suspended(wide or not self.isVisible())   # only the layout on screen renders
         if had_focus:
             self._focus_view()
+        self._sync_surface()
         self._views_changed()
+
+    def _sync_surface(self) -> None:
+        """Maximised or full screen: the ``background`` surface hierarchy of the in-window expanded workspace;
+        restored: the window surface (ui/surface.py).  Re-polishes the widgets whose
+        stylesheet depends on it; painted components read the level when they paint."""
+        from ..surface import LEVEL_PROP, REGION_NAMES, expanded_window
+        level = 0 if expanded_window(self.isMaximized(), self.isFullScreen()) else None
+        if self.property(LEVEL_PROP) == level:
+            return
+        self.setProperty(LEVEL_PROP, level)
+        from PySide6.QtWidgets import QLineEdit
+        from ..widgets.common import refresh_style
+        names = ("Panel", "AnaWorkspace", "AnaWindowScroll") + REGION_NAMES
+        refresh_style(self)
+        for w in self.findChildren(QWidget):
+            if w.objectName() in names or isinstance(w, QLineEdit):
+                refresh_style(w)
+        self.update()
 
     def compact_shown(self) -> bool:
         return not self.wide
@@ -154,6 +173,8 @@ class AnalysisWindow(QWidget):
 
     def changeEvent(self, e):
         super().changeEvent(e)
+        if e.type() == e.Type.WindowStateChange:
+            self._sync_surface()
         if e.type() in (e.Type.WindowStateChange, e.Type.ActivationChange):
             self._views_changed()
 

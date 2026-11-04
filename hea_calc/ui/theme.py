@@ -67,6 +67,9 @@ ANALYSIS_WIDE_MIN = DETAILS_PANEL_MIN      # narrowest Analysis allowed beside t
 # a rounded control).  Components the design draws square - panels, tiles, buttons, fields, table
 # cells - stay square; pills (tags, toggle track) are fully rounded by construction.
 CORNER_RADIUS = 7
+# Separator between parts of one line of application text ("Single composition | Run 1").  Not a middle dot: "·" is
+# kept for multiplication in formulas (0.55·Tm, J/(mol·K)).
+UI_SEPARATOR = " | "
 # The content switcher's outline and segment frames (analysis/widgets.ContentSwitcher), measured from the approved
 # Analysis header reference (2026-11-04): a 4 px corner, smaller than the panels' CORNER_RADIUS.
 SWITCHER_RADIUS = 4
@@ -97,7 +100,7 @@ DARK = {
     "layer-hover-01": "#2b3236", "layer-hover-02": "#434a51",
     "layer-active-01": "#4d5358", "layer-active-02": "#697077",
     "layer-selected-01": "#343a3f", "layer-selected-hover-01": "#434a51", "layer-selected-02": "#4d5358", "layer-selected-hover-02": "#5d646a", "shell": "#21272a", "window-background": "#121619", "notification-info-bg": "#21272a", "notification-success-bg": "#21272a", "notification-warning-bg": "#21272a", "notification-error-bg": "#21272a",
-    "field-01": "#21272a", "field-02": "#343a3f", "field-hover-02": "#434a51",
+    "field-01": "#21272a", "field-02": "#343a3f", "field-hover-02": "#434a51", "field-on-background": "#343a3f",
     # a field on the dialog's Cool Gray 90 surface uses field-01 (field-02 is for fields on layer-01)
     "dialog-field": "#21272a", "dialog-field-hover": "#2b3236",
     "border-subtle-00": "#343a3f", "border-subtle-01": "#343a3f", "border-subtle-02": "#4d5358",
@@ -155,7 +158,7 @@ LIGHT = {
     "layer-hover-01": "#e4e9f1", "layer-hover-02": "#e4e9f1",
     "layer-active-01": "#c1c7cd", "layer-active-02": "#c1c7cd",
     "layer-selected-01": "#dde1e6", "layer-selected-hover-01": "#cdd3da", "layer-selected-02": "#dde1e6", "layer-selected-hover-02": "#cdd3da", "shell": "#ffffff", "window-background": "#ffffff", "notification-info-bg": "#edf5ff", "notification-success-bg": "#defbe6", "notification-warning-bg": "#fcf4d6", "notification-error-bg": "#fff1f1",
-    "field-01": "#ffffff", "field-02": "#f2f4f8", "field-hover-02": "#e4e9f1",
+    "field-01": "#ffffff", "field-02": "#f2f4f8", "field-hover-02": "#e4e9f1", "field-on-background": "#ffffff",
     "dialog-field": "#f2f4f8", "dialog-field-hover": "#e4e9f1",
     "border-subtle-00": "#dde1e6", "border-subtle-01": "#dde1e6", "border-subtle-02": "#c1c7cd",
     # Composition fields (2026-10-28, explicit product values); disabled background = field-02 (#f2f4f8)

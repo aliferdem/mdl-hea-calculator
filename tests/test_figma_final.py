@@ -535,7 +535,7 @@ def test_analysis_identity_names_the_run_not_the_elements(win, app):
     win.calculate("single", ["CoCrFeMnNi"], [{"Co": 1, "Cr": 1, "Fe": 1, "Mn": 1, "Ni": 1}], [{}])
     pump(app, 0.3)
     ident = win.analysis.composition.identity_text()
-    assert ident == "Single composition · Run 1"
+    assert ident == "Single composition | Run 1"
     assert "elements" not in ident and "Co-Cr" not in ident
 
 

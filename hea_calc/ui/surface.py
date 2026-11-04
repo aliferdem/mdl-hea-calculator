@@ -2,7 +2,7 @@
 
 Analysis is shown in five hosts - the compact and the wide docked layouts (the main window's Analysis slot, a
 ``layer-01`` panel), the dedicated in-window expanded workspace (``background``) and the compact and wide floating
-window (``window-background``).  Carbon colours a component by the layer it sits on, so the same component needs different
+window (``window-background``; ``background`` while maximised or full screen - see :func:`expanded_window`).  Carbon colours a component by the layer it sits on, so the same component needs different
 tokens in different hosts.  This module is the one place that decides it:
 
 * a *host* declares the Carbon level of its own surface - the ``carbon_layer`` property (0 = background, 1 =
@@ -35,6 +35,14 @@ def window_level() -> int:
     """The floating Analysis window's surface (``window-background``): level 1 where it equals ``layer-01``
     (light), else 0."""
     return 1 if t("window-background").lower() == t("layer-01").lower() else 0
+
+
+def expanded_window(maximized: bool, full_screen: bool) -> bool:
+    """The floating Analysis window is *expanded* - the in-window expanded workspace's hierarchy: the
+    ``background`` surface (level 0) with ``layer-01`` regions - while Windows maximises it or shows it full
+    screen.  Restored it keeps the ``window-background`` surface whatever its width or layout (the surface follows
+    the host, not the layout).  Pure (unit-tested)."""
+    return bool(maximized or full_screen)
 
 
 def host_level(w) -> int | None:

@@ -46,7 +46,9 @@ EQUATIONS = {
                      r"$k_1=\dfrac{\Delta H_{\mathrm{IM}}}{\Delta H_{\mathrm{mix}}}$",
                      r"$\mathrm{SS:}\ k_1<k_1^{\mathrm{cr}}$"],
     "M8": [r"$\Phi=\dfrac{\Delta G_{\mathrm{ss}}}{-|\Delta G_{\max}|},\ \ \Delta G_{\mathrm{ss}}=\Delta H_{\mathrm{ss}}-T_m\Delta S_{\mathrm{mix}}$",
-                     r"$\mathrm{SS:}\ \Phi\geq 1,\ \delta_{\mathrm{CN12}}\leq 6.6\%$"],
+                     # King et al. 2016 Sec. 3.1: Phi >= 1 alone; the delta <= 6.6 % screen (Sec. 3.4) only generates
+                     # candidate alloys and is not part of the criterion (engine M8; audit F9)
+                     r"$\mathrm{SS:}\ \Phi\geq 1$"],
 }
 
 

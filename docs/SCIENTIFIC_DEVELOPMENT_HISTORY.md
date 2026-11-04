@@ -1109,3 +1109,15 @@ panel height; the panel's dash for the 45 elements without a value), documented 
   a candidate third oracle after verification.
 * The printed Pauling values were not compared with other compilations; they are kept as printed, because they are
   the values behind the published Δχ.
+
+## 2026-11-04 - Model details presentation (display only; no engine change)
+
+- **M8 criterion equation.** The rendered criterion line of Model details read "SS: Φ ≥ 1, δ<sub>CN12</sub> ≤ 6.6 %".
+  King et al. (2016) §3.1 define the solid-solution region by Φ ≥ 1 alone; the δ ≤ 6.6 % screen of §3.4 only generates
+  candidate alloys (F9; the engine has used Φ ≥ 1 alone since then). `tools/render_equations.py` now renders
+  "SS: Φ ≥ 1" (`hea_calc/ui/equations/M8_2.svg`); the model's criterion text keeps the screen as a separate note.
+- **Model figures.** Proportions are bounded (a 3:2 plot for two unrelated variables, at most 720 px wide and
+  centred); M7 (k₁ against k₁cr, the same dimensionless quantity, criterion k₁ < k₁cr) uses equal data-unit scaling
+  so the k₁ = k₁cr line is at 45°; the one-dimensional criteria (M3 γ, M5 φ, M8 Φ) are compact threshold strips.
+  No value, threshold, class colour or caption statement changed; the citation is no longer repeated under the
+  figure because the page's Reference section holds it.

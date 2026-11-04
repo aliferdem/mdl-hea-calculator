@@ -19,6 +19,7 @@ from ...core.analysis import state as S
 from ...core.analysis.scope import BASE_LABELS
 from ...core.engine import MODEL_KEYS
 from .. import icons
+from ..theme import UI_SEPARATOR
 from ..widgets.common import IconButton, LineTabs
 from .collection_view import CollectionContent, _Region
 from .composition_view import CompositionContent, mode_name
@@ -306,7 +307,7 @@ class AnalysisWorkspace(QWidget):
             from .composition_view import identity_line
             info = self.c.run_info(self.c.record.run_id) if self.c.record is not None else None
             origin = identity_line(info)
-            self.identity.setText(rich(f"{CMP.name_html(row.name)}" + (f" · {origin}" if origin else "")))
+            self.identity.setText(rich(f"{CMP.name_html(row.name)}" + (f"{UI_SEPARATOR}{origin}" if origin else "")))
         else:
             sc = st.scope
             if sc is None:

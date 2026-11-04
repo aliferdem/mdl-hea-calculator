@@ -108,6 +108,16 @@ def stylesheet_rules(k: dict) -> str:
 #AnalysisWindow #AnaWorkspace, #AnalysisWindow QScrollArea#AnaWindowScroll {{ background: {k['window-background']};
     border: none; }}
 #AnaRail, #AnaRegion {{ background: {k['layer-01']}; }}
+/* the separate window while maximised or full screen (surface.expanded_window) has the in-window expanded
+   workspace's hierarchy: `background` outside, layer-01 regions */
+#AnalysisWindow[carbon_layer="0"], #AnalysisWindow[carbon_layer="0"] #Panel,
+#AnalysisWindow[carbon_layer="0"] #AnaWorkspace, #AnalysisWindow[carbon_layer="0"] QScrollArea#AnaWindowScroll {{
+    background: {k['background']}; border: none; }}
+#AnalysisWindow[carbon_layer="0"] #AnaRegion, #AnalysisWindow[carbon_layer="0"] #AnaRail {{
+    background: {k['layer-01']}; }}
+/* a text field directly on the `background` surface (Find a descriptor in an expanded Analysis) */
+QWidget[carbon_layer="0"] QLineEdit:enabled:!read-only {{ background: {k['field-on-background']}; }}
+QWidget[carbon_layer="0"] QLineEdit:enabled:!read-only:hover {{ background: {k['field-hover-02']}; }}
 /* docked Analysis (ui/surface.py): a layer-01 panel in the compact AND the wide layout - the wide layout is not a
    standalone workspace shell - so its regions are the next layer, layer-02 */
 #AnaDock, #AnaDock #AnaWorkspace, #AnaDock QScrollArea#AnaDockScroll {{ background: {k['layer-01']}; border: none; }}
