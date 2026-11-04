@@ -405,6 +405,10 @@ class SymbolKeys(QObject):
             if ev.key() == Qt.Key.Key_Escape:
                 self.view.symbol_escape(self.row)
                 return True
+            tgt = self.view.symbol_key_target(self.row, ev.key(), ev.modifiers())
+            if tgt is not None:
+                focus_cell(self.view, tgt)
+                return True
         elif et == QEvent.Type.FocusOut and ev.reason() not in (Qt.FocusReason.PopupFocusReason,
                                                                 Qt.FocusReason.ActiveWindowFocusReason):
             QTimer.singleShot(0, self, self._blurred)
@@ -422,6 +426,15 @@ class SymbolKeys(QObject):
         # committed rows: QLineEdit.editingFinished (emitted on a real focus loss) runs _element_edited
 
 
+def focus_cell(view, tgt) -> None:
+    """Move the keyboard focus to ``tgt`` as Tab does (the value selected; the old field commits on focus loss)."""
+    tgt.setFocus(Qt.FocusReason.TabFocusReason)
+    tgt.selectAll()
+    sa = getattr(view, "scroll", None)
+    if sa is not None:
+        sa.ensureWidgetVisible(tgt, 0, 8)
+
+
 class GridKeys(QObject):
     """Keyboard navigation between the numeric cells of a composition table (2026-10-28).
 
@@ -429,6 +442,8 @@ class GridKeys(QObject):
       Up / Down move to the editable field above / below in the same column.
     * Composition space - Enter moves to the next editable cell (Min, Max, Step, then the next row); Up / Down move
       within the column; Ctrl+Left / Ctrl+Right move between Min, Max and Step of the row.
+    * Both - Ctrl+Left from the row's leftmost editable value moves to the row's element symbol (2026-11-04); the
+      symbol field's own keys (``RowEditing.symbol_key_target``) lead back and between the symbols.
 
     Read-only, disabled and draft cells are skipped.  A key with no target cell keeps its ordinary meaning (Enter
     still commits; Left / Right without Ctrl always edit the text).  Moving focus is the commit: the field's own
@@ -473,13 +488,19 @@ class GridKeys(QObject):
             flat = [f for cells in grid for f in cells]
             i = flat.index(obj)
             return next((f for f in flat[i + 1:] if self.editable(f)), None)
-        if self.row_major and ctrl and key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+        if ctrl and key in (Qt.Key.Key_Left, Qt.Key.Key_Right) and not mods & (
+                Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.AltModifier):
             step = -1 if key == Qt.Key.Key_Left else 1
             cc = c + step
             while 0 <= cc < len(grid[r]):
                 if self.editable(grid[r][cc]):
                     return grid[r][cc]
                 cc += step
+            if step < 0:                                  # nothing left of it: the row's element symbol
+                rows = list(self.view.rows.values())
+                el = rows[r].el if r < len(rows) else None
+                if el is not None and self.editable(el):
+                    return el
             return None
         return None
 
@@ -492,11 +513,7 @@ class GridKeys(QObject):
         tgt = self.target(obj, ev.key(), ev.modifiers())
         if tgt is None:
             return False
-        tgt.setFocus(Qt.FocusReason.TabFocusReason)       # selects the value, like Tab; the old field commits
-        tgt.selectAll()
-        sa = getattr(self.view, "scroll", None)
-        if sa is not None:
-            sa.ensureWidgetVisible(tgt, 0, 8)
+        focus_cell(self.view, tgt)                        # selects the value, like Tab; the old field commits
         return True
 
 
@@ -525,6 +542,39 @@ class RowEditing:
 
     def symbols_editable(self) -> bool:
         return True
+
+    # ---------------------------------------------------------------- keyboard (2026-11-04)
+    @staticmethod
+    def value_cells(row) -> list:
+        """The row's numeric cells, left to right (Single composition: every input column; space: Min, Max, Step)."""
+        return list(row.fields.values()) if hasattr(row, "fields") else [row.min, row.max, row.step]
+
+    def symbol_key_target(self, row, key, mods):
+        """Where a key pressed in ``row``'s symbol field moves the focus, or None (the key keeps its meaning).
+
+        * Up / Down - the symbol field of the row above / below, in the order shown (the Add element draft
+          included); none past the first or the last row;
+        * Ctrl+Right - the row's first editable value (the way back from Ctrl+Left, ``GridKeys``).
+        Only unmodified Up / Down and plain Ctrl+Right are taken: Shift / Alt combinations keep their text meaning."""
+        other = mods & (Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.AltModifier
+                        | Qt.KeyboardModifier.MetaModifier)
+        ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
+        if other:
+            return None
+        if key in (Qt.Key.Key_Up, Qt.Key.Key_Down) and not ctrl:
+            rows = self._ordered_rows()
+            if row not in rows:
+                return None
+            step = -1 if key == Qt.Key.Key_Up else 1
+            i = rows.index(row) + step
+            while 0 <= i < len(rows):
+                if GridKeys.editable(rows[i].el):
+                    return rows[i].el
+                i += step
+            return None
+        if key == Qt.Key.Key_Right and ctrl and row is not self.draft:
+            return next((f for f in self.value_cells(row) if GridKeys.editable(f)), None)
+        return None
 
     # ---------------------------------------------------------------- draft placement
     def _ordered_rows(self) -> list:
