@@ -10,8 +10,14 @@ shadow and the caption buttons stay Windows' own.  Only the caption colours are 
   22000+) only; ``COLORREF`` is ``0x00BBGGRR``.
 
 Colours are the theme's own tokens: caption and border = ``window-background`` (dark #121619, light #ffffff: the
-same surface as the window's content, so caption and content read as one), text = ``text-primary``.  Every
-call fails silently on other platforms and older builds
+same surface as the window's content, so caption and content read as one), text = ``text-primary``.
+
+What the caption *shows* is per window (``caption_content`` property): every secondary window (dialogs,
+Documentation, About, the separate Analysis window) shows its title without the application icon
+(:data:`CAPTION_TITLE`, the default); the main window opts into :data:`CAPTION_FULL`.  The icon is hidden through
+uxtheme's ``SetWindowThemeAttribute(WTA_NONCLIENT, WTNCA_NODRAWICON)``, which only stops Windows from *drawing* it:
+the window keeps its icon for Alt+Tab and the taskbar, and its title, caption buttons, dragging and Snap behaviour
+are untouched.  Every call fails silently on other platforms and older builds
 (the window then simply keeps the system caption).  Only this process's top-level QWidget windows are touched
 - never native file dialogs, other applications or the global Windows theme.
 
@@ -36,6 +42,22 @@ DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19
 DWMWA_BORDER_COLOR = 34
 DWMWA_CAPTION_COLOR = 35
 DWMWA_TEXT_COLOR = 36
+
+# what the native caption shows (widget property ``caption_content``; secondary windows default to the title only)
+CAPTION_FULL, CAPTION_TITLE = "full", "title"
+CAPTION_PROPERTY = "caption_content"
+WTA_NONCLIENT = 1
+WTNCA_NODRAWCAPTION, WTNCA_NODRAWICON = 0x1, 0x2
+
+
+def caption_content(widget: QWidget) -> str:
+    """What ``widget``'s caption shows: its ``caption_content`` property, else the title only (no icon)."""
+    return str(widget.property(CAPTION_PROPERTY) or CAPTION_TITLE)
+
+
+def caption_flags(content: str) -> int:
+    """``WTNCA_*`` flags that hide what a caption of ``content`` does not show.  Pure (unit-tested)."""
+    return 0 if content == CAPTION_FULL else WTNCA_NODRAWICON
 
 
 def windows_build() -> int:
@@ -94,9 +116,31 @@ def apply(widget: QWidget, theme: str, tokens: dict) -> bool:
                 else wintypes.BOOL(value)
             hr = dwm.DwmSetWindowAttribute(hwnd, wintypes.DWORD(attr), ctypes.byref(v), ctypes.sizeof(v))
             ok = ok and hr == 0
+        apply_caption_content(widget)
         widget.setProperty("titlebar_theme", theme if ok else "")
         return ok
     except Exception:                       # noqa: BLE001 - unsupported system: keep the default caption
+        return False
+
+
+def apply_caption_content(widget: QWidget) -> bool:
+    """Hide the caption's icon unless the window's ``caption_content`` keeps it (see module docstring); True when
+    Windows accepted it.  The window title and icon themselves are never changed."""
+    handle = int(widget.internalWinId() or 0)
+    if not handle or not windows_build():
+        return False
+    flags = caption_flags(caption_content(widget))
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class WTA_OPTIONS(ctypes.Structure):
+            _fields_ = [("dwFlags", wintypes.DWORD), ("dwMask", wintypes.DWORD)]
+        opts = WTA_OPTIONS(flags, WTNCA_NODRAWCAPTION | WTNCA_NODRAWICON)
+        hr = ctypes.windll.uxtheme.SetWindowThemeAttribute(wintypes.HWND(handle), WTA_NONCLIENT, ctypes.byref(opts),
+                                                           ctypes.sizeof(opts))
+        return hr == 0
+    except Exception:                       # noqa: BLE001 - unsupported system: the caption keeps its content
         return False
 
 

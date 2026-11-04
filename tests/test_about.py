@@ -141,7 +141,7 @@ def test_about_window_frame_and_identity(win, app):
     about = win.show_about()
     app.processEvents()
     assert about.isWindow() and about.isVisible() and not about.isModal()
-    assert about.windowTitle() == "About HEA Calculator"
+    assert about.windowTitle() == "About MDL HEA Calculator"
     assert (about.width(), about.height()) == (720, 640)
     assert not about.windowFlags() & Qt.WindowType.FramelessWindowHint
     assert not about.findChildren(QPushButton), "no in-content Close button: the native caption closes it"

@@ -17,35 +17,39 @@ from .common import button, refresh_style, set_prop
 
 
 class Modal(QDialog):
-    """Carbon modal: 20 px title, label, scrollable body, footer of 64 px buttons.
+    """Carbon modal: optional 20 px title and label, scrollable body, footer of 64 px buttons.
 
     The window keeps the native Windows caption (themed by ``ui/win_titlebar.py``), whose Close button closes
-    it; there is no second, in-content close control (release reconciliation).  Footer buttons are workflow
-    actions only (Apply, Cancel, Export …)."""
+    it; there is no second, in-content close control (release reconciliation).  The caption shows the window
+    title without the application icon.  A dialog whose caption already names it (``heading=False``: Table
+    columns, Filter results, Calculation settings) has no in-content heading - its body starts 16 px under the
+    caption.  Footer buttons are workflow actions only (Apply, Cancel, Export …)."""
 
-    def __init__(self, title: str, label: str = "", parent=None, width: int = 640):
+    def __init__(self, title: str, label: str = "", parent=None, width: int = 640, heading: bool = True):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
         from .. import win_titlebar
         win_titlebar.watch(self)
         self.resize(width, 560)
+        self.has_heading = heading
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        head = QHBoxLayout()
-        head.setContentsMargins(16, 16, 16, 0)
-        col = QVBoxLayout()
-        col.setSpacing(4)
-        if label:
-            lab = QLabel(label)
-            lab.setObjectName("ModalLabel")
-            col.addWidget(lab)
-        t = QLabel(title)
-        t.setObjectName("ModalTitle")
-        col.addWidget(t)
-        head.addLayout(col, 1)
-        root.addLayout(head)
+        if heading:
+            head = QHBoxLayout()
+            head.setContentsMargins(16, 16, 16, 0)
+            col = QVBoxLayout()
+            col.setSpacing(4)
+            if label:
+                lab = QLabel(label)
+                lab.setObjectName("ModalLabel")
+                col.addWidget(lab)
+            t = QLabel(title)
+            t.setObjectName("ModalTitle")
+            col.addWidget(t)
+            head.addLayout(col, 1)
+            root.addLayout(head)
         self.body = QVBoxLayout()
         self.body.setContentsMargins(16, 16, 16, 24)
         self.body.setSpacing(12)
@@ -81,7 +85,7 @@ class Modal(QDialog):
         par = self.parentWidget()
         scr = (par.screen() if par is not None else None) or QGuiApplication.primaryScreen()
         avail = scr.availableGeometry().height() if scr is not None else 900
-        chrome = 16 + 44 + 16 + 24 + 64 + 40           # title block, body margins, footer, caption allowance
+        chrome = (16 + 44 if self.has_heading else 0) + 16 + 24 + 64 + 40   # title, body margins, footer, caption
         want = content.sizeHint().height() + chrome
         h = max(minimum, min(int(avail * 0.9), want))
         self.resize(self.width(), h)
@@ -130,7 +134,7 @@ class ColumnsDialog(Modal):
     """Table columns: choose visible columns; Apply / Cancel / Reset to default."""
 
     def __init__(self, visible: list[str], parent=None):
-        super().__init__("Table columns", "Results table", parent, width=560)
+        super().__init__("Table columns", parent=parent, width=560, heading=False)
         self.checks: dict[str, QCheckBox] = {}
         inner = QWidget()
         grid = QGridLayout(inner)
@@ -280,11 +284,14 @@ class FilterDialog(Modal):
     dialog shows the table's current filters as rules; Cancel changes nothing."""
 
     def __init__(self, filters: list, parent=None):
-        super().__init__("Filter results", "Results table", parent, width=720)
+        super().__init__("Filter results", parent=parent, width=720, heading=False)
         self.rules: list[FilterRule] = []
         top = QHBoxLayout()
         self.add_btn = button("Add filter", "ghost", "sm")
         self.add_btn.setAccessibleName("Add filter")
+        from .. import icons
+        self.add_btn.setIcon(icons.icon("add", "link-primary"))     # Carbon: the icon follows the label
+        self.add_btn.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.add_btn.clicked.connect(self.open_add_menu)
         top.addWidget(self.add_btn)
         top.addStretch(1)
@@ -392,7 +399,7 @@ class SettingsDialog(Modal):
     """Calculation settings shared by every workflow (passed to the engine)."""
 
     def __init__(self, annealing: float | None, fraction: float, parent=None):
-        super().__init__("Calculation settings", "Models M6 and M7", parent, width=560)
+        super().__init__("Calculation settings", parent=parent, width=560, heading=False)
         self.resize(560, 360)
         txt = QLabel("Troparevsky (M6) and Senkov & Miracle (M7) compare phases at a temperature. "
                      "Enter the annealing temperature of interest, or leave it empty to use "

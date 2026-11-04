@@ -125,10 +125,9 @@ class AnalysisPanel(QFrame):
         hl.addWidget(self.suffix)
         hl.addStretch(1)
         self.switcher = ContentSwitcher(["Composition", "Collection"], segment=116)    # Figma: 232 x 32
-        # Figma (Analysis 494:69395, Mode=Composition): the switcher's box is x = right - 356, y = 12 .. 44 - lower
-        # than the 40 px header row (it overlaps the context bar's empty top 4 px), 4 px from the collapse button.
-        # It is a child of the panel placed by _place_switcher (a header child would be clipped at 40 px); the
-        # header reserves its width.
+        # Figma (Analysis 494:69395, Mode=Composition): the switcher's box is x = right - 356, 4 px from the collapse
+        # button; vertically see SWITCHER_TOP.  It is a child of the panel placed by _place_switcher (it is kept
+        # outside the header's layout); the header reserves its width.
         self.switcher.setParent(self)
         self._switcher_slot = QWidget()
         self._switcher_slot.setFixedSize(232, 32)
@@ -253,13 +252,21 @@ class AnalysisPanel(QFrame):
     def sizeHint(self) -> QSize:
         return QSize(805, 465)
 
-    SWITCHER_TOP = 12
+    # 2026-11-04 (approved): the switcher sits 4 px below the panel's top edge, docked and in the separate window,
+    # in both contexts - y = 4 .. 36, centred in the 40 px header row with the title and the 40 x 40 buttons - and
+    # SWITCHER_GAP_BELOW (8 px) above the next row's controls (the context bar's controls start 4 px inside it).
+    # Formerly y = 12 .. 44 (Figma 494:69395), which left the scope controls touching its bottom edge.
+    SWITCHER_TOP = 4
+    SWITCHER_GAP_BELOW = 8
+
+    def switcher_top(self) -> int:
+        return self.SWITCHER_TOP
 
     def _place_switcher(self) -> None:
         slot = self._switcher_slot
         if slot.isVisible():
             x = slot.mapTo(self, slot.rect().topLeft()).x()
-            self.switcher.setGeometry(x, self.SWITCHER_TOP, slot.width(), slot.height())
+            self.switcher.setGeometry(x, self.switcher_top(), slot.width(), slot.height())
             self.switcher.show()
             self.switcher.raise_()
         else:
@@ -382,7 +389,7 @@ class AnalysisPanel(QFrame):
     # ------------------------------------------------------------------ overflow
     def open_overflow(self):
         menu = overflow_menu(self, self.c)
-        menu.open_below(self.overflow_btn, align_right=True)
+        menu.open_from_trigger(self.overflow_btn)
         menu.deleteLater()
 
 

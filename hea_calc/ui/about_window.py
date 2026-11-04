@@ -1,4 +1,4 @@
-"""About HEA Calculator: identity, purpose, institution, credits, references, technologies and licences.
+"""About MDL HEA Calculator: identity, purpose, institution, credits, references, technologies and licences.
 
 Figma ``About`` (494:94818): a window with the native caption (no in-content Close button), 720 px wide, the
 "MDL **HEA Calculator**" lock-up and three body paragraphs.  Below them, compact sections carry what the release brief
@@ -27,7 +27,7 @@ from . import win_titlebar
 from .theme import FONT_FAMILY, THEME
 from .widgets.scroll import inner_scroll_area
 
-WINDOW_TITLE = "About HEA Calculator"
+WINDOW_TITLE = "About MDL HEA Calculator"
 SIZE = QSize(720, 640)
 MARGIN = 40
 

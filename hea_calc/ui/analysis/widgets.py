@@ -27,7 +27,8 @@ from PySide6.QtWidgets import (QAbstractButton, QHBoxLayout, QLabel, QSizePolicy
                                QWidget)
 
 from .. import crisp, icons
-from ..theme import BODY_COMPACT_01, CORNER_RADIUS, FOCUS_WIDTH, HAIRLINE, HEADING_COMPACT_01, LABEL_01, font, t
+from ..theme import (BODY_COMPACT_01, FOCUS_WIDTH, HAIRLINE, HEADING_COMPACT_01, LABEL_01,
+                    SWITCHER_RADIUS, font, t)
 from ..widgets.common import button, paint_tag, retire
 # The selection controls are shared application primitives (widgets/dropdown.py); re-exported for Analysis.
 from ..widgets.common import InlineNotification
@@ -207,14 +208,14 @@ class ContentSwitcher(QWidget):
     def paintEvent(self, _e):
         p = QPainter(self)
         r = self.rect()
-        crisp.fill_rounded(p, r, CORNER_RADIUS, t("switcher-unselected"))
+        crisp.fill_rounded(p, r, SWITCHER_RADIUS, t("switcher-unselected"))
         clip = QPainterPath()
-        clip.addRoundedRect(QRectF(r), CORNER_RADIUS, CORNER_RADIUS)
+        clip.addRoundedRect(QRectF(r), SWITCHER_RADIUS, SWITCHER_RADIUS)
         for i, text in enumerate(self.labels):
             seg = QRect(i * self.segment, 0, self.segment, r.height())
             sel = i == self.index_
             if sel:
-                crisp.fill_rounded(p, seg, CORNER_RADIUS, t("switcher-selected"))
+                crisp.fill_rounded(p, seg, SWITCHER_RADIUS, t("switcher-selected"))
             elif i == self.hover:
                 p.save()
                 p.setClipPath(clip)
@@ -232,12 +233,12 @@ class ContentSwitcher(QWidget):
                 p.drawEllipse(QPointF(seg.center().x() + tw / 2 + 6, seg.center().y() - 6), 3, 3)
         # group outline first, then the selected segment's frame on top of it (all four sides visible),
         # then the keyboard focus ring
-        crisp.frame(p, r, HAIRLINE, t("border-strong-02"), CORNER_RADIUS)
+        crisp.frame(p, r, HAIRLINE, t("border-strong-02"), SWITCHER_RADIUS)
         crisp.frame(p, QRect(self.index_ * self.segment, 0, self.segment, r.height()), HAIRLINE, t("border-inverse"),
-                    CORNER_RADIUS)
+                    SWITCHER_RADIUS)
         if self.hasFocus():
             crisp.frame(p, QRect(self.focus_i * self.segment, 0, self.segment, r.height()), FOCUS_WIDTH, t("focus"),
-                        CORNER_RADIUS)
+                        SWITCHER_RADIUS)
         p.end()
 
 

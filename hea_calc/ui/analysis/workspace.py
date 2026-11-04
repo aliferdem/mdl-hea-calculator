@@ -322,7 +322,7 @@ class AnalysisWorkspace(QWidget):
 
     def open_overflow(self):
         menu = overflow_menu(self, self.c)
-        menu.open_below(self.overflow_btn, align_right=True)
+        menu.open_from_trigger(self.overflow_btn)
         menu.deleteLater()
 
     def focus_title(self):

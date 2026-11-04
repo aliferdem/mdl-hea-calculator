@@ -1,8 +1,8 @@
 """Help window: the HEA Calculator documentation (``core/docs.py`` is the model; this module only presents it).
 
 A non-modal top-level window with the native Windows caption (no in-content Close button), titled
-"Help — HEA Calculator", 960 × 720 by default.  Layout (Thermo-Calc-style documentation browser, Carbon v11
-behaviour):
+"Documentation" (its caption shows that text and no icon), 960 × 720 by default.  Layout (Thermo-Calc-style
+documentation browser, Carbon v11 behaviour):
 
 * compact 48 px header - the documentation search field, aligned with the article column (no Home button:
   Documentation Home is the first entry of the contents tree, and F1 / Alt+Home open it);
@@ -29,7 +29,7 @@ from .widgets.common import IconButton
 from .widgets.menu import carbonize_popups
 from .widgets.scroll import thin_scrollbars
 
-WINDOW_TITLE = "Help — HEA Calculator"
+WINDOW_TITLE = "Documentation"          # the caption shows this text and no icon (2026-11-04)
 DEFAULT_SIZE = QSize(960, 720)
 MINIMUM_SIZE = QSize(720, 560)
 NAV_WIDTH = 264

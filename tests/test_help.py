@@ -326,7 +326,9 @@ def test_help_window_is_one_native_window_with_the_documented_frame(win, app):
     hw = win.show_help("home")
     pump(app)
     assert hw.isWindow() and hw.isVisible()
-    assert hw.windowTitle() == "Help — HEA Calculator"
+    assert hw.windowTitle() == "Documentation"                    # 2026-11-04: the caption's only text
+    from hea_calc.ui import win_titlebar
+    assert win_titlebar.caption_content(hw) == win_titlebar.CAPTION_TITLE, "title shown, no caption icon"
     assert (hw.width(), hw.height()) == (960, 720)
     assert not hw.windowFlags() & Qt.WindowType.FramelessWindowHint, "native caption"
     assert not [b for b in hw.findChildren(QPushButton) if b.text().strip().lower() == "close"]

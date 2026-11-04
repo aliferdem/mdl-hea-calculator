@@ -310,8 +310,11 @@ class IconButton(QPushButton):
         r = self.rect()
         enabled = self.isEnabled()
         bg = None
+        from .menu import is_menu_open
         if not enabled:
             bg = None
+        elif is_menu_open(self):
+            bg = t("layer-02")                       # its menu is open (CarbonMenu.open_from_trigger)
         elif self.isDown():
             bg = t("button-ghost-active")
         elif self.property("active") == "true" or self.isChecked():

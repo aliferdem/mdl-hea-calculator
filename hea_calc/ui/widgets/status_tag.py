@@ -120,7 +120,11 @@ class HeaderIconButton(InfoButton):
             token = "icon-disabled"
         else:
             token = "icon-primary"
-            if self.isDown():
+            from .menu import is_menu_open
+            if is_menu_open(self):
+                # its menu is open: the trigger is part of the menu's surface (merged, CarbonMenu.open_from_trigger)
+                crisp.fill_rect(p, r, t("layer-02"))
+            elif self.isDown():
                 crisp.fill_rect(p, r, t("layer-active-01"))
             elif self.underMouse() or self.is_open():
                 crisp.fill_rect(p, r, t("layer-hover-01"))

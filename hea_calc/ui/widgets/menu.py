@@ -51,6 +51,23 @@ SHADOW = 6
 SIZES = {"sm": 32, "md": 40, "lg": 48}
 
 
+MENU_OPEN_PROPERTY = "menu_open"
+
+
+def set_menu_open(trigger, value: bool) -> None:
+    """Mark ``trigger`` as the open menu's trigger (or not) and repaint it; a deleted trigger is ignored."""
+    try:
+        if bool(trigger.property(MENU_OPEN_PROPERTY)) != value:
+            trigger.setProperty(MENU_OPEN_PROPERTY, value)
+            trigger.update()
+    except RuntimeError:
+        pass
+
+
+def is_menu_open(trigger) -> bool:
+    return bool(trigger.property(MENU_OPEN_PROPERTY))
+
+
 class CarbonMenu(QMenu):
     def __init__(self, title: str = "", parent=None, size: str = "sm", block_padding: int = 4):
         super().__init__(title, parent)
@@ -164,6 +181,18 @@ class CarbonMenu(QMenu):
             return self.exec(pos, active) if active is not None else self.exec(pos)
         self.popup(pos, active) if active is not None else self.popup(pos)
         return None
+
+    def open_from_trigger(self, trigger, align_right: bool = True):
+        """Open as the menu of an icon-only trigger (the Analysis Options button, 2026-11-04): flush under it and
+        merged with it into one elevated surface, the trigger showing its open state (``MENU_OPEN_PROPERTY``,
+        painted in the menu surface colour) for exactly as long as the menu is open - however it closes (an item,
+        a click outside, Escape, deactivation or ``close()``: every path emits ``aboutToHide``)."""
+        set_menu_open(trigger, True)
+        self.aboutToHide.connect(lambda: set_menu_open(trigger, False))
+        try:
+            return self.open_below(trigger, align_right=align_right, merge=True)
+        finally:
+            set_menu_open(trigger, False)             # exec returned: the menu is closed in any case
 
     def exec_at(self, global_pos: QPoint):
         """Context menu: the surface's top-left corner at ``global_pos`` (upward from it near the screen bottom)."""

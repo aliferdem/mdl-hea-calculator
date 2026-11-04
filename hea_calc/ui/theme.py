@@ -63,6 +63,9 @@ ANALYSIS_WIDE_MIN = DETAILS_PANEL_MIN      # narrowest Analysis allowed beside t
 # a rounded control).  Components the design draws square - panels, tiles, buttons, fields, table
 # cells - stay square; pills (tags, toggle track) are fully rounded by construction.
 CORNER_RADIUS = 7
+# The content switcher's outline and segment frames (analysis/widgets.ContentSwitcher), measured from the approved
+# Analysis header reference (2026-11-04): a 4 px corner, smaller than the panels' CORNER_RADIUS.
+SWITCHER_RADIUS = 4
 # Tooltip / toggletip bubbles are the one intentional exception to CORNER_RADIUS: the HEA reference
 # (design/components/Group 241.png, 308 px wide at 3x) has 2 px corners.
 TOOLTIP_RADIUS = 2

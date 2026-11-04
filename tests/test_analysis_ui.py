@@ -89,8 +89,8 @@ def test_embedded_geometry_and_regions(win, app):
     assert (p.width(), p.height()) == (829, 490) and p.size_class == "M"
     assert p.switcher.width() == 232 and p.switcher.height() == 32
     assert p.context_stack.height() == 40 and p.tab_stack.height() == 32
-    # Figma (Mode=Composition): the switcher's box is y = 12 .. 44, overlapping the context bar's empty top 4 px
-    assert p.switcher.mapTo(p, QPoint(0, 0)).y() == 12
+    # 2026-11-04: the switcher's box is y = 4 .. 36, centred on the 40 px header row (AnalysisPanel.SWITCHER_TOP)
+    assert p.switcher.mapTo(p, QPoint(0, 0)).y() == p.SWITCHER_TOP == 4
     assert p.overflow_btn.mapTo(p, QPoint(0, 0)).x() + 40 == p.width(), "header buttons flush right"
     assert p.tab_stack.mapTo(p, QPoint(0, 0)).y() == 80, "header 40 + context bar 40"
     assert p.content_stack.mapTo(p, QPoint(0, 0)).y() == 112

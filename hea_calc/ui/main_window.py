@@ -259,6 +259,7 @@ class MainWindow(QMainWindow):
             self.table.pagination.size_box.setCurrentIndex(PAGE_SIZES.index(size))
         carbonize_popups(self)       # text-field context menus and dropdown lists use the Carbon popups
         win_titlebar.install(QApplication.instance(), lambda: THEME.name, lambda: THEME.tokens)
+        self.setProperty(win_titlebar.CAPTION_PROPERTY, win_titlebar.CAPTION_FULL)   # keeps its icon
         win_titlebar.watch(self)
         THEME.changed.connect(self.apply_theme)
         # the effective theme was resolved at start-up (app.py) from this preference; from now on it follows
