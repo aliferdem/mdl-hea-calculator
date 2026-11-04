@@ -202,7 +202,7 @@ def test_descriptor_is_a_results_column_and_analysis_metric():
     assert col.model is None, "a shared descriptor: no model owns it"
     assert "dchi" not in DEFAULT_COLUMNS, "optional column: the default table layout is unchanged"
     assert "Pauling" in col.chooser_tip and "no model" in col.chooser_tip
-    assert "Guo & Liu" in col.tooltip           # the source is on the heading tooltip (chooser tips cite none)
+    assert col.tooltip == col.chooser_tip and "Guo" not in col.tooltip, "plain description, no source"
     assert any(c.key == "dchi" for title, cols in chooser_groups() if title == "General" for c in cols)
     assert "dchi" in NUM_KEYS and "dchi" in METRIC_KEYS
     d = DESCRIPTORS["dchi"]

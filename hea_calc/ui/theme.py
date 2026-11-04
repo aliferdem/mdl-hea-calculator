@@ -18,9 +18,13 @@ from PySide6.QtGui import QColor, QFont, QFontDatabase
 # 40 px panel headers, the 32 px title bar + its 4 px state line at the top of the client area.
 PANEL_GAP = 16
 CONTENT_MARGIN_X = 16
-CONTENT_MARGIN_TOP = 16
 CONTENT_MARGIN_BOTTOM = 16
+TITLEBAR_BAR_HEIGHT = 32
 HEADER_HEIGHT = 36       # title bar (32) + state line (4)
+# The visible gap from the bottom of the 32 px title bar to the top of the panels is 16 px.  The 4 px state line
+# under the bar (its background colour) is part of that gap, so the content margin is the rest of it.
+TITLEBAR_PANEL_GAP = 16
+CONTENT_MARGIN_TOP = TITLEBAR_PANEL_GAP - (HEADER_HEIGHT - TITLEBAR_BAR_HEIGHT)
 PANEL_HEADER_HEIGHT = 40
 COLLAPSED_PANEL = 40     # a collapsed panel's strip (Figma Mode=Collapsed, 40 x 490)
 CONTROL_HEIGHT = 32      # Carbon "sm" fields/rows

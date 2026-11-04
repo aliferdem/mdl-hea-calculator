@@ -286,18 +286,19 @@ def test_upper_panels_fit_and_table_fills_width_at_each_scale(app, scale):
 
 
 def test_design_viewport_reproduces_reference_geometry(app):
-    """1920 px: panels at the final Figma positions (Main window 501:39126: 16 / 602 / 1075 at y = 52 -
-    Elements 570, Composition setup 457, Analysis 829 px, right edge 1904; the results table at y = 558)."""
+    """1920 px: panels at the final Figma positions (Main window 501:39126: 16 / 602 / 1075 -
+    Elements 570, Composition setup 457, Analysis 829 px, right edge 1904).  Vertically (2026-11-04) the panels start
+    16 px below the 32 px title bar, y = 48 (formerly 52), and the results table follows at y = 554 (formerly 558)."""
     w = make_window(app, (1920, 1000))
     try:
         xs = [p.mapTo(w, QPoint(0, 0)).x() for p in (w.elements, w.composition, w.details)]
         assert xs == [16, 602, 1075]
-        assert {p.mapTo(w, QPoint(0, 0)).y() for p in (w.elements, w.composition, w.details)} == {52}
+        assert {p.mapTo(w, QPoint(0, 0)).y() for p in (w.elements, w.composition, w.details)} == {48}
         assert {p.height() for p in (w.elements, w.composition, w.details)} == {490}
         assert w.elements.width() == 570 and w.composition.width() == 457
         assert w.details.width() == 829
         assert w.details.mapTo(w, QPoint(0, 0)).x() + w.details.width() == 1904
-        assert w.table.mapTo(w, QPoint(0, 0)).y() == 558
+        assert w.table.mapTo(w, QPoint(0, 0)).y() == 554
         assert w.elements.table.tile_size == 28        # 570 px panel: 18 × 28 px tiles + 2 px gaps (Figma)
         assert w.elements.table.mapTo(w.elements, QPoint(0, 0)) == QPoint(16, 56)
         assert not w.layout_report()["mainScrollbarVisible"], "no unnecessary main scroll bar"

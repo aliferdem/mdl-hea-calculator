@@ -673,6 +673,24 @@ class Header(QHeaderView):
             icons.paint(p, name, QRectF(ax, rect.center().y() - 8, 16, 16), "icon-primary")
         p.restore()
 
+    def tail_rect(self) -> QRect:
+        """The header area right of the last section (empty when the sections fill or overflow the viewport)."""
+        x0 = self.length() - self.offset()
+        vp = self.viewport()
+        return QRect(x0, 0, max(0, vp.width() - x0), vp.height())
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        # the rule under the header belongs to the whole header, not to its sections: paintSection draws it under
+        # each section, and the area right of the last one (user-narrowed columns) continues it at the same y,
+        # colour and width, so the line above the first row reaches the viewport's right edge
+        tail = self.tail_rect()
+        if tail.width() > 0:
+            p = QPainter(self.viewport())
+            crisp.fill_rect(p, tail, t("header-row"))
+            crisp.hline_bottom(p, tail, t("row-border"), HAIRLINE)
+            p.end()
+
     def sizeHint(self):
         s = super().sizeHint()
         return QSize(s.width(), HEADER_HEIGHT)
@@ -882,8 +900,37 @@ class ResultsView(QTableView):
         pt = self.viewport().mapTo(sa.widget(), QPoint(0, y + ROW_HEIGHT // 2))
         sa.ensureVisible(pt.x(), pt.y(), 0, ROW_HEIGHT * 2)
 
+    def row_tail_rect(self, r: int) -> QRect:
+        """The part of row ``r`` right of the last column, in viewport coordinates (empty when the columns fill or
+        overflow the viewport).  The delegate paints cells only; this strip belongs to the row as well."""
+        x0 = self.header.length() - self.horizontalOffset()
+        return QRect(x0, self.rowViewportPosition(r), max(0, self.viewport().width() - x0), ROW_HEIGHT)
+
+    def _paint_row_tails(self, p: QPainter) -> None:
+        """Continue each row's hover layer, double-click flash and bottom rule to the viewport's right edge, so a
+        row reads as one band however few columns are shown.  No fake cells: the strip holds no text, and the
+        column widths are untouched."""
+        n = self.m.rowCount()
+        if not n or self.header.length() - self.horizontalOffset() >= self.viewport().width():
+            return
+        first = max(0, self.rowAt(0))
+        last = self.rowAt(self.viewport().height() - 1)
+        last = n - 1 if last < 0 else last
+        for r in range(first, last + 1):
+            rect = self.row_tail_rect(r)
+            if r == self.hover_row:
+                crisp.fill_rect(p, rect, t("row-hover"))
+            if r == self.flash_row and self.flash_level > 0:
+                c = QColor(t("layer-active-01"))
+                c.setAlphaF(self.flash_level)
+                p.fillRect(rect, c)
+            crisp.hline_bottom(p, rect, t("row-border"), HAIRLINE)
+
     def paintEvent(self, e):
         super().paintEvent(e)
+        p = QPainter(self.viewport())
+        self._paint_row_tails(p)
+        p.end()
         if self.hasFocus() and 0 <= self.kb_row < self.m.rowCount():
             from ..theme import FOCUS_WIDTH
             p = QPainter(self.viewport())

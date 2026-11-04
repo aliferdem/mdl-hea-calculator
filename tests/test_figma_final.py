@@ -499,7 +499,9 @@ def test_progress_line_reserves_its_height(win, app):
     pump(app)
     assert win.progress_line.fraction() == 0.25
     assert win.top_row.mapTo(win, win.top_row.rect().topLeft()).y() == y0        # no layout shift
-    assert y0 == 36 + 16
+    # 2026-11-04: the panels start 16 px below the 32 px title bar (the 4 px state line is part of that gap)
+    from hea_calc.ui.theme import TITLEBAR_PANEL_GAP
+    assert TITLEBAR_PANEL_GAP == 16 and y0 == 32 + 16
     win.progress.hide()
 
 
