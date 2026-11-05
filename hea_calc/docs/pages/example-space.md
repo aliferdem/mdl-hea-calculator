@@ -7,7 +7,7 @@ element and look at the same family in weight percent.
 
 1. Select **Composition space** with the mode switcher.
 2. Select Co, Cr, Fe, Ni and Al. Keep **Range basis** at **At. ratio**.
-3. Keep the defaults for Co, Cr, Fe and Ni (Min 1.0, Max 1.0, Lock on).
+3. For Co, Cr, Fe and Ni, set Min 1.0 and Max 1.0 and keep Lock on, so each stays at a ratio of 1.
 4. For Al, switch **Lock** off and set Min 0.1, Max 0.5, Step 0.1.
 
 The Workload summary reports **6 valid compositions** in 2 element systems: CoCrFeNi (Al absent) and Al0.1CoCrFeNi
