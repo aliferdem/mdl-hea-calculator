@@ -44,9 +44,18 @@ $env:QT_QPA_PLATFORM = "offscreen"
 uv run pytest -q
 ```
 
-The complete test suite contains approximately 1,650 tests and takes about 3–4 minutes on a 16-core Linux
-machine. Tests involving native windows are optional and require a Windows desktop session. They can be enabled by
-setting `HEA_NATIVE_TESTS=1`.
+The complete test suite contains approximately 1,950 tests. Every test belongs to one group (`tests/conftest.py`), so a
+change can be checked with the relevant group instead of the whole suite:
+
+| Command | Group |
+|---|---|
+| `uv run pytest -m ui` | Qt interface tests: widgets, windows, layout and themes |
+| `uv run pytest -m core` | Calculations, datasets, models, export and storage, without a window |
+| `uv run pytest -m perf` | Timing budgets and large workloads |
+| `uv run pytest -m "not perf"` | Everything except the performance group |
+
+Tests involving native windows are optional and require a Windows desktop session. They can be enabled by setting
+`HEA_NATIVE_TESTS=1`.
 
 The code is checked with [ruff](https://docs.astral.sh/ruff/) (settings in `pyproject.toml`) on every pull request
 and every push to `main`. The same check can be run locally before committing; `--fix` removes unused imports and

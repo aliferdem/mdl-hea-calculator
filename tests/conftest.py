@@ -18,6 +18,52 @@ def engine():
     return Engine()
 
 
+# ---------------------------------------------------------------------------------------------- test groups
+# Every test belongs to exactly one group, so a change can be checked without the whole suite:
+#   uv run pytest -m ui      Qt interface tests (widgets, windows, layout, theme)
+#   uv run pytest -m core    calculations, datasets, models, export and storage, without a window
+#   uv run pytest -m perf    timing budgets and large workloads (benchmarks, million-row tables, cancellation)
+#   uv run pytest -m "not perf"   everything except the slow performance group
+# A performance test that opens a window is in ``perf``, not ``ui``.
+GROUPS = {"ui": "Qt interface tests", "core": "calculation, data and export tests without a window",
+          "perf": "timing budgets and large workloads"}
+PERF_MODULES = {"test_benchmarks.py", "test_large_workflows.py"}
+PERF_TESTS = {
+    "test_final_interaction.py::test_large_clear_undo_copies_no_rows_into_python",
+    "test_repository.py::test_large_build_runs_in_the_background_and_keeps_the_old_page",
+    "test_repository.py::test_cancel_with_a_full_writer_queue_is_fast_and_keeps_a_contiguous_prefix",
+    "test_repository.py::test_sweep_summary_reports_large_sets_instead_of_refusing_them",
+    "test_repository.py::test_beyond_the_largest_tested_batch_is_refused_plainly",
+    "test_space_units.py::test_large_wt_space_counts_in_bounded_time",
+    "test_variables_export.py::test_variables_export_performance",
+    "test_view_consistency.py::test_deleting_rows_in_a_large_view_keeps_every_page_exact",
+}
+_UI_MARKS = ("QApplication", "_ui_support", "MainWindow", "QWidget")
+_UI_MODULES: dict[str, bool] = {}
+
+
+def pytest_configure(config):
+    for name, text in GROUPS.items():
+        config.addinivalue_line("markers", f"{name}: {text}")
+
+
+def group_of(item) -> str:
+    """The group of a collected test: ``perf`` (listed above), else ``ui`` (its module builds Qt widgets), else
+    ``core``."""
+    path = Path(str(item.fspath))
+    if path.name in PERF_MODULES or f"{path.name}::{item.originalname or item.name}" in PERF_TESTS:
+        return "perf"
+    if path.name not in _UI_MODULES:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        _UI_MODULES[path.name] = any(m in text for m in _UI_MARKS)
+    return "ui" if _UI_MODULES[path.name] else "core"
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        item.add_marker(getattr(pytest.mark, group_of(item)))
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_call(item):
     """Destroy the main/analysis windows a test body created and left open.  close() only hides a top-level widget;
