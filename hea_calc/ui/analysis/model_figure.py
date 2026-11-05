@@ -20,7 +20,7 @@ PAD_L, PAD_R, PAD_T, PAD_B = 56, 16, 12, 44
 LEGEND_H = 24
 
 # Responsive geometry (2026-11-04): the figure never stretches with the window.  Its drawing is at most MAX_WIDTH wide
-# and centred; its height follows from the width through a bounded plot-area aspect, so a maximised Analysis window
+# and starts at the content's left edge, like the Criterion and Evaluated values text above it; its height follows from the width through a bounded plot-area aspect, so a maximised Analysis window
 # shows the same proportions as a narrow one.
 MAX_WIDTH = {"scatter": 720, "curves": 720, "strip": 760}
 SCATTER_ASPECT = 1.5            # plot-area width : height for ordinary two-variable charts (3:2)
@@ -138,9 +138,9 @@ class ModelFigureWidget(QWidget):
         return QSize(280, self.heightForWidth(280))
 
     def drawing_rect(self) -> QRectF:
-        """Where the figure is drawn inside the widget: at most ``max_width`` wide, horizontally centred."""
+        """Where the figure is drawn inside the widget: at most ``max_width`` wide, from its left edge."""
         w, h = self.figure_size(self.width())
-        return QRectF((self.width() - w) / 2.0, 0.0, w, min(h, float(self.height())))
+        return QRectF(0.0, 0.0, w, min(h, float(self.height())))
 
     # -------------------------------------------------------------- geometry
     def ranges(self) -> tuple[tuple[float, float], tuple[float, float]]:

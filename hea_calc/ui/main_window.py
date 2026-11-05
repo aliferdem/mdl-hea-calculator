@@ -188,6 +188,16 @@ class MainWindow(QMainWindow):
         self._sticky_timer.setSingleShot(True)
         self._sticky_timer.setInterval(0)
         self._sticky_timer.timeout.connect(self._place_sticky)
+        # the upper row fitted to the Analysis content while both left panels are collapsed (_fit_upper_row)
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.setInterval(0)
+        self._fit_timer.timeout.connect(self._fit_upper_row)
+        self._fit_passes = 0
+        self.top_row.collapse_changed.connect(lambda _i, _on: self._schedule_fit())
+        self.analysis_dock.layout_changed.connect(lambda _w: self._schedule_fit())
+        self.analysis_ctl.state_changed.connect(lambda _o, _n: self._schedule_fit())
+        THEME.changed.connect(lambda _n: self._schedule_fit())
         self.scroll.verticalScrollBar().valueChanged.connect(self._place_sticky)
         self.scroll.horizontalScrollBar().valueChanged.connect(self._place_sticky)
         content_w.installEventFilter(self)
@@ -306,6 +316,75 @@ class MainWindow(QMainWindow):
         super().resizeEvent(e)
         if hasattr(self, "_sticky_timer"):
             self._sticky_timer.start()
+        if hasattr(self, "_fit_timer"):
+            self._schedule_fit()
+
+    # ------------------------------------------------------------------ fitted upper row
+    # With Elements and Composition setup both collapsed, the row grows until Analysis needs no scroll bar of its
+    # own - never above what leaves the results table its toolbar, header, FIT_TABLE_ROWS rows and pagination in
+    # the window, never below the design height.  Any other collapse state keeps the design height.  The panels
+    # are only resized (UpperPanels.set_fitted_height), and nothing is stored.
+    FIT_TABLE_ROWS = 5
+
+    def _schedule_fit(self, own: bool = False) -> None:
+        if not own:
+            self._fit_passes = 0
+        self._fit_timer.start()
+
+    def upper_row_fit_active(self) -> bool:
+        tr = self.top_row
+        return ({0, 1} <= tr.collapsed and self.ANALYSIS_PANEL not in tr.collapsed and not tr.stacked
+                and self._top_visible and self.pages.currentIndex() == 0)
+
+    def upper_row_limit(self) -> int:
+        """The tallest the fitted row may be: the main viewport less the page margins, the panel gap and the
+        smallest usable results table."""
+        from .widgets.results_table import HEADER_HEIGHT as TABLE_HEADER, ROW_HEIGHT
+        table_min = (self.table.TOOLBAR_HEIGHT + TABLE_HEADER + self.FIT_TABLE_ROWS * ROW_HEIGHT
+                     + self.table.PAGINATION_HEIGHT)
+        return self.scroll.viewport().height() - CONTENT_MARGIN_TOP - CONTENT_MARGIN_BOTTOM - PANEL_GAP - table_min
+
+    def analysis_overflow(self) -> int:
+        """How much taller (positive) or shorter (negative) the docked Analysis could be for its visible content
+        to fit without a vertical scroll bar: the largest such difference over its visible vertical scroll
+        areas (the wide layout's one scroll, or the compact panel's page scrolls)."""
+        from PySide6.QtWidgets import QScrollArea
+        extra = None
+        for sa in self.analysis_dock.findChildren(QScrollArea):
+            if not sa.isVisible() or sa.widget() is None \
+                    or sa.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff:
+                continue
+            bar = sa.verticalScrollBar()
+            if not bar.property("fits_upper_row"):              # content that grows or shrinks re-fits the row
+                bar.setProperty("fits_upper_row", True)
+                bar.rangeChanged.connect(lambda _a, _b: self._schedule_fit(own=True))
+            vp = sa.viewport().height()
+            w = sa.widget()
+            if bar.maximum() > 0:
+                d = bar.maximum()                                # exact: the hidden part
+            else:
+                vw = sa.viewport().width()
+                content = w.heightForWidth(vw) if w.hasHeightForWidth() else -1
+                if content < 0:
+                    content = w.sizeHint().height()
+                d = max(content, w.minimumSizeHint().height()) - vp
+            extra = d if extra is None else max(extra, d)
+        return extra or 0
+
+    def _fit_upper_row(self) -> None:
+        tr = self.top_row
+        if not self.upper_row_fit_active():
+            tr.set_fitted_height(None)
+            return
+        current = tr.current_row_height()
+        target = max(TOP_ROW_HEIGHT, min(current + self.analysis_overflow(), self.upper_row_limit()))
+        if abs(target - current) <= 1:
+            self._fit_passes = 0                     # settled: a later content change starts a fresh fit
+            return
+        tr.set_fitted_height(target)
+        self._fit_passes += 1
+        if self._fit_passes < 4:                     # settle once the new height is laid out (bounded: no loop)
+            self._schedule_fit(own=True)
 
     # ------------------------------------------------------------------ window chrome
     def nativeEvent(self, event_type, message):                 # noqa: N802 - Qt API

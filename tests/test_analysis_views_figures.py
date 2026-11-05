@@ -64,7 +64,7 @@ def _figure(k, current=None):
     return ModelFigureWidget(figure(k), current or {"x": 2.2, "y": 1.6})
 
 
-def test_figures_keep_bounded_proportions_and_are_centred(app):
+def test_figures_keep_bounded_proportions_and_are_left_aligned(app):
     from hea_calc.ui.analysis import model_figure as MF
     for k in ("M1", "M2", "M4", "M6", "M7"):
         w = _figure(k)
@@ -73,7 +73,7 @@ def test_figures_keep_bounded_proportions_and_are_centred(app):
         assert sizes[2][0] <= w.max_width()
         w.resize(2000, w.heightForWidth(2000))
         r = w.drawing_rect()
-        assert abs(r.left() - (2000 - r.width()) / 2) < 1, "centred"
+        assert r.left() == 0 and r.width() == sizes[2][0], "left-aligned, still bounded"
         if k != "M7":
             plot_w = sizes[2][0] - MF.PAD_L - MF.PAD_R
             plot_h = sizes[2][1] - MF.PAD_T - MF.PAD_B - MF.LEGEND_H
@@ -254,4 +254,42 @@ def test_analysis_surface_hierarchy_follows_the_presentation_state(app, theme):
         assert ("compact", "overview", True) in seen, "a restored wide window's regions were measured"
         assert THEME.name == theme
     finally:
+        close(app, w)
+
+
+@pytest.mark.parametrize("host", ["docked", "detached-normal", "detached-maximized", "detached-fullscreen"])
+def test_model_details_figure_starts_at_the_content_edge(app, host):
+    """The figure's drawing starts where the page's text starts (Model figure heading, title, caption, and the
+    Criterion section above), in every host and window state; it stays bounded."""
+    from PySide6.QtWidgets import QLabel
+    from hea_calc.core.analysis import state as S
+    w = make_window(app, "light")
+    aw = None
+    try:
+        calc(w, app)
+        c = w.analysis.c
+        c.apply(S.set_tab, "model_details")
+        pump(app, 20)
+        root = w
+        if host.startswith("detached"):
+            aw = root = w.open_analysis_window()
+            {"detached-normal": aw.showNormal, "detached-maximized": aw.showMaximized,
+             "detached-fullscreen": aw.showFullScreen}[host]()
+            pump(app, 20)
+            c.apply(S.set_tab, "model_details")
+            pump(app, 20)
+        from hea_calc.ui.analysis.model_figure import ModelFigureWidget
+        charts = [x for x in root.findChildren(ModelFigureWidget)
+                  if x.isVisible()]
+        assert charts, host
+        chart = charts[0]
+        left = chart.mapTo(root, QPoint(0, 0)).x() + chart.drawing_rect().left()
+        texts = [lb for lb in root.findChildren(QLabel) if lb.isVisible() and lb.text() in ("Model figure", "Criterion")]
+        assert len(texts) == 2, [lb.text() for lb in texts]
+        for lb in texts:
+            assert lb.mapTo(root, QPoint(0, 0)).x() == left, (host, lb.text())
+        assert chart.drawing_rect().width() <= chart.max_width()
+    finally:
+        if aw is not None:
+            close(app, aw)
         close(app, w)

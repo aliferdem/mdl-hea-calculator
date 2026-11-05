@@ -14,8 +14,12 @@ COLLAPSED_GAP = 8   # the gap on either side of a vertical collapsed strip in a 
 
 class CollapsedStrip(QWidget):
     """A collapsed panel (Figma Mode=Collapsed / Collapsed Horizontal / Collapsed Vertical): the panel surface,
-    40 px across, with the expand button (40 × 40) and the title - rotated in a vertical strip (reading top to
-    bottom, from y = 56), horizontal in a 40 px tall bar (stacked Analysis)."""
+    40 px across, with the expand button (40 × 40) and the title - in a vertical strip rotated 90° counterclockwise
+    (reading bottom to top, ending TITLE_TOP below the strip's top, centred across it), horizontal in a 40 px tall
+    bar (stacked Analysis).  Only the title is rotated; the button keeps its orientation."""
+
+    TITLE_TOP = 56          # the end of a vertical title: 16 px under the 40 px expand button
+    TITLE_BOTTOM_MIN = 16   # space kept under the title's start when the strip is short (the title is elided)
 
     expand_requested = Signal()
 
@@ -47,10 +51,28 @@ class CollapsedStrip(QWidget):
         if self.horizontal:
             p.drawText(QRectF(16, 0, self.width() - 16 - STRIP, STRIP), int(Qt.AlignmentFlag.AlignVCenter), self.title)
         else:
-            p.translate(STRIP / 2 + 7, 56)
-            p.rotate(90)
-            p.drawText(QRectF(0, 0, self.height() - 72, 20), int(Qt.AlignmentFlag.AlignLeft), self.title)
+            rect = self.vertical_title_rect()
+            fm = p.fontMetrics()
+            fits = fm.horizontalAdvance(self.title) <= rect.height()
+            text = self.title if fits else fm.elidedText(self.title, Qt.TextElideMode.ElideRight, int(rect.height()))
+            # rotated -90°: the text's x axis runs up the strip, its y axis to the right
+            p.translate(rect.left(), rect.bottom())
+            p.rotate(-90)
+            p.drawText(QRectF(0, 0, rect.height(), rect.width()),
+                       int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), text)
         p.end()
+
+    def vertical_title_rect(self) -> QRectF:
+        """Where the vertical title is drawn (strip coordinates): one text line wide, centred across the strip,
+        ending at TITLE_TOP and starting as far down as the title needs (never below TITLE_BOTTOM_MIN)."""
+        import math
+        from PySide6.QtGui import QFontMetricsF
+        from ..theme import BODY_COMPACT_01, font
+        fm = QFontMetricsF(font(BODY_COMPACT_01), self)       # the strip's own device, as the painter uses
+        line = math.ceil(fm.height())
+        avail = max(0, self.height() - self.TITLE_TOP - self.TITLE_BOTTOM_MIN)
+        length = min(math.ceil(fm.horizontalAdvance(self.title)) + 1, avail)
+        return QRectF(round((STRIP - line) / 2), self.TITLE_TOP, line, length)
 
 
 class UpperPanels(QWidget):
@@ -87,6 +109,7 @@ class UpperPanels(QWidget):
         self.stacked_height = stacked_height or row_height
         self.gap = gap
         self.stacked = False
+        self.fitted_height: int | None = None     # set_fitted_height: the row's height while it is fitted
         self.collapsed: set[int] = set()
         self.strips: list[CollapsedStrip] = []
         titles = titles or [""] * len(panels)
@@ -125,6 +148,21 @@ class UpperPanels(QWidget):
 
     def is_collapsed(self, i: int) -> bool:
         return i in self.collapsed
+
+    def set_fitted_height(self, h: int | None) -> None:
+        """Give the (unstacked) row ``h`` px instead of ``row_height`` - the main window fits it to the Analysis
+        content while Elements and Composition setup are both collapsed - or None for the design height.  Every
+        panel and strip of the row takes the row's height; the stacked layout is not affected."""
+        h = None if h is None else max(int(h), self.row_height)
+        if h == self.row_height:
+            h = None
+        if h == self.fitted_height:
+            return
+        self.fitted_height = h
+        self.relayout(force=True)
+
+    def current_row_height(self) -> int:
+        return self.row_height if self.stacked or self.fitted_height is None else self.fitted_height
 
     def _spec(self, i: int) -> tuple[int, int, int | None]:
         _w, ref, mn, mx = self.panels[i]
@@ -177,11 +215,12 @@ class UpperPanels(QWidget):
             if stacked:
                 h = self.row_height + self.gap + (STRIP if analysis_bar else self.stacked_height)
             else:
-                h = self.row_height
-            self.setFixedHeight(h)
+                h = self.current_row_height()
+            if h != self.maximumHeight():
+                self.setFixedHeight(h)
         self.strips[last].set_horizontal(self.stacked and analysis_bar)
         self._sync_directions()
-        h = self.row_height
+        h = self.current_row_height()
         if self.stacked:
             x = 0
             gaps = self.row_gaps(range(last)) + [0]
