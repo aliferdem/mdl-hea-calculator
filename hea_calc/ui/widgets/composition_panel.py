@@ -59,7 +59,7 @@ HEAVY_THRESHOLD = 5_000      # combinations above which a pre-flight runs in a w
 MODE_TITLES = {"single": "Single composition", "sweep": "Composition space", "expression": "Expression"}
 RANGE_BASES = (("ratio", "At. ratio"), ("at", "at.%"), ("wt", "wt.%"), ("mass", "Mass"))
 BASIS_LABELS = dict(RANGE_BASES)
-SWEEP_COPY_LIMIT = 100_000   # Copy table of a composition space puts every generated row on the clipboard
+SWEEP_COPY_LIMIT = 100_000   # Copy compositions of a composition space puts every generated row on the clipboard
 # defaults of a new row / after a basis change: (min, max, step)
 def parse_points(text: str) -> int | None:
     """A Points value: a whole number (``11``, ``11.0`` is not accepted - it would hide a typed step)."""
@@ -1656,6 +1656,20 @@ class SweepView(QWidget, RowEditing):
         self.rows[new] = row
         self.set_elements(order)
 
+    BASIS_UNITS = {"ratio": "at. ratio", "at": "at.%", "wt": "wt.%", "mass": "g"}
+
+    def table_tsv(self) -> str:
+        """The range table as shown - Element, Min, Max, Step or Points, Lock - as Excel-pastable text
+        (Calculate menu: Copy table, as in Single composition).  Values are the fields' text, unchanged."""
+        unit = f" ({self.BASIS_UNITS[self.unit]})"
+        points = self.mode == "points"
+        head = ["Element", "Min" + unit, "Max" + unit, "Points" if points else "Step" + unit, "Lock"]
+        lines = ["\t".join(head)]
+        for el, r in self.rows.items():
+            lines.append("\t".join([el, r.min.text().strip(), r.max.text().strip(), r.step.text().strip(),
+                                    "On" if r.lock.isChecked() else "Off"]))
+        return "\r\n".join(lines) + "\r\n"
+
     def snapshot(self) -> dict:
         """Ranges, locks and system sizes per element (Undo of Clear composition space)."""
         return {"rows": {el: (r.min.text(), r.max.text(), r.step.text(), r.lock.isChecked())
@@ -2332,7 +2346,11 @@ class CompositionPanel(Panel):
                                           ("Copy table", self._copy_single, has, "copy")])
             self.clear_btn.setEnabled(has or self._calculating)
         elif m == "sweep":
-            self.footer.calc.set_actions([("Copy table", self._copy_sweep, self._sweep_copyable(), "copy")])
+            # Copy table: the range table, as in Single composition; Copy compositions: every generated composition
+            self.footer.calc.set_actions([("Copy table", self._copy_sweep_table, bool(self.sweep.rows), "copy"),
+                                          ("-", None, False, None),
+                                          ("Copy compositions", self._copy_sweep, self._sweep_copyable(), "copy",
+                                           self._sweep_copy_limit_note())])
             self.clear_btn.setEnabled(bool(self._elements) or self._calculating)
         else:
             has = bool(self.expr.text().strip())
@@ -2398,9 +2416,19 @@ class CompositionPanel(Panel):
         n = self.sweep.valid_count()
         return n is not None and 0 < n <= SWEEP_COPY_LIMIT
 
+    def _copy_sweep_table(self):
+        self.copy_text.emit(self.sweep.table_tsv(), "range table")
+
+    def _sweep_copy_limit_note(self) -> str:
+        """Why Copy table is unavailable when the space is valid but larger than the clipboard limit."""
+        if not self.sweep.can_calculate():
+            return ""
+        n = self.sweep.valid_count()
+        return f"over {SWEEP_COPY_LIMIT:,}" if n is not None and n > SWEEP_COPY_LIMIT else ""
+
     def _copy_sweep(self):
-        """Composition space > Copy table: every generated composition (at most SWEEP_COPY_LIMIT) as TSV, generated
-        off the GUI thread like Expression's."""
+        """Composition space > Copy compositions: every generated composition (at most SWEEP_COPY_LIMIT) as TSV,
+        generated off the GUI thread like Expression's."""
         try:
             recipe = self.sweep.recipe()
         except (ValueError, RangeError, ExpressionError) as exc:

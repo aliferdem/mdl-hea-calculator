@@ -117,7 +117,7 @@ class SplitButton(QWidget):
         self.chevron.clicked.connect(self.open_menu)
         self.chevron.installEventFilter(self)
         lay.addWidget(self.chevron)
-        self.menu_items: list[tuple] = []          # (text, slot, enabled, icon)
+        self.menu_items: list[tuple] = []          # (text, slot, enabled, icon[, why unavailable])
         self._open = False
 
     def set_split(self, on: bool) -> None:
@@ -125,16 +125,20 @@ class SplitButton(QWidget):
         self.setFixedWidth(CALC_WIDTH + ((CHEVRON_WIDTH + 1) if on else 0))
 
     def set_actions(self, items: list[tuple]) -> None:
+        """The chevron's menu.  An item may carry a fifth field: why it is unavailable.  The chevron opens whenever
+        an item can be used or explains itself, so a disabled action never hides its reason behind a disabled
+        chevron (Composition space: Copy table over its row limit)."""
         self.menu_items = list(items)
-        self.chevron.setEnabled(any(i[2] for i in items))
+        self.chevron.setEnabled(any(i[2] or (len(i) > 4 and i[4]) for i in items if i[0] != "-"))
 
     def open_menu(self) -> None:
         menu = CarbonMenu(parent=self)
-        for text, slot, enabled, icon in self.menu_items:
+        for text, slot, enabled, icon, *why in self.menu_items:
             if text == "-":
                 menu.addSeparator()
                 continue
-            menu.add_action(text, slot, enabled=enabled, icon=icon)
+            label = f"{text} ({why[0]})" if why and why[0] and not enabled else text
+            menu.add_action(label, slot, enabled=enabled, icon=icon)
         menu.trigger_width = self.width()
         self._open = True
         self.chevron.update()

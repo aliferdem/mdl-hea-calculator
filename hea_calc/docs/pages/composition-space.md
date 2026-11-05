@@ -18,6 +18,8 @@ Explore a region of composition space systematically. Select the elements, give 
 | **All:** row | A value typed in its Min, Max or Step sets every element; its Lock switches every element. "Mixed" means the rows differ. |
 | **System size** | Keeps only systems with the chosen numbers of elements; **All** keeps every size. When every element is locked, every system contains all N elements, so System size shows N and cannot be changed; unlocking or removing an element makes it selectable again. See [System Size and Element Constraints](help://system-size). |
 | **Workload summary** | The exact number of valid compositions with the estimated runtime and temporary storage. |
+| Calculate menu › **Copy table** | Copies the range table (Element, Min, Max, Step or Points, Lock) as tab-separated text for a spreadsheet. |
+| Calculate menu › **Copy compositions** | Copies every generated composition as tab-separated text, up to 100,000 compositions. For a larger space the menu shows the limit. |
 
 ### Range bases and defaults
 
