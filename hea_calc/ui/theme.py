@@ -125,7 +125,7 @@ DARK = {
     "button-danger-primary": "#da1e28", "button-danger-secondary": "#ff8389", "button-danger-hover": "#b81922", "button-danger-active": "#750e13",
     "button-disabled": "#697077", "button-disabled-bg": "#697077", "text-on-color-disabled": "#a2a9b0",
     "focus": "#ffffff", "focus-inset": "#121619",
-    "background-inverse": "#f2f4f8", "highlight": "#002d9c",
+    "background-inverse": "#f2f4f8", "highlight": "#002d9c", "text-selection": "#002d9c", "text-selection-text": "#f2f4f8",
     "support-error": "#fa4d56", "support-success": "#42be65", "support-warning": "#f1c21b",
     "support-info": "#4589ff",
     "status-green": "#24a148", "status-yellow": "#f1c21b", "status-red": "#fa4d56", "status-gray": "#878d96",
@@ -179,7 +179,7 @@ LIGHT = {
     "button-danger-primary": "#da1e28", "button-danger-secondary": "#da1e28", "button-danger-hover": "#b81922", "button-danger-active": "#750e13",
     "button-disabled": "#a2a9b0", "button-disabled-bg": "#c1c7cd", "text-on-color-disabled": "#878d96",
     "focus": "#0f62fe", "focus-inset": "#ffffff",
-    "background-inverse": "#343a3f", "highlight": "#d0e2ff",
+    "background-inverse": "#343a3f", "highlight": "#d0e2ff", "text-selection": "#d0e2ff", "text-selection-text": "#121619",
     "support-error": "#da1e28", "support-success": "#24a148", "support-warning": "#f1c21b",
     "support-info": "#0043ce",
     "status-green": "#24a148", "status-yellow": "#f1c21b", "status-red": "#da1e28", "status-gray": "#878d96",
@@ -446,11 +446,15 @@ QPushButton[tall="64"]:focus {{ border: 2px solid {k['focus']}; padding: 0px 14p
 /* initial focus given by the program, not the keyboard: no ring yet (dialogs.quiet_focus) */
 QPushButton[tall="64"][quietfocus="true"]:focus {{ border: none; padding: 0px 16px 24px 16px; }}
 
+/* ---------------- selected text: one Carbon `highlight`-based pair for every text widget (labels, the
+   Documentation and About text, editors and fields), focused or not - never the system accent colour */
+QLabel, QTextBrowser, QTextEdit, QPlainTextEdit, QLineEdit {{
+    selection-background-color: {k['text-selection']}; selection-color: {k['text-selection-text']}; }}
+
 /* ---------------- text inputs (Carbon text input, sm) */
 QLineEdit {{ background: {k['field-02']}; color: {k['text-primary']}; border: none;
              border-bottom: 1px solid {k['border-strong-02']}; padding: 0px 16px;
-             min-height: {FIELD_CONTENT_HEIGHT}px; max-height: {FIELD_CONTENT_HEIGHT}px;
-             selection-background-color: {k['border-interactive']}; selection-color: {k['text-on-color']}; }}
+             min-height: {FIELD_CONTENT_HEIGHT}px; max-height: {FIELD_CONTENT_HEIGHT}px; }}
 QLineEdit:hover {{ background: {k['field-hover-02']}; }}
 /* All four sides are declared explicitly.  A bare `border: 2px solid ...` leaves the bottom at
    1 px, because the base rule's `border-bottom` longhand outranks it - measured in the light theme,

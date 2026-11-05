@@ -252,8 +252,8 @@ class CodeEditor(QTextEdit):
         pal.setColor(pal.ColorRole.Base, QColor(0, 0, 0, 0))
         pal.setColor(pal.ColorRole.Text, QColor(t("syntax-text")))
         pal.setColor(pal.ColorRole.PlaceholderText, QColor(t("text-placeholder")))
-        pal.setColor(pal.ColorRole.Highlight, QColor(t("highlight")))
-        pal.setColor(pal.ColorRole.HighlightedText, QColor(t("text-primary")))
+        pal.setColor(pal.ColorRole.Highlight, QColor(t("text-selection")))
+        pal.setColor(pal.ColorRole.HighlightedText, QColor(t("text-selection-text")))
         self.setPalette(pal)
         self.viewport().setPalette(pal)
 
