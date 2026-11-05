@@ -217,7 +217,7 @@ def composition_report_html(row, info=None, created: str | None = None, batch_ma
     mrows = []
     for k in MODEL_KEYS:
         o = res.models[k]
-        status = ("Not available — " + ("undefined" if o.na_kind == "undefined" else "missing data")) \
+        status = ("Not available: " + ("undefined" if o.na_kind == "undefined" else "missing data")) \
             if o.label == NA else MD.STATUS_LABELS.get(o.status, o.status)
         mrows.append([_e(MD.title(k)), tag(o.label), _e(status), sup(MD.criterion_value_text(k, d, o.label)),
                       sup(MD.threshold_text(k, d))])
@@ -257,7 +257,7 @@ def composition_report_html(row, info=None, created: str | None = None, batch_ma
     parts.append("<h2>Definitions</h2>")
     for dd in DESCRIPTORS_LIST:
         if dd.equation:
-            parts.append(f"<p><b>{dd.name}</b> — {dd.equation}. <span class='note'>Data: {_e(dd.data)}."
+            parts.append(f"<p><b>{dd.name}</b>: {dd.equation}. <span class='note'>Data: {_e(dd.data)}."
                          f"{' ' + dd.undefined if dd.undefined else ''}</span></p>")
     parts.append("<h2 style='page-break-before: always;'>Model criteria and references</h2>")
     for k in MODEL_KEYS:

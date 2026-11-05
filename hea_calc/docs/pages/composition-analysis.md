@@ -1,6 +1,6 @@
 # Individual Composition Analysis
 
-**Analysis › Composition** shows one result — the active composition — in detail: its normalised composition, its
+**Analysis › Composition** shows one result, the active composition, in detail: its normalised composition, its
 descriptors and, for each model, the prediction with the values and thresholds behind it.
 
 ![Analysis › Composition › Overview for CoCrFeMnNi.](images/analysis-composition.png)
@@ -44,9 +44,9 @@ precision**.
 
 **Open in new window** (Options menu), the row menu's **Open details in new window**, or a double-click on a results
 row while the top panels are hidden (View › **Top panels**, Ctrl+B) opens the **Analysis window**: a separate window
-with the whole Analysis — Composition and Collection with all their tabs. It shows the same analysis as the panel:
+with the whole Analysis: Composition and Collection with all their tabs. It shows the same analysis as the panel:
 the composition, tabs, collection and plot settings are shared, so a change in one shows in the other. It has its own
-taskbar button; minimise, maximise or close it like any window — closing it does not close the calculator, and the
+taskbar button; minimise, maximise or close it like any window. Closing it does not close the calculator, and the
 next request reopens it. Exports are in its **Options** menu.
 
 ## Expanded analysis

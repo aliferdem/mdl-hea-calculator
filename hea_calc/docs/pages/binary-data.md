@@ -34,6 +34,6 @@ as **Flagged binary data**. It flags these five pairs and every pair with |ΔH<s
 
 ## Missing pairs
 
-A pair outside a dataset makes only the dependent quantities N/A, with the pair named in the reason — for example
+A pair outside a dataset makes only the dependent quantities N/A, with the pair named in the reason, for example
 "No Troparevsky formation enthalpy for Co–Si, Cr–Si, Fe–Si, Ni–Si." for M6 and M7 of CoCrFeNiSi0.5. A missing value is
 never replaced by zero.

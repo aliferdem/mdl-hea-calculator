@@ -1,6 +1,6 @@
 # Desktop Layout
 
-The main window has a title bar, three panels — Elements, Composition setup and Analysis — and the results
+The main window has a title bar, three panels (Elements, Composition setup and Analysis) and the results
 table below them. The whole window scrolls as one page; the results table never scrolls by itself, and its column
 headings stay visible at the top while you scroll through it.
 

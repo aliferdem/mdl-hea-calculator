@@ -54,8 +54,8 @@ Reports of a combined collection name every contributing run.
 
 ## Selecting results in a plot
 
-Select points with the selection tools of a plot. The selection bar then offers **Show in results table** — the
-table shows exactly the selected results, as a filter you can clear — and **Clear**. Double-click a point to analyse
+Select points with the selection tools of a plot. The selection bar then offers **Show in results table** (the
+table shows exactly the selected results, as a filter you can clear) and **Clear**. Double-click a point to analyse
 that composition.
 
 ## Element families
@@ -68,8 +68,8 @@ produce the same composition, it is calculated once and belongs to the first blo
 
 For each model the **Models** tab shows how many results received each class. Percentages refer to the results for
 which the model could be evaluated; results where the model is not available are counted separately and are never
-treated as a class. Each model lists only the classes it can produce — M4 distinguishes SS, SS+IM and IM, while M1
-distinguishes SS and MP — so a class missing from a model's bar is not a zero count. Extrapolated verdicts and
+treated as a class. Each model lists only the classes it can produce (M4 distinguishes SS, SS+IM and IM, while M1
+distinguishes SS and MP), so a class missing from a model's bar is not a zero count. Extrapolated verdicts and
 verdicts that depend on flagged data are counted separately within each class.
 
 ## Options menu

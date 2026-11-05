@@ -23,7 +23,7 @@ Miedema molar volumes.
 
 ## Two radius sets
 
-Guo & Liu radii and Kittel CN12 radii give different size mismatches for the same alloy — for CoCrFeMnNi, δ = 3.27 %
+Guo & Liu radii and Kittel CN12 radii give different size mismatches for the same alloy: for CoCrFeMnNi, δ = 3.27 %
 and δ<sub>CN12</sub> = 0.92 %. Each is used only with the models whose authors used it, and both are reported. For
 M3 the publication does not name its radius set; the calculator uses the Guo & Liu radii of the same research group,
 which reproduce the paper's printed γ values where the alloy compositions can be reconstructed (Kittel CN12 radii do

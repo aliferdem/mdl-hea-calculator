@@ -1,6 +1,6 @@
 # Composition Expressions
 
-Calculate compositions written as formulas — fixed alloys such as Al0.5CoCrFeNi, or families with a variable amount
+Calculate compositions written as formulas: fixed alloys such as Al0.5CoCrFeNi, or families with a variable amount
 such as AlxCoCrFeNi. Everything is written in one text area: the formula, and below it one line per variable that
 says which values the variable takes. Select **Parse** to check what you wrote; **Calculate** then calculates one
 composition per combination of variable values.
@@ -42,7 +42,7 @@ field label gives a short summary.
 
 ## Ranges: step or points
 
-Each range line names one variable between its two bounds, then **either** a step **or** a number of points — never
+Each range line names one variable between its two bounds, then **either** a step **or** a number of points, never
 both:
 
 | Range line | Values |
@@ -56,7 +56,7 @@ needs its own range line in the same block; a range belongs to its block only.
 
 ## Parse, then calculate
 
-Parsing is explicit — the field does not check as you type. Select **Parse** (the icon in the field, or
+Parsing is explicit: the field does not check as you type. Select **Parse** (the icon in the field, or
 **Ctrl+Enter**):
 
 | State | What you see |

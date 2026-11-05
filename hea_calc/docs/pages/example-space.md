@@ -16,13 +16,13 @@ to Al0.5CoCrFeNi. The footer reads **Ready**. Select **Calculate**.
 In **Analysis › Collection › Plots**, choose a **Line** plot of ΔH<sub>mix</sub> along the Al amount to see the mixing
 enthalpy fall as Al is added, or a **Stacked bars** plot to compare the model classes across the run.
 
-The same space with **Range basis › Mass** — Co, Cr, Fe and Ni at 1.0 g, Al optional from 0.1 to 0.5 g — also
+The same space with **Range basis › Mass** (Co, Cr, Fe and Ni at 1.0 g, Al optional from 0.1 to 0.5 g) also
 contains 6 compositions, but they are different alloys: equal masses, not equal numbers of atoms.
 
 ## Two optional elements
 
 Add Mn and switch its Lock off; set Al from 0.05 to 1.5 in steps of 0.05 and Mn from 0.1 to 1.0 in steps of 0.1. The
-space now has four element systems — CoCrFeNi, +Al, +Mn and +Al+Mn — and **341 valid compositions**
+space now has four element systems (CoCrFeNi, +Al, +Mn and +Al+Mn) and **341 valid compositions**
 (1 + 30 + 10 + 300).
 
 ## Varying four elements of CoCrFeMnNi

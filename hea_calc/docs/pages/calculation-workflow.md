@@ -27,8 +27,8 @@ While a batch runs, **Calculate** is unavailable, the footer reads **Calculating
 
 ## Runs
 
-Every calculation adds a numbered run (Run 1, Run 2 …). The run records how its compositions were defined — mode,
-ranges or expressions — and the calculation settings. Analysis uses runs to keep collections consistent: a
+Every calculation adds a numbered run (Run 1, Run 2 …). The run records how its compositions were defined (mode,
+ranges or expressions) and the calculation settings. Analysis uses runs to keep collections consistent: a
 collection always belongs to one run. See [Collection Analysis](help://collection-analysis).
 
 ## Responsiveness
@@ -38,5 +38,5 @@ very large result sets also run in the background, and the table says so while t
 
 ## Errors
 
-If a batch cannot start — for example because its results would not fit on the disk — or fails, an error message
+If a batch cannot start (for example because its results would not fit on the disk) or fails, an error message
 appears above the results table and stays until you close it. Results calculated before a failure are kept.

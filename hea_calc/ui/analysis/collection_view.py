@@ -1556,7 +1556,7 @@ class CollectionContent(QWidget):
         wide = self.size_class == "L"
         if st.stats_all and not wide:
             note = QHBoxLayout()
-            note.addWidget(label("All measures need a wider view — Expand analysis", "secondary"))
+            note.addWidget(label("All measures need a wider view.", "secondary"))
             b = button("Expand analysis", "ghost", "sm")
             b.clicked.connect(lambda: self.c.expand_requested.emit(True))
             note.addWidget(b)
@@ -1633,7 +1633,7 @@ class CollectionContent(QWidget):
                 rail.add(label(GROUP_SHORT.get(dd.group, dd.group), "label"))
                 last = dd.group
             # symbol and unit in the 320 px rail; the full scientific name (e.g. which radius set) in the Tooltip
-            cb = QCheckBox(f"{dd.plain} ({dd.unit_plain})")
+            cb = QCheckBox(f"{dd.plain} ({dd.unit_text})")
             cb.setToolTip(plain_text(dd.name))
             cb.setAccessibleName(plain_text(f"{dd.plain} — {dd.name}"))
             cb.setChecked(dd.key in st.stats_metrics)

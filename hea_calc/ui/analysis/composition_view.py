@@ -63,7 +63,7 @@ def status_tip(key: str, o) -> str:
     if o is None:
         return ""
     if o.label == NA:
-        kind = "Not available — undefined" if o.na_kind == "undefined" else "Not available — missing data"
+        kind = "Not available: undefined" if o.na_kind == "undefined" else "Not available: missing data"
         return f"<b>{kind}.</b> {_html.escape(o.reason or '')} Missing data are not replaced by zero."
     return _html.escape(o.caution or "")
 
@@ -494,7 +494,7 @@ class CompositionContent(CurrentStack):
             for k in na:
                 reasons.setdefault(res.models[k].reason or "", []).append(k)
             for reason, keys in reasons.items():
-                out.append(("information", "icon-secondary", f"{', '.join(keys)} not available — {_html.escape(reason)}"))
+                out.append(("information", "icon-secondary", f"{', '.join(keys)} not available: {_html.escape(reason)}"))
         flagged = [k for k in MODEL_KEYS if res.models[k].status == STATUS_DATA_SUSPECT and res.models[k].label != NA]
         if flagged:
             out.append(("warning_filled", "support-warning",

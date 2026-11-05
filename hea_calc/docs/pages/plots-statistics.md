@@ -1,7 +1,7 @@
 # Plots and Statistical Analysis
 
 The Plots and Statistics tabs of a collection describe how descriptors and predictions vary across a calculation
-run. Values that are not available are excluded and counted — never drawn or averaged as zero.
+run. Values that are not available are excluded and counted, never drawn or averaged as zero.
 
 ## Plot types
 
@@ -31,7 +31,7 @@ on the plot. **Representation** chooses **Automatic**, **All points**, **Sample*
 Choose the descriptors with **Metrics**. The default set is ΔH<sub>mix</sub>, ΔS<sub>mix</sub>, Ω, δ,
 δ<sub>CN12</sub>, VEC and Φ; no descriptor is given special weight. For each descriptor the table reports the
 number of results with a value (**N**; hover it for the number missing), the **Median**, the quartiles **Q1 – Q3**
-and the range **Min – Max**. **All measures** — and the expanded view — show every measure:
+and the range **Min – Max**. **All measures** and the expanded view show every measure:
 
 | Column | Meaning |
 |---|---|

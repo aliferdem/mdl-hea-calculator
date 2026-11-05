@@ -29,8 +29,8 @@ compositions** (1 + 30 + 10 + 300).
   number of values of each variable); a block without variables produces one. The total is the sum over all blocks
   and may not exceed 5,000,000.
 * **Valid compositions.** A combination is skipped when an amount becomes negative, a bracketed group sums to zero,
-  or fewer than two elements remain. A composition that has already been generated — in the same or an earlier block
-  — is counted once, in the block that produced it first.
+  or fewer than two elements remain. A composition that has already been generated (in the same or an earlier block)
+  is counted once, in the block that produced it first.
 * **Groups.** A bracketed group is normalised before its amount is applied: (FeCoNi)90Al10 is 30 / 30 / 30 / 10 at.%.
 
 *Examples.* AlxCoCrFeNi with x from 0 to 2 in steps of 0.05: 41 combinations, **41 valid compositions**. Blocks
@@ -39,6 +39,6 @@ compositions** and 2 duplicates (y = 0 and y = 0.2 repeat x = 0 and x = 1 of the
 
 ## Design coordinates
 
-Every result of a batch keeps the values that generated it — the grid values of a composition space in its range
+Every result of a batch keeps the values that generated it: the grid values of a composition space in its range
 basis, or the variable values of an expression, and the block number. Analysis plots can use them as axes, and lines
 connect results only along such an ordered variable.

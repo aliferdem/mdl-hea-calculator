@@ -29,4 +29,4 @@ each value is calculated.
   [Collection Analysis](help://collection-analysis).
 
 > **Results are temporary.** Results are stored in a temporary database that is deleted when you close HEA
-> Calculator. Export the results you want to keep — see [Exporting Results](help://export).
+> Calculator. Export the results you want to keep. See [Exporting Results](help://export).

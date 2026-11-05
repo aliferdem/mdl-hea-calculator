@@ -31,7 +31,7 @@ converted (wt.% to at.% through the molar masses) and the balance takes the rema
 
 If the other elements add up to more than 100, the balance would be negative. The footer then reports
 **Composition exceeds 100%**, the balance field shows the negative remainder with a red frame, and Calculate is
-unavailable until you reduce the other values — nothing is rescaled or cut off for you. If you remove the balance
+unavailable until you reduce the other values. Nothing is rescaled or cut off for you. If you remove the balance
 element, the next element in the table becomes the balance; **Clear** removes the balance with the elements.
 
 ## Adding and removing elements
@@ -41,7 +41,7 @@ Besides clicking tiles in **Elements**, you can type elements in the table:
 * Select **Add element** (the + button at the left of the panel footer). A blank row appears under the last row,
   **El.** is selected as the input column, and the cursor is in the new symbol field.
 * Type a symbol (any case, for example *fe*) and press **Enter**. The element is added exactly as if you had clicked
-  its tile — the tile is selected — and a new blank row is ready for the next symbol. An unknown symbol, or one
+  its tile (the tile is selected), and a new blank row is ready for the next symbol. An unknown symbol, or one
   already in the table, is reported in the footer and is not added.
 * Press **Esc**, or click elsewhere while the blank row is empty, to close it. A blank row is never part of a
   calculation.
@@ -69,7 +69,7 @@ The footer names the first problem, and the affected field has a red frame:
 * the total mass must be greater than zero.
 
 If the selected elements leave a model without data, the footer warns **Partial model coverage**; you can still
-calculate — see [Model Support and Availability](help://model-availability).
+calculate. See [Model Support and Availability](help://model-availability).
 
 ## Result
 

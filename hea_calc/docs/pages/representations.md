@@ -21,7 +21,7 @@ each other element.
 * at.% and wt.% are converted through the atomic weights: x<sub>i</sub> = (w<sub>i</sub>/M<sub>i</sub>) /
   Σ(w<sub>j</sub>/M<sub>j</sub>).
 * Mass values are treated like weight percent: only their proportions matter for the composition.
-* Converted values are rounded for display — four decimals, five for Mass. Decimal commas are accepted (0,5 = 0.5).
+* Converted values are rounded for display: four decimals, five for Mass. Decimal commas are accepted (0,5 = 0.5).
 
 ## Total mass
 
@@ -30,8 +30,8 @@ must be greater than zero; the default is 2 g. The value you enter is remembered
 two places:
 
 * the **Mass** column of Single composition;
-* the **Mass** column of the composition table in **Analysis › Overview**, headed with the batch size — for
-  example **Mass (2 g batch)** — for every result, whether it came from a single composition, a composition space,
+* the **Mass** column of the composition table in **Analysis › Overview**, headed with the batch size (for
+  example **Mass (2 g batch)**) for every result, whether it came from a single composition, a composition space,
   an expression or an import.
 
 Changing the total mass never changes a descriptor or a prediction; it only rescales the masses.

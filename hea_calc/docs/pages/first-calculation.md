@@ -19,8 +19,8 @@ In **Elements**, click **Co**, **Cr**, **Fe**, **Mn** and **Ni**, in this order.
 marked, and Composition setup adds one row per element in the order you clicked. Every **At. ratio** value reads
 **1.0000**, so the composition is already equiatomic.
 
-> **Common mistake.** Clicking a selected tile again deselects it and removes its row. The rows — and the alloy
-> name — follow the order of selection: clicking Ni first would name the alloy NiCoCrFeMn.
+> **Common mistake.** Clicking a selected tile again deselects it and removes its row. The rows and the alloy
+> name follow the order of selection: clicking Ni first would name the alloy NiCoCrFeMn.
 
 ## Step 3 — Check model support (optional)
 
@@ -46,7 +46,7 @@ are converted immediately.
 | Mn | 1.0000 | 20.0000 | 19.5919 | 0.39184 |
 | Ni | 1.0000 | 20.0000 | 20.9335 | 0.41867 |
 
-**Mass** is in grams for the **Total mass** in the **Total:** row — 2 g unless you have changed it. The total mass
+**Mass** is in grams for the **Total mass** in the **Total:** row: 2 g unless you have changed it. The total mass
 you enter is remembered for later sessions.
 
 ## Step 5 — Set equal amounts
@@ -64,7 +64,7 @@ and wt.%, and the total mass divided by the number of elements in Mass.
 Select **at.%** under Input column. Co, the first element, is the *balance*: its field is greyed out and always
 holds 100 minus the other elements. Change the Ni value to 25: Co becomes 15.0000 at once, and the column still sums
 to 100 %. Now change Ni to 50: the others add up to 110, Co would be −10, so the footer reports **Composition
-exceeds 100%** and Calculate is unavailable until you lower a value — nothing is rescaled for you. Select **Set
+exceeds 100%** and Calculate is unavailable until you lower a value. Nothing is rescaled for you. Select **Set
 equal** to return to 20.0000 each, then select **At. ratio** again.
 
 ## Step 7 — Calculate
@@ -85,7 +85,7 @@ Find the new row in the results table. Hover a column heading to see the quantit
 
 Units: ρ in g cm⁻³, T<sub>m</sub> in K, ΔH<sub>mix</sub> in kJ mol⁻¹, ΔS<sub>mix</sub> in J mol⁻¹ K⁻¹, δ in %.
 **SS** in every model column means that each of the eight models predicts a single solid solution. Such agreement is
-not typical; for many compositions the models differ — see [Prediction Result Labels](help://result-labels).
+not typical; for many compositions the models differ. See [Prediction Result Labels](help://result-labels).
 
 The table rounds values for display. Full-precision values are in **Analysis › Descriptors** (**Full precision**)
 and in exported files.

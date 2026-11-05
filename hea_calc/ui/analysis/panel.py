@@ -326,7 +326,7 @@ class AnalysisPanel(QFrame):
         has = self._has_results
         self.expand_btn.setEnabled(has)
         self.expand_btn.setToolTip("Expand analysis (Ctrl+Shift+E)" if has else
-                                   "Expand analysis — available after a calculation")
+                                   "Expand analysis (available after a calculation)")
         self.overflow_btn.setEnabled(has)
         comp_ok = self.row is not None
         for b in self.comp_tabs.buttons:

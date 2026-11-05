@@ -30,7 +30,7 @@ STATUS_LABELS = {STATUS_IN_DOMAIN: "In domain", STATUS_EXTRAPOLATED: "Extrapolat
 STATUS_SHORT = {STATUS_IN_DOMAIN: "Within the published domain",
                 STATUS_EXTRAPOLATED: "Extrapolated beyond the published domain",
                 STATUS_DATA_SUSPECT: "Verdict uses flagged binary data"}
-NA_LABELS = {NA_MISSING_DATA: "Not available — missing data", NA_UNDEFINED: "Not available — undefined",
+NA_LABELS = {NA_MISSING_DATA: "Not available: missing data", NA_UNDEFINED: "Not available: undefined",
              NA_ERROR: "Not evaluable"}
 CLASS_NAMES = {"SS": "solid solution", "MP": "multiple phases", "IM": "intermetallic",
                "SS+IM": "solid solution + intermetallic", "MG": "metallic glass (amorphous)", NA: "not available"}
@@ -90,7 +90,7 @@ HELP: dict[str, ModelHelp] = {
     "M6": ModelHelp(
         "A composition forms a single solid solution if no binary compound is so stable that it precipitates and "
         "no pair is so unfavourable that it separates.",
-        "Troparevsky et al. (2015), Supplemental Material, Appendix A — DFT formation enthalpies of the lowest-energy "
+        "Troparevsky et al. (2015), Supplemental Material, Appendix A: DFT formation enthalpies of the lowest-energy "
         "binary compounds, 30 elements.",
         "Any element is outside the 30-element set.",
         "Binary compounds only. Temperature 0.55·T<sub>m</sub> is used when no annealing temperature is set.",

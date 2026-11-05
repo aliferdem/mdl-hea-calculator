@@ -356,7 +356,7 @@ class ElementInfo(QWidget):
          ("r", "atomic_radius", "{:.1f} pm", 1.0,
           "Atomic radius (pm), given to 0.1 pm; the radius set used by M2–M5 (δ, γ, Λ, S_E)"),
          ("r<sub>CN12</sub>", "atomic_radius_cn12", "{:.0f} pm", 1.0,
-          "Metallic radius for coordination number 12 (pm) — a different radius set; used for δ by M1 "
+          "Metallic radius for coordination number 12 (pm). A different radius set, used for δ by M1 "
           "(M8 uses no radius)")],
         [("VEC", "nvalence", "{:g}", 1.0, "Valence electron count (s + d electrons)"),
          ("φ*", "work_function_phi", "{:.2f} V", 1.0, "Miedema electronegativity parameter φ* (V)"),

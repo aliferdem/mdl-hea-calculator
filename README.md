@@ -89,7 +89,7 @@ are retained from the corresponding publications.
 | **M3** | [^3] | SS if $\gamma \lt 1.175$ | SS, MP |
 | **M4** | [^4] | SS if $\Lambda \gt 0.96$; SS+IM if $0.24 \le \Lambda \le 0.96$; IM if $\Lambda \lt 0.24$ | SS, SS+IM, IM |
 | **M5** | [^5] | SS if $\phi \ge 20$ | SS, MP |
-| **M6** | [^6] | SS if $-T\Delta S_{\mathrm{mix}} \lt \Delta H_{\mathrm{f}}(i,j) \lt 37$ meV/atom for every pair | SS, IM, MP |
+| **M6** | [^6] | SS if $-T\Delta S_{\mathrm{mix}} \lt \Delta H_{\mathrm{f}}(i,j) \lt 37$ meV atom⁻¹ for every pair | SS, IM, MP |
 | **M7** | [^7] | SS if $\Delta H_{\mathrm{mix}} - T\Delta S_{\mathrm{mix}} \lt \Delta H_{\mathrm{IM}} - k_2 T\Delta S_{\mathrm{mix}}$, $k_2 = 0.6$ | SS, IM |
 | **M8** | [^8] | SS if $\Phi \ge 1$, with $\Phi$ from Miedema-model $\Delta G_{\mathrm{ss}}$ and $\Delta G_{\max}$ | SS, MP |
 

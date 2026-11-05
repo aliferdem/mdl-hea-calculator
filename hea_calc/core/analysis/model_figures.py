@@ -112,7 +112,7 @@ def _m1() -> Figure:
 
 def _m2() -> Figure:
     pts = _points("M2")
-    return Figure("M2", "scatter", "ΔHmix against δ", "δ (%)", "ΔHmix (kJ/mol)", "publication",
+    return Figure("M2", "scatter", "ΔHmix against δ", "δ (%)", "ΔHmix (kJ mol⁻¹)", "publication",
                   _pub_caption("M2", len(pts), "δ, ΔHmix"), REFS["M2"], pts,
                   [Line("v", 6.6, "δ = 6.6 %"), Line("h", -11.6, "−11.6"), Line("h", -12.2, "−12.2"),
                    Line("h", 3.2, "3.2"), Line("v", 6.4, "δ = 6.4 %")],
@@ -129,7 +129,7 @@ def _m3() -> Figure:
 
 def _m4() -> Figure:
     pts = _points("M4")
-    return Figure("M4", "scatter", "Λ against δ", "δ (%)", "Λ (J/(mol K))", "publication",
+    return Figure("M4", "scatter", "Λ against δ", "δ (%)", "Λ (J mol⁻¹ K⁻¹)", "publication",
                   _pub_caption("M4", len(pts), "δ, Λ"), REFS["M4"], pts,
                   [Line("h", 0.96, "Λ = 0.96"), Line("h", 0.24, "Λ = 0.24")],
                   [Region("SS", None, None, 0.96, None), Region("SS+IM", None, None, 0.24, 0.96),
@@ -147,14 +147,14 @@ def _m5() -> Figure:
 
 def _m6() -> Figure:
     ts = [300.0 + 25.0 * i for i in range(69)]               # 300 ... 2000 K
-    lines = [Line("h", TROPAREVSKY_UPPER_MEV, f"{TROPAREVSKY_UPPER_MEV:g} meV/atom")]
+    lines = [Line("h", TROPAREVSKY_UPPER_MEV, f"{TROPAREVSKY_UPPER_MEV:g} meV atom⁻¹")]
     for n in (3, 4, 5, 6):
         lines.append(Line("curve", label=f"−TΔSmix, {n} elements", xs=ts,
                           ys=[-K_B_MEV * t * math.log(n) for t in ts]))
-    return Figure("M6", "curves", "The formation-enthalpy window", "T (K)", "ΔHf (meV/atom)", "illustrative",
+    return Figure("M6", "curves", "The formation-enthalpy window", "T (K)", "ΔHf (meV atom⁻¹)", "illustrative",
                   "Illustrative criterion chart from the model's equations: every binary ΔHf of an alloy must lie "
                   "between the lower bound −TΔSmix (ideal entropy of an equiatomic alloy, kB T ln N per atom) and "
-                  f"{TROPAREVSKY_UPPER_MEV:g} meV/atom. No published values are plotted.", REFS["M6"], [],
+                  f"{TROPAREVSKY_UPPER_MEV:g} meV atom⁻¹. No published values are plotted.", REFS["M6"], [],
                   lines, [], x_range=(300, 2000), y_range=(-320, 80))
 
 

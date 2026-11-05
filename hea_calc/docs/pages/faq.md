@@ -30,7 +30,7 @@ values in **Analysis › Models**.
 
 ## What is the difference between atomic ratio and atomic percent?
 
-An atomic ratio gives proportional numbers of atoms — Al0.5CoCrFeNi means 0.5 : 1 : 1 : 1 : 1. Atomic percent gives
+An atomic ratio gives proportional numbers of atoms: Al0.5CoCrFeNi means 0.5 : 1 : 1 : 1 : 1. Atomic percent gives
 the same proportions scaled to 100: 11.11 at.% Al and 22.22 at.% of each other element. The calculator converts
 between them automatically.
 
@@ -64,7 +64,7 @@ first, sort by a column or use **Filter results**. **Open details in new window*
 
 ## How do I export my results?
 
-Select **Export** above the results table and choose Excel or CSV — all results, or the filtered results while a
+Select **Export** above the results table and choose Excel or CSV: all results, or the filtered results while a
 filter is active. Exports include every descriptor at full precision. See [Exporting Results](help://export).
 
 ## Are my results saved when I close the calculator?

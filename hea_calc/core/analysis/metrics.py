@@ -75,16 +75,6 @@ class Descriptor:
     def plain_title(self) -> str:
         return f"{self.plain} ({self.unit or '-'})"
 
-    @property
-    def unit_plain(self) -> str:
-        """The unit without superscript minus signs (for controls that cannot render rich text)."""
-        return UNIT_PLAIN.get(self.unit, self.unit) or "–"
-
-
-# Units written with a solidus for plain-text controls (check boxes, native titles): IBM Plex lacks the
-# superscript minus glyph at small sizes.
-UNIT_PLAIN = {"kJ mol⁻¹": "kJ/mol", "J mol⁻¹ K⁻¹": "J/(mol·K)", "meV atom⁻¹": "meV/atom", "g cm⁻³": "g/cm³",
-              "g mol⁻¹": "g/mol"}
 
 
 _D = Descriptor

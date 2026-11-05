@@ -1,6 +1,6 @@
 # Exporting Results
 
-Exports contain the dataset — all results, or all filtered results — never just the visible page, in the table's
+Exports contain the dataset (all results, or all filtered results), never just the visible page, in the table's
 current sort order. Results are deleted when the calculator closes, so export what you want to keep.
 
 ## Results

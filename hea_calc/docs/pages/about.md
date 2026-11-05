@@ -18,7 +18,7 @@ For every composition the calculator reports:
 
 ## How it works
 
-Every workflow — a single composition, a composition space, composition expressions and spreadsheet import —
+Every workflow (a single composition, a composition space, composition expressions and spreadsheet import)
 produces plain compositions and passes them to the same calculation engine, so a composition gives the same result
 whichever way it was entered. Large batches are generated and calculated in background processes and stored on
 disk, so the window stays responsive while hundreds of thousands of compositions are calculated.

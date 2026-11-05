@@ -8,11 +8,11 @@ success or error indicators.
 | Tag | Meaning |
 |---|---|
 | **SS** | Solid solution |
-| **MP** | Multiple phases — not a single solid solution |
+| **MP** | Multiple phases, not a single solid solution |
 | **IM** | Intermetallic |
 | **SS+IM** | Solid solution with intermetallic |
 | **MG** | Metallic glass (amorphous) |
-| **N/A** | Not available — the model could not be evaluated |
+| **N/A** | Not available: the model could not be evaluated |
 
 ## Classes each model can produce
 

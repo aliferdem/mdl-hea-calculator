@@ -117,14 +117,14 @@ if no binary compound is so stable that it precipitates and no pair is so unfavo
 
 * **Criterion.** Φ = ΔG<sub>ss</sub>/(−|ΔG<sub>max</sub>|) ≥ 1 → SS, otherwise MP.
 * ΔG<sub>ss</sub> is the Gibbs energy of the disordered solid solution at T<sub>m</sub> from Miedema's model (chemical,
-  elastic and — for pairs of transition metals — structural terms); ΔG<sub>max</sub> is the binary ordered compound of
+  elastic and, for pairs of transition metals, structural terms); ΔG<sub>max</sub> is the binary ordered compound of
   largest magnitude, scaled to the number of disjoint pairs.
 * The δ ≤ 6.6 % screen the authors used to generate candidate alloys is not part of the criterion.
 
 ## Reading the predictions together
 
 The models use different descriptors, data and thresholds, calibrated on different sets of alloys, and can classify
-the same composition differently — AlCoCrFeNi is SS in M1 and M3, MP in M2, M5 and M8, SS+IM in M4, and IM in M6 and
+the same composition differently: AlCoCrFeNi is SS in M1 and M3, MP in M2, M5 and M8, SS+IM in M4, and IM in M6 and
 M7. Treat the tags as independent screening indicators, not as votes on one answer. See
 [Equiatomic CoCrFeMnNi](help://example-cantor) for a worked comparison.
 

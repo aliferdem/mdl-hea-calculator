@@ -432,7 +432,7 @@ class MainWindow(QMainWindow):
         if ws is not None and ws.expand_btn is not None:      # the wide docked layout's Expand analysis
             ws.expand_btn.setEnabled(has)
             ws.expand_btn.setToolTip("Expand analysis (Ctrl+Shift+E)" if has else
-                                     "Expand analysis — available after a calculation")
+                                     "Expand analysis (available after a calculation)")
 
     def reset_workspace(self) -> None:
         """View > Reset workspace: the default layout - the calculation page, the top panels shown, every upper

@@ -96,8 +96,8 @@ MODELS: dict[str, ModelInfo] = {
                          name="Ω–δ solid solution criterion",
                          note="Empirical solid-solution region; outside this region the calculator reports MP rather than assigning a unique competing phase."),
     "M2": ModelInfo("M2", "Guo et al.", "Model 2 – Guo et al. (2013)",
-                    "SS if δ ≤ 6.6 % and −11.6 ≤ ΔHmix ≤ 3.2 kJ/mol; MG (amorphous) if δ > 6.4 % and "
-                    "ΔHmix < −12.2 kJ/mol; otherwise MP.",
+                    "SS if δ ≤ 6.6 % and −11.6 ≤ ΔHmix ≤ 3.2 kJ mol⁻¹; MG (amorphous) if δ > 6.4 % and "
+                    "ΔHmix < −12.2 kJ mol⁻¹; otherwise MP.",
                          name="δ–ΔH<sub>mix</sub> empirical phase-selection map",
                          note="For as-cast alloys: solid solution inside the printed δ–ΔH<sub>mix</sub> window, amorphous phase (MG) where δ and ΔH<sub>mix</sub> are both large, multi-phase (MP) otherwise. Guo's intermetallic region is bounded only graphically, so SS and IM are not separated here."),
     "M3": ModelInfo("M3", "Wang et al.", "Model 3 – Wang et al. (2015)",
@@ -113,17 +113,17 @@ MODELS: dict[str, ModelInfo] = {
                          name="φ excess-entropy ordering criterion",
                          note="φ ≥ 20 separates a single solid solution from multi-phase; S<sub>E</sub> is the hard-sphere excess entropy averaged over the fcc and bcc packing factors."),
     "M6": ModelInfo("M6", "Troparevsky et al.", "Model 6 – Troparevsky et al. (2015)",
-                    "SS if −T·ΔSmix < ΔHf(i,j) < 37 meV/atom for every binary; IM if any ΔHf is below the "
+                    "SS if −T·ΔSmix < ΔHf(i,j) < 37 meV atom⁻¹ for every binary; IM if any ΔHf is below the "
                     "lower bound; MP if only the upper bound is exceeded.",
                          name="ΔH<sub>f</sub> binary-window criterion",
-                         note="Every binary pair in the composition must satisfy −T·ΔS<sub>mix</sub> &lt; ΔH<sub>f</sub>(i,j) &lt; 37 meV/atom; a pair below the lower bound is what drives IM."),
+                         note="Every binary pair in the composition must satisfy −T·ΔS<sub>mix</sub> &lt; ΔH<sub>f</sub>(i,j) &lt; 37 meV atom⁻¹; a pair below the lower bound is what drives IM."),
     "M7": ModelInfo("M7", "Senkov & Miracle", "Model 7 – Senkov & Miracle (2016)",
                     "SS if ΔHmix − TΔSmix < ΔH_IM − k₂TΔSmix (k₂ = 0.6), i.e. k₁ < k₁cr(T) for ΔHmix < 0; "
                     "otherwise IM.",
                          name="ΔG solid-solution versus intermetallic criterion",
                          note="Compares solid-solution and intermetallic formation free energies at the assessment temperature. Derived for ΔH<sub>mix</sub> &lt; 0; other compositions are marked as an extrapolation."),
     "M8": ModelInfo("M8", "King et al.", "Model 8 – King et al. (2016)",
-                     "SS if Φ ≥ 1, otherwise MP.  The δ ≤ 6.6 % screen is King §3.4’s candidate-generation filter, not part of the criterion; King §3.1 keeps NbTiV₂Zr — Φ > 1 with δ > 6.6 — in the success set.",
+                     "SS if Φ ≥ 1, otherwise MP.  The δ ≤ 6.6 % screen is King §3.4’s candidate-generation filter, not part of the criterion; King §3.1 keeps NbTiV₂Zr (Φ > 1, δ > 6.6) in the success set.",
                           name="Φ thermodynamic stability criterion",
                           note="Φ ≥ 1 means forming a solid solution is thermodynamically preferred to an intermetallic. The δ ≤ 6.6 % screen is King §3.4's alloy-generation filter, not part of this criterion."),
 }
@@ -793,7 +793,7 @@ class Engine:
             if d.get("formation_suspect_pairs"):
                 notes.append("Verdict driven by binary value(s) the dataset flags as outside the "
                              "published figure's range and therefore unreliable: "
-                             + ", ".join(f"{p} = {d['formation_suspect_values'][p]:g} meV/atom"
+                             + ", ".join(f"{p} = {d['formation_suspect_values'][p]:g} meV atom⁻¹"
                                          for p in d["formation_suspect_pairs"]) + ".")
                 status = STATUS_DATA_SUSPECT
             m["M6"] = ModelOutcome("M6", lab, values={"hf_min": d["hf_min"], "hf_max": d["hf_max"],
@@ -821,7 +821,7 @@ class Engine:
             if d["dhmix"] >= 0:
                 caution = ("Extrapolation: Senkov & Miracle (2016) derive this criterion for "
                            "ΔHmix < 0, but this alloy has "
-                           "ΔHmix = %+.2f kJ/mol." % d["dhmix"])
+                           "ΔHmix = %+.2f kJ mol⁻¹." % d["dhmix"])
                 status = STATUS_EXTRAPOLATED
                 if d["dhmix"] == 0:
                     caution += (" ΔHmix = 0 exactly (a tabulated zero pair), so the published "
@@ -830,7 +830,7 @@ class Engine:
             if d.get("formation_suspect_pairs"):
                 extra = ("ΔH_IM is a weighted mean of the same matrix and is driven by binary "
                          "value(s) flagged as unreliable: "
-                         + ", ".join(f"{p} = {d['formation_suspect_values'][p]:g} meV/atom"
+                         + ", ".join(f"{p} = {d['formation_suspect_values'][p]:g} meV atom⁻¹"
                                      for p in d["formation_suspect_pairs"]) + ".")
                 caution = (caution + "  " + extra) if caution else extra
                 status = STATUS_DATA_SUSPECT
@@ -918,7 +918,7 @@ class Engine:
             if not has_radius:
                 return "none", "No atomic radius in the dataset (Guo & Liu or supplementary)"
             if supp:
-                return "warn", "Atomic radius not from Guo & Liu (2011) — supplementary value"
+                return "warn", "Atomic radius not from Guo & Liu (2011): supplementary value"
             return base
 
         out["M1"] = mix_status() if not in_mix else (("ok", "ΔHmix and Kittel CN12 radius available") if cn12

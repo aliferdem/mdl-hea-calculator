@@ -3,7 +3,7 @@
 The lower part of the **Elements** panel shows the properties of the element under the pointer (or the last one you
 selected). This page defines every value shown there: its symbol, name, meaning, unit, the calculator's convention
 and the source of the number. The values are the calculator's elemental dataset (`data/periodic_table.json`),
-formatted for display only — nothing is recalculated or rounded before it is used.
+formatted for display only; nothing is recalculated or rounded before it is used.
 
 > **Note.** A dash (—) means the dataset has no value for this element. It is never treated as zero: the descriptors
 > and models that need the value become N/A for alloys containing the element. See
@@ -34,7 +34,7 @@ formatted for display only — nothing is recalculated or rounded before it is u
 | r<sub>CN12</sub> | Metallic radius, coordination number 12 | pm | The radius of the element in a 12-coordinated metal, shown to 1 pm as Kittel lists it. For the few elements with a range or a valence-dependent value the calculator uses Ce 182 pm, Eu (2+) 204 pm, Yb (2+) 194 pm and Pu 161 pm. | Kittel, *Introduction to Solid State Physics*, 8th ed., Ch. 3, Table 9 [12] | δ<sub>CN12</sub> — model M1 (M8 uses no radius) |
 
 > **Important.** r and r<sub>CN12</sub> are two different radius sets, not two precisions of one value. They give
-> different size mismatches for the same alloy — for CoCrFeMnNi δ = 3.27 % and δ<sub>CN12</sub> = 0.92 % — and each
+> different size mismatches for the same alloy (for CoCrFeMnNi δ = 3.27 % and δ<sub>CN12</sub> = 0.92 %), and each
 > is used only with the models whose authors used it. See [Elemental Property Data](help://elemental-data#two-radius-sets).
 
 ## Electronic properties

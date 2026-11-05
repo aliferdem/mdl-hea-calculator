@@ -35,5 +35,5 @@ evaluated"). N/A has two causes:
 * **undefined** — a quantity of the criterion has no value for this composition, for example Ω when
   ΔH<sub>mix</sub> is exactly zero (equiatomic CoNi).
 
-Missing data are never replaced by zero. Tabulated zeros — for example the Takeuchi & Inoue value 0 kJ mol⁻¹ for
-Fe–Mn — are real values and are used.
+Missing data are never replaced by zero. Tabulated zeros (for example the Takeuchi & Inoue value 0 kJ mol⁻¹ for
+Fe–Mn) are real values and are used.
