@@ -389,8 +389,9 @@ class ResultsModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole:
             return col.html
         if role == Qt.ItemDataRole.ToolTipRole:
-            # Carbon tooltip on header hover/focus: symbol with unit ("ΔHmix (kJ/mol)"), short meaning
-            return f"{col.header}\n{col.tooltip}" if col.tooltip else col.header
+            # Carbon tooltip on header hover/focus: what the column holds, with its unit once
+            # ("Mixing enthalpy (kJ mol⁻¹)"); the heading itself already shows the symbol
+            return col.tooltip or col.header
         return None
 
     def flags(self, index):

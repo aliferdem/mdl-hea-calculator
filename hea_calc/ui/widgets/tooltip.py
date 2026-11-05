@@ -171,6 +171,34 @@ def bubble_path(body: QRectF, radius: float, caret: float | None, side: str) -> 
     return path
 
 
+def anchor_rect(widget: QWidget) -> QRect:
+    """The part of ``widget`` a tooltip points at: its visible content, not its full layout cell.
+
+    A check box or radio button in a grid column is as wide as the column, a fixed-width label is wider than its
+    text; centring the caret on those rectangles pointed it at empty space, often over a neighbouring row.  Check
+    boxes and radio buttons use the style's click rectangle (indicator and label); single-line plain-text labels
+    the rectangle their text occupies; any other widget its own rectangle."""
+    from PySide6.QtWidgets import QCheckBox, QRadioButton, QStyle, QStyleOptionButton
+    full = widget.rect()
+    try:
+        if isinstance(widget, (QCheckBox, QRadioButton)):
+            opt = QStyleOptionButton()
+            widget.initStyleOption(opt)
+            el = QStyle.SubElement.SE_CheckBoxClickRect if isinstance(widget, QCheckBox) \
+                else QStyle.SubElement.SE_RadioButtonClickRect
+            r = widget.style().subElementRect(el, opt, widget).intersected(full)
+            return r if not r.isEmpty() else full
+        text = widget.text() if isinstance(widget, QLabel) else ""
+        if text and not widget.wordWrap() and widget.textFormat() != Qt.TextFormat.RichText and "\n" not in text \
+                and "<" not in text:
+            r = widget.style().itemTextRect(widget.fontMetrics(), widget.contentsRect(), int(widget.alignment()),
+                                            widget.isEnabled(), text).intersected(full)
+            return r if not r.isEmpty() else full
+    except RuntimeError:                      # deleted while the tip was pending
+        pass
+    return full
+
+
 class CarbonToolTip(QWidget):
     """The tooltip bubble (see module docstring for the specification)."""
 
@@ -321,7 +349,7 @@ class ToolTipController(QObject):
         return self.tip
 
     def show_tip(self, widget: QWidget, text: str, local_rect: QRect | None = None):
-        rect = local_rect or widget.rect()
+        rect = local_rect or anchor_rect(widget)
         g = widget.mapToGlobal(rect.topLeft())
         anchor = QRect(g, rect.size())
         screen = QApplication.screenAt(anchor.center()) or self.app.primaryScreen()
@@ -396,6 +424,13 @@ class ToolTipController(QObject):
                 self.hide()                     # the pointer acted: the hover tip (now possibly outdated) goes
         elif et == QEvent.Type.Hide and obj is self._source:
             self.hide()
+        elif et == QEvent.Type.Move and obj.isWindow() and self.visible() and self._source is not None:
+            try:
+                moved = obj is self._source.window()
+            except RuntimeError:
+                moved = True
+            if moved:
+                self.hide()                     # the trigger moved with its window: the caret would point elsewhere
         return False
 
     def _item_tooltip(self, obj, ev) -> bool:

@@ -14,7 +14,7 @@ from .engine import MODEL_KEYS, MODELS, NA, AlloyResult
 @dataclass(frozen=True)
 class Column:
     key: str
-    header: str            # plain-text header (clipboard / export)
+    header: str            # plain-text header (clipboard / export); " (unit)" is appended from ``unit``
     html: str              # rich header for the UI
     unit: str = ""
     kind: str = "num"      # "text" | "num" | "model"
@@ -38,12 +38,12 @@ COLUMNS: list[Column] = [
     Column("composition", "Composition (at.%)", "Composition (at.%)", kind="text", group="Composition", chooser=False),
     Column("run", "Run", "Run", kind="num", decimals=0, group="Run", stored=False),
     Column("variables", "Variables", "Variables", kind="text", group="Run", sortable=False, stored=False),
-    Column("density", "ρ (g/cm³)", "ρ", "g cm⁻³", default=True, group="Physical"),
-    Column("tm", "Tm (K)", "T<sub>m</sub>", "K", default=True, group="Thermodynamic"),
-    Column("dhmix", "ΔHmix (kJ/mol)", "ΔH<sub>mix</sub>", "kJ mol⁻¹", default=True, group="Thermodynamic"),
-    Column("dsmix", "ΔSmix (J/mol·K)", "ΔS<sub>mix</sub>", "J mol⁻¹ K⁻¹", default=True, group="Thermodynamic"),
-    Column("delta", "δ (%)", "δ", "%", default=True, group="Structural"),
-    Column("delta_cn12", "δ CN12 (%)", "δ<sub>CN12</sub>", "%", group="Structural"),
+    Column("density", "ρ", "ρ", "g cm⁻³", default=True, group="Physical"),
+    Column("tm", "Tm", "T<sub>m</sub>", "K", default=True, group="Thermodynamic"),
+    Column("dhmix", "ΔHmix", "ΔH<sub>mix</sub>", "kJ mol⁻¹", default=True, group="Thermodynamic"),
+    Column("dsmix", "ΔSmix", "ΔS<sub>mix</sub>", "J mol⁻¹ K⁻¹", default=True, group="Thermodynamic"),
+    Column("delta", "δ", "δ", "%", default=True, group="Structural"),
+    Column("delta_cn12", "δ CN12", "δ<sub>CN12</sub>", "%", group="Structural"),
     Column("vec", "VEC", "VEC", default=True, group="Structural"),
     Column("cstr", "Cryst. Str.", "Cryst. Str.", kind="text", default=True, group="Structural"),
     Column("dchi", "Δχ", "Δχ", decimals=3, group="Structural"),
@@ -51,18 +51,18 @@ COLUMNS: list[Column] = [
     Column("gamma", "γ", "γ", decimals=4, group="Structural"),
     Column("lambda", "Λ", "Λ", decimals=3, group="Structural"),
     Column("phi_ye", "φ", "φ", group="Thermodynamic"),
-    Column("s_e", "S_E (J/mol·K)", "S<sub>E</sub>", "J mol⁻¹ K⁻¹", decimals=4, group="Thermodynamic"),
-    Column("hf_min", "ΔHf min (meV/atom)", "ΔH<sub>f,min</sub>", "meV atom⁻¹", decimals=0, group="Thermodynamic"),
-    Column("hf_max", "ΔHf max (meV/atom)", "ΔH<sub>f,max</sub>", "meV atom⁻¹", decimals=0, group="Thermodynamic"),
-    Column("hf_lower", "−TΔSmix (meV/atom)", "−TΔS<sub>mix</sub>", "meV atom⁻¹", decimals=1, group="Thermodynamic"),
-    Column("t_assess", "T (K)", "T", "K", decimals=0, group="Thermodynamic"),
-    Column("dhim", "ΔH_IM (kJ/mol)", "ΔH<sub>IM</sub>", "kJ mol⁻¹", group="Thermodynamic"),
+    Column("s_e", "S_E", "S<sub>E</sub>", "J mol⁻¹ K⁻¹", decimals=4, group="Thermodynamic"),
+    Column("hf_min", "ΔHf min", "ΔH<sub>f,min</sub>", "meV atom⁻¹", decimals=0, group="Thermodynamic"),
+    Column("hf_max", "ΔHf max", "ΔH<sub>f,max</sub>", "meV atom⁻¹", decimals=0, group="Thermodynamic"),
+    Column("hf_lower", "−TΔSmix", "−TΔS<sub>mix</sub>", "meV atom⁻¹", decimals=1, group="Thermodynamic"),
+    Column("t_assess", "T", "T", "K", decimals=0, group="Thermodynamic"),
+    Column("dhim", "ΔH_IM", "ΔH<sub>IM</sub>", "kJ mol⁻¹", group="Thermodynamic"),
     Column("k1", "k₁", "k<sub>1</sub>", group="Thermodynamic"),
     Column("k1cr", "k₁cr", "k<sub>1</sub><sup>cr</sup>", group="Thermodynamic"),
     Column("phi_king", "Φ", "Φ", group="Thermodynamic"),
-    Column("dg_ss", "ΔG_ss (kJ/mol)", "ΔG<sub>ss</sub>", "kJ mol⁻¹", group="Thermodynamic"),
-    Column("dg_max", "ΔG_max (kJ/mol)", "ΔG<sub>max</sub>", "kJ mol⁻¹", group="Thermodynamic"),
-    Column("mean_mass", "M̄ (g/mol)", "M̄", "g mol⁻¹", group="Physical"),
+    Column("dg_ss", "ΔG_ss", "ΔG<sub>ss</sub>", "kJ mol⁻¹", group="Thermodynamic"),
+    Column("dg_max", "ΔG_max", "ΔG<sub>max</sub>", "kJ mol⁻¹", group="Thermodynamic"),
+    Column("mean_mass", "M̄", "M̄", "g mol⁻¹", group="Physical"),
 ] + [
     Column(k, k, k, kind="model", default=True, group="Models")
     for k in MODEL_KEYS
@@ -70,59 +70,68 @@ COLUMNS: list[Column] = [
 MODEL_OWNERS = {'omega': 'M1', 'delta_cn12': 'M1', 'gamma': 'M3', 'lambda': 'M4', 'phi_ye': 'M5', 's_e': 'M5', 'hf_min': 'M6', 'hf_max': 'M6', 'hf_lower': 'M6', 'dhim': 'M7', 'k1': 'M7', 'k1cr': 'M7', 'phi_king': 'M8', 'dg_ss': 'M8', 'dg_max': 'M8'}
 
 
-# 2026-11-04: what each column holds, in plain language - its unit where it has one, and when it can be N/A.
-# One text for the table heading and for Table columns / Filter results.  No equations, no references: the
-# definitions, sources and validity limits are in Documentation and in Analysis.
-COLUMN_TIPS = {
-    "run": "The calculation run that produced the result.",
-    "variables": "The result's design values: expression variables or composition-space grid values. Empty for "
-                 "single compositions and imports.",
-    "density": "Estimated density of the alloy, in g/cm³.",
-    "tm": "Estimated melting temperature of the alloy, in K.",
-    "dhmix": "Mixing enthalpy of the alloy, in kJ/mol. N/A when an element pair has no data.",
-    "dsmix": "Ideal configurational mixing entropy, in J/(mol·K).",
-    "delta": "Atomic-size mismatch between the elements, in %.",
-    "delta_cn12": "Atomic-size mismatch based on 12-coordination atomic radii, in %.",
-    "vec": "Valence electron concentration of the alloy.",
-    "cstr": "Crystal structure suggested by the valence electron concentration: FCC, BCC or FCC + BCC.",
-    "dchi": "Pauling electronegativity difference between the elements (dimensionless). N/A when an element has "
-            "no tabulated value. Used by no model.",
-    "omega": "Balance of mixing entropy against mixing enthalpy (dimensionless). N/A when the mixing enthalpy is "
-             "zero.",
-    "gamma": "Solid-angle ratio of the smallest and largest atoms (dimensionless).",
-    "lambda": "Mixing entropy relative to the squared atomic-size mismatch.",
-    "phi_ye": "Entropy-based ordering parameter (dimensionless).",
-    "s_e": "Excess entropy from atomic packing, averaged over bcc and fcc, in J/(mol·K).",
-    "hf_min": "Most negative formation enthalpy among the alloy's element pairs, in meV/atom.",
-    "hf_max": "Most positive formation enthalpy among the alloy's element pairs, in meV/atom.",
-    "hf_lower": "Entropy contribution at the assessment temperature, in meV/atom.",
-    "t_assess": "Assessment temperature: the annealing temperature, or a fraction of the melting temperature, in K.",
-    "dhim": "Formation enthalpy of competing intermetallic compounds, in kJ/mol.",
-    "k1": "Ratio of the intermetallic enthalpy to the mixing enthalpy (dimensionless).",
-    "k1cr": "Critical enthalpy ratio for a solid solution (dimensionless).",
-    "phi_king": "Stability of the solid solution relative to the most stable intermetallic (dimensionless).",
-    "dg_ss": "Gibbs energy of the solid solution at the melting temperature, in kJ/mol.",
-    "dg_max": "Gibbs energy of the most stable competing intermetallic, in kJ/mol.",
-    "mean_mass": "Mean atomic mass of the alloy, in g/mol.",
+# What each column holds: a short name, and a note only where it helps (N/A cases, a choice of values).  The
+# tooltip shows the unit once, after the name: "Mixing enthalpy (kJ mol⁻¹)".  No equations, no references: the
+# definitions, sources and validity limits are in Documentation and Model details.
+COLUMN_TIPS: dict[str, tuple[str, str]] = {
+    "run": ("Calculation run that produced the result", ""),
+    "variables": ("Design values of the result", "Expression variables or composition-space grid values. Empty "
+                  "for single compositions and imports."),
+    "density": ("Density", "Rule-of-mixtures estimate."),
+    "tm": ("Melting temperature", "Rule-of-mixtures estimate."),
+    "dhmix": ("Mixing enthalpy", "N/A when an element pair has no data."),
+    "dsmix": ("Ideal configurational mixing entropy", ""),
+    "delta": ("Atomic-size mismatch", ""),
+    "delta_cn12": ("Atomic-size mismatch from 12-coordination radii", ""),
+    "vec": ("Valence electron concentration", ""),
+    "cstr": ("Crystal structure from the valence electron concentration", "FCC, BCC or FCC + BCC."),
+    "dchi": ("Pauling electronegativity difference", "N/A when an element has no tabulated value. Used by no model."),
+    "omega": ("Entropy-enthalpy ratio", "N/A when the mixing enthalpy is zero."),
+    "gamma": ("Solid-angle ratio of the smallest and largest atoms", ""),
+    "lambda": ("Mixing entropy relative to the squared size mismatch", ""),
+    "phi_ye": ("Entropy-based ordering parameter", ""),
+    "s_e": ("Excess entropy from atomic packing", "Mean of the bcc and fcc values."),
+    "hf_min": ("Most negative pair formation enthalpy", ""),
+    "hf_max": ("Most positive pair formation enthalpy", ""),
+    "hf_lower": ("Entropic lower bound at the assessment temperature", ""),
+    "t_assess": ("Assessment temperature", "The annealing temperature, or a fraction of the melting temperature."),
+    "dhim": ("Intermetallic formation enthalpy", ""),
+    "k1": ("Ratio of intermetallic to mixing enthalpy", ""),
+    "k1cr": ("Critical enthalpy ratio for a solid solution", ""),
+    "phi_king": ("Solid-solution stability relative to the most stable intermetallic", ""),
+    "dg_ss": ("Solid-solution Gibbs energy at the melting temperature", ""),
+    "dg_max": ("Gibbs energy of the most stable competing intermetallic", ""),
+    "mean_mass": ("Mean atomic mass", ""),
 }
 _SS_MP = "solid solution (SS) or multiphase (MP)"
 MODEL_TIPS = {
-    "M1": f"Phase predicted by this model: {_SS_MP}.",
-    "M2": "Phase predicted by this model: solid solution (SS), multiphase (MP) or metallic glass (MG).",
-    "M3": f"Phase predicted by this model: {_SS_MP}.",
-    "M4": "Phase predicted by this model: solid solution (SS), solid solution with intermetallics (SS+IM) or "
-          "intermetallic (IM).",
-    "M5": f"Phase predicted by this model: {_SS_MP}.",
-    "M6": "Phase predicted by this model: solid solution (SS), multiphase (MP) or intermetallic (IM).",
-    "M7": "Phase predicted by this model: solid solution (SS) or intermetallic (IM).",
-    "M8": f"Phase predicted by this model: {_SS_MP}.",
+    "M1": f"Predicted phase: {_SS_MP}.",
+    "M2": "Predicted phase: solid solution (SS), multiphase (MP) or metallic glass (MG).",
+    "M3": f"Predicted phase: {_SS_MP}.",
+    "M4": "Predicted phase: solid solution (SS), solid solution with intermetallics (SS+IM) or intermetallic (IM).",
+    "M5": f"Predicted phase: {_SS_MP}.",
+    "M6": "Predicted phase: solid solution (SS), multiphase (MP) or intermetallic (IM).",
+    "M7": "Predicted phase: solid solution (SS) or intermetallic (IM).",
+    "M8": f"Predicted phase: {_SS_MP}.",
 }
+
+
+def column_tip(c: Column) -> str:
+    """The column's tooltip: "<name> (<unit>)", then its note on a second line."""
+    if c.kind == "model":
+        return MODEL_TIPS.get(c.key, "")
+    name, note = COLUMN_TIPS.get(c.key, ("", ""))
+    if not name:
+        return ""
+    head = f"{name} ({c.unit})" if c.unit else name
+    return f"{head}\n{note}" if note else head
 
 
 def _owned(c: Column) -> Column:
     from dataclasses import replace
-    tip = (MODEL_TIPS if c.kind == "model" else COLUMN_TIPS).get(c.key, "")
-    return replace(c, model=c.key if c.kind == "model" else MODEL_OWNERS.get(c.key), tooltip=tip, chooser_tip=tip)
+    tip = column_tip(c)
+    return replace(c, header=f"{c.header} ({c.unit})" if c.unit else c.header,
+                   model=c.key if c.kind == "model" else MODEL_OWNERS.get(c.key), tooltip=tip, chooser_tip=tip)
 
 
 COLUMNS = [_owned(c) for c in COLUMNS]

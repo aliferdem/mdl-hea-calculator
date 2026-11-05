@@ -124,7 +124,7 @@ def test_table_heading_and_chooser_show_the_plain_descriptions(win, app):
     for i, key in enumerate(m.keys):
         tip = m.headerData(i, Qt.Orientation.Horizontal, Qt.ItemDataRole.ToolTipRole)
         col = COLUMN_BY_KEY[key]
-        assert tip == (f"{col.header}\n{col.tooltip}" if col.tooltip else col.header), key
+        assert tip == (col.tooltip or col.header), key
     d = ColumnsDialog(list(m.keys), win)
     try:
         for key, cb in d.checks.items():

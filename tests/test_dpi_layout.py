@@ -455,7 +455,9 @@ def test_result_cells_have_no_tooltip_but_headers_use_the_carbon_bubble(app, win
     x = hdr.sectionViewportPosition(col) + 5
     ev = QHelpEvent(QEvent.Type.ToolTip, QPoint(x, 10), hdr.viewport().mapToGlobal(QPoint(x, 10)))
     assert ctl.eventFilter(hdr.viewport(), ev) is True
-    assert ctl.visible() and "M1" in ctl.tip.text
+    from hea_calc.core.results import COLUMN_BY_KEY
+    # the heading shows "M1"; its tooltip says what the column holds without repeating the label (2026-11-05)
+    assert ctl.visible() and ctl.tip.text == COLUMN_BY_KEY["M1"].tooltip and "M1" not in ctl.tip.text
     g = hdr.viewport().mapToGlobal(QPoint(hdr.sectionViewportPosition(col), 0))
     assert ctl.tip.anchor.topLeft() == g, "anchored to the header section"
     ctl.hide()

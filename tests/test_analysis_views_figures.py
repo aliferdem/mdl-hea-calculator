@@ -178,8 +178,8 @@ def test_identity_line_uses_the_ui_separator(win, app):
 
 
 def test_math_middle_dots_are_kept():
-    from hea_calc.core.results import COLUMN_BY_KEY
-    assert "·" in COLUMN_BY_KEY["dsmix"].header or "mol·K" in COLUMN_BY_KEY["dsmix"].header
+    from hea_calc.core.engine import MODELS
+    assert "−T·ΔSmix" in MODELS["M6"].criterion, "a product in a formula keeps its middle dot"
     assert math.isfinite(1.0)
 
 

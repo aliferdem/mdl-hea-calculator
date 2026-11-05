@@ -220,7 +220,7 @@ def test_table_tsv_for_excel():
     rows = _rows()
     text = table_tsv(rows, ["name", "dhmix", "delta", "M1", "M6"])
     lines = text.split("\r\n")
-    assert lines[0] == "Alloy\tΔHmix (kJ/mol)\tδ (%)\tM1\tM6"
+    assert lines[0] == "Alloy\tΔHmix (kJ mol⁻¹)\tδ (%)\tM1\tM6"
     assert lines[1].startswith("CoCrFeNi\t-3.75\t")
     assert lines[2].split("\t")[1] == "-12.32"
     assert "−" not in text and lines[-1] == ""
@@ -240,7 +240,7 @@ def test_export_import_round_trip(tmp_path):
     import openpyxl
     ws = openpyxl.load_workbook(xlsx).worksheets[0]
     header = [c.value for c in ws[1]]
-    i = header.index("ΔHmix (kJ/mol)")
+    i = header.index("ΔHmix (kJ mol⁻¹)")
     assert ws.cell(row=2, column=i + 1).value == pytest.approx(rows[0].result.descriptors["dhmix"], rel=1e-15)
     csvp = export_rows(rows, tmp_path / "out.csv")
     assert csvp.read_text(encoding="utf-8-sig").splitlines()[0].startswith("Alloy,Source")
