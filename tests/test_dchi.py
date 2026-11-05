@@ -298,9 +298,13 @@ def test_help_documents_dchi():
 # ---------------------------------------------------------------------- Elements panel
 def test_element_panel_shows_pauling_electronegativity_from_the_dataset():
     from PySide6.QtWidgets import QApplication
+    from hea_calc.ui.theme import load_fonts
     from hea_calc.ui.widgets.element_panel import ElementInfo
     app = QApplication.instance() or QApplication([])
     _ = app
+    # the application fonts are registered before any widget asks for them, as at start-up (app.py); a font
+    # requested earlier resolves to a fallback that Qt caches for the rest of the process
+    load_fonts()
     data = Datasets()
     info = ElementInfo(data)
     try:
